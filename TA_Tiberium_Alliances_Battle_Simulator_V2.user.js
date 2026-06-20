@@ -38,20 +38,20 @@ codes by NetquiK
 
 codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 ----------------
-- Two new auto-optimize sim presets, each with its own "wand" (✨) button:
-  * Preset #6 "LowRep" (Lowest Repair, must win): requires victory (enemy health 0),
-    then selects the cached layout with the lowest offense repair TIME (lowest max of
-    inf/veh/air repair charge), tie-broken by surviving offense health then duration.
+- Two auto-optimize sim modes, each with its own button (floating toolbar) + column:
+  * "Best Win" (preset #6 "BestWin"): only layouts that fully destroy the enemy
+    (total health 0), then the LOWEST max repair time (max of inf/veh/air repair
+    charge). If none can win it reports that and keeps your formation.
     Console: window.MikeyMike_OptimizeRepair()
-  * Preset #7 "Best" (Best Value, balanced): minimizes a combined score of remaining
-    enemy health AND own army losses (repair-time proxy), each as a 0-100% fraction.
-    Does NOT require a full kill, so it can prefer a cheap near-kill. Weights are
-    adjustable via the Optimizer.BestBalance.wEnemy / wRepair settings.
-    Console: window.MikeyMike_OptimizeBest()
-- New TABS.OPTIMIZER engine: automatically tries several battle layouts derived from
-  the current army (horizontal/vertical mirrors and row swaps), simulates each one
-  (server-throttled, capped at 24/run), then applies that mode's best layout.
-- To show the LowRep (#6) and Best (#7) columns, widen the Stats window (columns 7-8).
+  * "Best DF 0" (preset #7 "BestDF0"): targets the enemy DEFENSE FACILITY (DF);
+    selects the layout that gets DF health as close to 0 as possible, then the
+    LOWEST max repair time. Reports the lowest repair for DF=0.
+    Console: window.MikeyMike_OptimizeDF0()
+- New TABS.OPTIMIZER engine: automatically tries many battle layouts derived from the
+  current army (mirrors, row swaps + mirrored variants, one-space shifts), simulating
+  each directly via SimulateBattle in a concurrent worker pool (Optimizer.Concurrency,
+  default 5; Optimizer.MaxCandidates, default 48), then applies that mode's best layout.
+- To show the BestWin (#6) and BestDF0 (#7) columns, widen the Stats window (columns 7-8).
 ----------------
 */
 
@@ -1530,12 +1530,12 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                             ]
                                     };
                                 case 7:
-                                    // Best Non Win: closest to a kill, then lowest max repair -- MikeyMike
+                                    // Best DF 0: destroy the Defense Facility for the lowest repair -- MikeyMike
                                     return {
-                                        Name: "BestN-W",
-                                            Description: "BEST NON WIN.<br>For when a full kill is not possible:<br>selects the layout that gets enemy health AS CLOSE TO 0 as possible,<br>then the LOWEST max repair time (max of inf/veh/air repair charge).<br>The 'Best Non Win' button auto-tries several layouts and applies the best.",
+                                        Name: "BestDF0",
+                                            Description: "BEST DF 0.<br>Targets the enemy DEFENSE FACILITY (DF):<br>selects the layout that gets DF health AS CLOSE TO 0 as possible,<br>then the LOWEST max repair time (max of inf/veh/air repair charge).<br>The 'Best DF 0' button keeps trying layouts and reports the lowest repair for DF=0.",
                                             Prio: [
-                                                [TABS.STATS.Prio.Enemy, TABS.STATS.Type.HealthPointPercent, false, 0, false],
+                                                [TABS.STATS.Prio.Defense_Facility, TABS.STATS.Type.HealthPointPercent, false, 0, false],
                                                 [TABS.STATS.Prio.Offense, TABS.STATS.Type.RepairChargeOffense, false, 0, false],
                                                 [TABS.STATS.Prio.Offense, TABS.STATS.Type.HealthPointPercent, false, 0, false],
                                                 [TABS.STATS.Prio.BattleDuration, null, false, 0, false]
@@ -2567,10 +2567,10 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             // Expose console-callable triggers as a reliable fallback to the GUI buttons.
                             var self = this;
                             try {
-                                window.MikeyMike_OptimizeRepair = function () { // lowest repair, must win
+                                window.MikeyMike_OptimizeRepair = function () { // Best Win: lowest repair, must win
                                     self.Run(6);
                                 };
-                                window.MikeyMike_OptimizeBest = function () { // balanced best value
+                                window.MikeyMike_OptimizeDF0 = function () { // Best DF 0: lowest repair for DF destroyed
                                     self.Run(7);
                                 };
                             } catch (e) {}
@@ -2595,7 +2595,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         __inflight: 0, // simulations currently in flight (worker pool)
                         __concurrency: 5, // how many simulations to run at once
                         __maxCandidates: 48, // hard cap on simulations per run
-                        __presetNum: 6, // 6 = Best Win, 7 = Best Non Win
+                        __presetNum: 6, // 6 = Best Win, 7 = Best DF 0
                         isRunning: function () {
                             return this.__running === true;
                         },
@@ -2712,7 +2712,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             if (c < 1) c = 1;
                             if (c > 12) c = 12;
                             this.__concurrency = c;
-                            this.__log("Optimizing: testing " + this.__total + " layouts (" + (this.__presetNum === 7 ? "best non win" : "best win") + ", " + this.__concurrency + " at a time)...");
+                            this.__log("Optimizing: testing " + this.__total + " layouts (" + (this.__presetNum === 7 ? "best DF=0" : "best win") + ", " + this.__concurrency + " at a time)...");
                             this.__pump();
                         },
                         Stop: function () {
@@ -2817,8 +2817,11 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     TABS.PreArmyUnits.AutoSimulate.getInstance().setEnabled(this.__prevAuto);
                                 } catch (e) {}
                             }
-                            // Rank all simulated layouts: lowest remaining enemy health, then lowest max repair time.
-                            var prios = TABS.STATS.getPreset(7).Prio,
+                            // Rank all simulated layouts by this mode's preset:
+                            //   #6 Best Win  -> lowest remaining enemy TOTAL health, then lowest max repair time.
+                            //   #7 Best DF 0 -> lowest remaining DEFENSE FACILITY health, then lowest max repair time.
+                            var mode = this.__presetNum,
+                                prios = TABS.STATS.getPreset(mode).Prio,
                                 sorted = [],
                                 valids = [],
                                 i;
@@ -2830,9 +2833,11 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             for (i = 0; i < sorted.length; i++) {
                                 if (sorted[i] && sorted[i].result && sorted[i].result.valid && sorted[i].result.formation) valids.push(sorted[i]);
                             }
-                            var enemyEnd = function (entry) { // remaining enemy total health (0 = full kill)
+                            // Remaining health of this mode's target (0 = destroyed).
+                            var targetEnd = function (entry) {
                                 try {
-                                    var h = entry.result.stats.Enemy.Overall.HealthPoints;
+                                    var s = entry.result.stats,
+                                        h = (mode === 6) ? s.Enemy.Overall.HealthPoints : s.Enemy.Defense_Facility.HealthPoints;
                                     return (h.end || 0) + (h.endFront || 0);
                                 } catch (e) {
                                     return Number.MAX_VALUE;
@@ -2840,29 +2845,31 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             };
                             var chosen = null,
                                 noWin = false;
-                            if (this.__presetNum === 6) {
+                            if (mode === 6) {
                                 // Best Win: only layouts that fully destroy the enemy; valids are pre-sorted so the
                                 // first kill found is also the cheapest (lowest max repair) kill.
                                 for (i = 0; i < valids.length; i++) {
-                                    if (enemyEnd(valids[i]) <= 0) {
+                                    if (targetEnd(valids[i]) <= 0) {
                                         chosen = valids[i];
                                         break;
                                     }
                                 }
                                 if (!chosen) noWin = true;
                             } else {
-                                // Best Non Win: closest to a kill, then lowest max repair (= first valid entry).
+                                // Best DF 0: DF as close to 0 as possible, then lowest repair (= first valid entry,
+                                // since valids are pre-sorted by DF health then repair). If a DF=0 layout exists it
+                                // is the first entry and is the cheapest DF kill.
                                 chosen = valids.length ? valids[0] : null;
                             }
                             if (chosen) {
                                 try {
                                     ClientLib.Data.MainData.GetInstance().get_Cities().set_CurrentOwnCityId(chosen.result.ownid);
                                     TABS.UTIL.Formation.Set(chosen.result.formation, chosen.result.cityid, chosen.result.ownid);
-                                    var killed = enemyEnd(chosen) <= 0;
-                                    this.__log((stopped ? "Stopped. " : "Done. ") + (this.__presetNum === 6 ?
+                                    var destroyed = targetEnd(chosen) <= 0;
+                                    this.__log((stopped ? "Stopped. " : "Done. ") + (mode === 6 ?
                                         "Applied cheapest winning layout (lowest max repair time)." :
-                                        (killed ? "A full kill is possible; applied cheapest winning layout." :
-                                            "No full kill possible; applied closest-to-kill layout with lowest max repair time.")));
+                                        (destroyed ? "DF destroyed (DF=0); applied lowest max repair time layout." :
+                                            "DF can't be fully destroyed; applied closest-to-0 DF layout with lowest max repair time.")));
                                 } catch (e) {
                                     this.__log("Finished, but could not apply layout: " + e);
                                 }
@@ -2873,7 +2880,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     } catch (e) {}
                                 }
                                 this.__log((stopped ? "Stopped. " : "Done. ") + (noWin ?
-                                    "No winning layout found (enemy can't be destroyed) - try 'Best Non Win'. Restored original." :
+                                    "No winning layout found (enemy can't be destroyed) - try 'Best DF 0'. Restored original." :
                                     "No layout found; restored original."));
                             }
                             try {
@@ -3299,15 +3306,15 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 column: 0,
                                 colSpan: 3
                             });
-                            var btnOptNonWin = new qx.ui.form.Button(this.tr("Best Non Win")).set({
-                                toolTipText: this.tr("Auto-try several army layouts for when a full kill is NOT possible: applies the layout that gets enemy health as close to 0 as possible, then the lowest max repair time."),
+                            var btnOptDF0 = new qx.ui.form.Button(this.tr("Best DF 0")).set({
+                                toolTipText: this.tr("Auto-try several army layouts to DESTROY the enemy Defense Facility (DF): applies the layout that gets DF health as close to 0 as possible, then the lowest max repair time."),
                                 height: 20,
                                 show: "label",
                                 center: true,
                                 appearance: "button-addpoints"
                             });
-                            btnOptNonWin.addListener("click", this.onClick_btnOptimizeNonWin, this);
-                            this.boxMove.add(btnOptNonWin, {
+                            btnOptDF0.addListener("click", this.onClick_btnOptimizeDF0, this);
+                            this.boxMove.add(btnOptDF0, {
                                 row: 7,
                                 column: 0,
                                 colSpan: 3
@@ -3533,7 +3540,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         onClick_btnOptimizeWin: function (e) { // MikeyMike: lowest repair, must win (preset #6)
                             TABS.OPTIMIZER.getInstance().Run(6);
                         },
-                        onClick_btnOptimizeNonWin: function (e) { // MikeyMike: balanced best value (preset #7)
+                        onClick_btnOptimizeDF0: function (e) { // MikeyMike: lowest repair for DF=0 (preset #7)
                             TABS.OPTIMIZER.getInstance().Run(7);
                         },
                         onClick_btnDisable: function (e) {
@@ -4637,11 +4644,11 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             ButtonPlay.addListener("click", this.playReplay, this);
                             this.Label.Buttons.View.add(ButtonPlay);
                             // MikeyMike: on the optimizer preset columns, add an auto-optimize ("wand") button.
-                            // #6 = LowRep (lowest repair, must win); #7 = Best (balanced best value).
+                            // #6 = BestWin (lowest repair, must win); #7 = BestDF0 (destroy Defense Facility cheapest).
                             if (this.Num === 6 || this.Num === 7) {
                                 var optMode = this.Num,
                                     optTip = (optMode === 7) ?
-                                    this.tr("Auto-try several layouts and apply the best-value layout (lowest remaining enemy health + lowest repair). (or call window.MikeyMike_OptimizeBest())") :
+                                    this.tr("Auto-try several layouts to destroy the Defense Facility: applies the layout with DF closest to 0, then lowest max repair time. (or call window.MikeyMike_OptimizeDF0())") :
                                     this.tr("Auto-try several layouts and apply the winning layout with the lowest repair time. (or call window.MikeyMike_OptimizeRepair())");
                                 var ButtonOptimize = new qx.ui.form.Button("✨").set({
                                     maxHeight: 22,
