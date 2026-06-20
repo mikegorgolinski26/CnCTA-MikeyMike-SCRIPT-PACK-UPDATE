@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name            Tiberium Alliances Battle Simulator V2 (MikeyMike Edition)
-// @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer that tries several formations and selects the winning layout with the lowest repair time.
+// @name            MM - Tiberium Alliances Battle Simulator 2026
+// @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         26.06.20
+// @version         1.1.0
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -57,12 +57,21 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
   This is sequential (one live army). Already-simulated layouts persist in the cache PER
   BASE, so they count as "tried": clicking the button again skips them and explores new
   permutations (avoiding ones already tried) until the base changes (cache invalidates).
+  Move generation: each candidate slides ONE unit up to Optimizer.MaxStep cells along a
+  single axis (default 1 = one cell up/down/left/right) into an empty cell, or swaps two
+  units within MaxStep of each other. Left/right moves are weighted higher than up/down
+  (Optimizer.Weight.Horizontal / .Vertical) so horizontal changes are tried first, and the
+  cell a unit just vacated is tabu'd (Optimizer.TabuLastCell) so it won't bounce straight
+  back. The search re-bases on each improvement, so larger overall moves build up over rounds.
   Row guardrail: during normal climbing each unit may only move within
   Optimizer.MaxRowDelta rows (default 1) of its STARTING row; kicks may exceed it
   but a result is only kept if it is a net improvement.
-  Settings: Optimizer.MaxNeighbors per round (16), Optimizer.MaxRounds (30),
-  Optimizer.SimBudget total sims (150), Optimizer.MaxKicks (3), Optimizer.MaxRowDelta (1).
+  Settings (tunable in the "Optimizer Options" panel - toolbar button or window.MikeyMike_Options()):
+    Optimizer.MaxStep (1), Optimizer.Weight.Horizontal (1), Optimizer.Weight.Vertical (0.75),
+    Optimizer.TabuLastCell (true), Optimizer.MaxRowDelta (1), Optimizer.MaxNeighbors (16),
+    Optimizer.MaxRounds (30), Optimizer.SimBudget (150), Optimizer.MaxKicks (3).
 - To show the BestWin (#6) and BestDF0 (#7) columns, widen the Stats window (columns 7-8).
+- Debug: set window.MMBATTLESIM_DEBUG = true in the console for verbose [MM BattleSim] logs.
 ----------------
 */
 
@@ -70,6 +79,32 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
     var script = document.createElement("script");
     script.textContent = "(" +
         function () {
+            // ---- MikeyMike debug framework ------------------------------------------------
+            // Consistent, filterable logging. Verbose MMlog() is gated behind
+            // window.MMBATTLESIM_DEBUG (off by default = clean console); MMwarn()/MMerr()
+            // always show. Toggle live from the game console: window.MMBATTLESIM_DEBUG = true
+            var MM_LOG_PREFIX = "[MM BattleSim]";
+            if (typeof window.MMBATTLESIM_DEBUG === "undefined") window.MMBATTLESIM_DEBUG = false;
+
+            function MMlog() {
+                if (!window.MMBATTLESIM_DEBUG) return;
+                try {
+                    console.log.apply(console, [MM_LOG_PREFIX].concat([].slice.call(arguments)));
+                } catch (e) {}
+            }
+
+            function MMwarn() {
+                try {
+                    console.warn.apply(console, [MM_LOG_PREFIX].concat([].slice.call(arguments)));
+                } catch (e) {}
+            }
+
+            function MMerr() {
+                try {
+                    console.error.apply(console, [MM_LOG_PREFIX].concat([].slice.call(arguments)));
+                } catch (e) {}
+            }
+
             function createClasses() {
                 qx.Class.define("qx.ui.form.ModelButton", { //				qx.ui.form.Button with model property
                     extend: qx.ui.form.Button,
@@ -2584,6 +2619,11 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 window.MikeyMike_OptimizeDF0 = function () { // Best DF 0: lowest repair for DF destroyed
                                     self.Run(7);
                                 };
+                                window.MikeyMike_Options = function () { // open the optimizer options panel
+                                    try {
+                                        TABS.GUI.Window.Optimizer.getInstance().open();
+                                    } catch (e) {}
+                                };
                             } catch (e) {}
                         } catch (e) {
                             console.group("Tiberium Alliances Battle Simulator V2");
@@ -2621,14 +2661,19 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         __batch: null, // last evaluated batch (for diagnostics)
                         __startRows: null, // unit id -> starting row (for the row guardrail)
                         __maxRowDelta: 1, // climb guardrail: max rows a unit may move from its start
+                        __maxStep: 1, // max cells a unit may move per candidate (orthogonal: up/down/left/right)
+                        __wH: 1, // selection weight for horizontal (left/right) moves
+                        __wV: 0.75, // selection weight for vertical (up/down) moves
+                        __tabuEnabled: true, // skip moving a unit straight back to the cell it just left
+                        __prevCell: null, // unit id -> "x,y" of the cell it occupied before its current one
                         isRunning: function () {
                             return this.__running === true;
                         },
                         __log: function (msg) {
                             try {
-                                TABS.GUI.Window.Stats.getInstance().setStatus(msg);
+                                TABS.GUI.Window.Stats.getInstance().setStatus(msg); // user-facing progress (always)
                             } catch (e) {}
-                            console.log("[MikeyMike Optimizer] " + msg);
+                            MMlog("Optimizer:", msg); // console echo, gated by window.MMBATTLESIM_DEBUG
                         },
                         __clone: function (f) { // shallow-clone an array of flat unit objects
                             var out = [],
@@ -2642,8 +2687,12 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             }
                             return out;
                         },
-                        // Generate "slight adjustments" of a formation: move one enabled unit to a nearby
-                        // empty cell, or swap two enabled units. Skips layouts already tried this run.
+                        // Generate "slight adjustments" of a formation: slide one enabled unit up to
+                        // Optimizer.MaxStep cells along a single axis (up/down/left/right) into an empty
+                        // cell, or swap two enabled units that are within MaxStep of each other. Left/right
+                        // moves are weighted higher than up/down (Optimizer.Weight.*), and the cell a unit
+                        // just vacated is tabu'd so it doesn't immediately bounce back. Layouts already
+                        // simulated this run (in the cache) are skipped.
                         __genNeighbors: function (base) {
                             var self = this,
                                 cache = TABS.CACHE.getInstance(),
@@ -2654,6 +2703,10 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 X = ClientLib.Base.Util.get_ArmyMaxSlotCountX();
                                 Y = ClientLib.Base.Util.get_ArmyMaxSlotCountY();
                             } catch (e) {}
+                            var maxStep = this.__maxStep > 0 ? this.__maxStep : 1,
+                                wH = (typeof this.__wH === "number" && this.__wH >= 0) ? this.__wH : 1,
+                                wV = (typeof this.__wV === "number" && this.__wV >= 0) ? this.__wV : 0.75,
+                                prevCell = this.__prevCell || {};
                             var units = []; // indices of enabled units
                             for (i = 0; i < base.length; i++)
                                 if (base[i].enabled && base[i].h > 0) units.push(i);
@@ -2688,44 +2741,54 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 }
                                 return true;
                             };
-                            var out = [],
+                            // Collect candidates into a weighted pool (after row-guardrail, tabu, dedupe and
+                            // cache filtering), then weighted-sample down to the per-round cap.
+                            var pool = [],
                                 seen = {},
-                                cap = this.__maxNeighbors,
-                                push = function (f) {
-                                    if (out.length >= cap) return;
+                                consider = function (f, w) {
                                     if (!withinGuardrail(f)) return; // row guardrail (climb stays near start)
                                     var key = cache.calcUnitsHash(self.__clone(f), self.__ownid);
                                     // skip the center, dupes in this batch, and any layout already simulated
                                     // (a valid cache entry) - this is what persists "tried" across clicks.
                                     if (key && key !== self.__currentKey && !seen[key] && !cache.get(key, self.__cityid)) {
                                         seen[key] = true;
-                                        out.push(f);
+                                        pool.push({
+                                            f: f,
+                                            w: w > 0 ? w : 0.0001
+                                        });
                                     }
                                 };
-                            var moves = [],
-                                swaps = [],
-                                u, c, f, ia, ib, tx, ty, a, b;
-                            // moves: each enabled unit -> its nearest empty cells
+                            var u, c, f, ia, ib, tx, ty, a, b;
+                            // moves: slide one enabled unit up to maxStep cells along ONE axis into an empty cell
                             for (u = 0; u < units.length; u++) {
                                 ia = units[u];
                                 var ux = base[ia].x,
                                     uy = base[ia].y,
-                                    cells = empties.slice().sort(function (p, q) {
-                                        return (Math.abs(p.x - ux) + Math.abs(p.y - uy)) - (Math.abs(q.x - ux) + Math.abs(q.y - uy));
-                                    }),
-                                    take = Math.min(cells.length, 3);
-                                for (c = 0; c < take; c++) {
+                                    id = base[ia].id,
+                                    tabu = self.__tabuEnabled ? prevCell[id] : undefined;
+                                for (c = 0; c < empties.length; c++) {
+                                    var ex = empties[c].x,
+                                        ey = empties[c].y,
+                                        dx = ex - ux,
+                                        dy = ey - uy;
+                                    if (dx !== 0 && dy !== 0) continue; // orthogonal only (no diagonals)
+                                    var dist = Math.abs(dx) + Math.abs(dy);
+                                    if (dist === 0 || dist > maxStep) continue; // within the step radius only
+                                    if (tabu !== undefined && tabu === ex + "," + ey) continue; // don't bounce straight back
                                     f = self.__clone(base);
-                                    f[ia].x = cells[c].x;
-                                    f[ia].y = cells[c].y;
-                                    moves.push(f);
+                                    f[ia].x = ex;
+                                    f[ia].y = ey;
+                                    consider(f, dy === 0 ? wH : wV); // horizontal favoured over vertical
                                 }
                             }
-                            // swaps: exchange positions of two enabled units
+                            // swaps: exchange two enabled units that are within maxStep of each other
                             for (a = 0; a < units.length; a++)
                                 for (b = a + 1; b < units.length; b++) {
                                     ia = units[a];
                                     ib = units[b];
+                                    var sdx = base[ib].x - base[ia].x,
+                                        sdy = base[ib].y - base[ia].y;
+                                    if ((Math.abs(sdx) + Math.abs(sdy)) > maxStep) continue; // keep each unit inside the step budget
                                     f = self.__clone(base);
                                     tx = f[ia].x;
                                     ty = f[ia].y;
@@ -2733,16 +2796,51 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     f[ia].y = f[ib].y;
                                     f[ib].x = tx;
                                     f[ib].y = ty;
-                                    swaps.push(f);
+                                    consider(f, (sdy === 0) ? wH : (sdx === 0) ? wV : (wH + wV) / 2);
                                 }
-                            // interleave so a capped round sees both moves and swaps
-                            var si = 0,
-                                mi = 0;
-                            while ((si < swaps.length || mi < moves.length) && out.length < cap) {
-                                if (si < swaps.length) push(swaps[si++]);
-                                if (mi < moves.length) push(moves[mi++]);
+                            // weighted sampling without replacement: higher-weighted (left/right) candidates
+                            // are more likely to be picked within the cap, but up/down can still be chosen.
+                            var cap = this.__maxNeighbors,
+                                out = [],
+                                k, total, r, acc, pick;
+                            while (out.length < cap && pool.length) {
+                                total = 0;
+                                for (k = 0; k < pool.length; k++) total += pool[k].w;
+                                r = Math.random() * total;
+                                acc = 0;
+                                pick = pool.length - 1;
+                                for (k = 0; k < pool.length; k++) {
+                                    acc += pool[k].w;
+                                    if (r <= acc) {
+                                        pick = k;
+                                        break;
+                                    }
+                                }
+                                out.push(pool[pick].f);
+                                pool.splice(pick, 1);
                             }
                             return out;
+                        },
+                        // Re-base bookkeeping: when the search center moves to a new best layout, remember the
+                        // cell each moved unit just left so __genNeighbors won't immediately send it back.
+                        __updateTabu: function (oldF, newF) {
+                            if (!this.__tabuEnabled) return;
+                            try {
+                                if (!this.__prevCell) this.__prevCell = {};
+                                if (!oldF || !newF) return;
+                                var oldPos = {},
+                                    i, o, n, np, op;
+                                for (i = 0; i < oldF.length; i++) {
+                                    o = oldF[i];
+                                    oldPos[o.id] = o.x + "," + o.y;
+                                }
+                                for (i = 0; i < newF.length; i++) {
+                                    n = newF[i];
+                                    np = n.x + "," + n.y;
+                                    op = oldPos[n.id];
+                                    if (op !== undefined && op !== np) this.__prevCell[n.id] = op; // unit moved -> tabu its old cell
+                                }
+                            } catch (e) {}
                         },
                         __tuple: function (stats) { // score tuple for the active preset; lower = better
                             var prios = TABS.STATS.getPreset(this.__presetNum).Prio,
@@ -2896,6 +2994,14 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.__simBudget = gi("Optimizer.SimBudget", 150);
                             this.__maxKicks = gi("Optimizer.MaxKicks", 3);
                             this.__maxRowDelta = gi("Optimizer.MaxRowDelta", 1);
+                            // How far a unit may slide per candidate (1 = one cell up/down/left/right), the
+                            // directional selection weights (left/right favoured over up/down), and whether to
+                            // tabu the cell a unit just vacated. Clamped to safe ranges.
+                            this.__maxStep = Math.max(1, gi("Optimizer.MaxStep", 1) | 0);
+                            this.__wH = Math.max(0, Number(gi("Optimizer.Weight.Horizontal", 1)) || 1);
+                            this.__wV = Math.max(0, Number(gi("Optimizer.Weight.Vertical", 0.75)));
+                            this.__tabuEnabled = gi("Optimizer.TabuLastCell", true) !== false;
+                            this.__prevCell = {};
                             // Avoid interference: pause auto-simulate while we drive simulations ourselves.
                             try {
                                 var auto = TABS.PreArmyUnits.AutoSimulate.getInstance();
@@ -2904,7 +3010,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             } catch (e) {
                                 this.__prevAuto = null;
                             }
-                            this.__log("Optimizing (" + (this.__presetNum === 7 ? "best DF=0" : "best win") + "): climb within " + String.fromCharCode(177) + this.__maxRowDelta + " row(s) of start, kicks may go further if it helps...");
+                            this.__log("Optimizing (" + (this.__presetNum === 7 ? "best DF=0" : "best win") + "): step " + this.__maxStep + " cell(s), climb within " + String.fromCharCode(177) + this.__maxRowDelta + " row(s) of start, kicks may go further if it helps...");
                             // Step 1: ensure the starting layout is simulated, then begin tweak rounds.
                             this.__evalList([this.__clone(this.__current)], this.__startRound);
                         },
@@ -3080,6 +3186,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             if (best) {
                                 var s = this.__tuple(best.result.stats);
                                 if (this.__lastBest === null || this.__cmp(s, this.__lastBest) < 0) this.__lastBest = s;
+                                this.__updateTabu(this.__current, best.result.formation); // remember vacated cells before re-basing
                                 this.__current = best.result.formation;
                                 this.__currentKey = best.key;
                             }
@@ -3135,6 +3242,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.__kicksUsed++;
                             this.__round++;
                             this.__current = kicked;
+                            this.__prevCell = {}; // a kick is a fresh jump; drop stale tabu cells
                             try {
                                 this.__currentKey = TABS.CACHE.getInstance().calcUnitsHash(this.__clone(kicked), this.__ownid);
                             } catch (e) {}
@@ -3655,6 +3763,21 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 column: 0,
                                 colSpan: 3
                             });
+                            // MikeyMike: open the optimizer options panel (added last so it doesn't shift
+                            // the getChildren()[12] skip-victory index used below).
+                            var btnOptions = new qx.ui.form.Button(this.tr("Optimizer Options")).set({
+                                toolTipText: this.tr("Tune how the auto-optimizer searches layouts: step size, left/right vs up/down weighting, row drift and search budgets."),
+                                height: 20,
+                                show: "label",
+                                center: true,
+                                appearance: "button-addpoints"
+                            });
+                            btnOptions.addListener("click", this.onClick_btnOptions, this);
+                            this.boxMove.add(btnOptions, {
+                                row: 8,
+                                column: 0,
+                                colSpan: 3
+                            });
                             // Move Box init by Netquik
                             this.boxMove.xy = TABS.SETTINGS.get("GUI.Window.MoveBox.position", [390, 470]);
                             this.PlayArea.getLayoutParent().getLayoutParent().add(this.boxMove, {
@@ -3878,6 +4001,15 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         },
                         onClick_btnOptimizeDF0: function (e) { // MikeyMike: lowest repair for DF=0 (preset #7)
                             TABS.OPTIMIZER.getInstance().Run(7);
+                        },
+                        onClick_btnOptions: function (e) { // MikeyMike: open the optimizer options panel
+                            try {
+                                TABS.GUI.Window.Optimizer.getInstance().open();
+                            } catch (err) {
+                                console.group("Tiberium Alliances Battle Simulator V2");
+                                console.error("Error opening Optimizer options", err);
+                                console.groupEnd();
+                            }
                         },
                         onClick_btnDisable: function (e) {
                             var formation = TABS.UTIL.Formation.Get();
@@ -5389,6 +5521,215 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         Prios: null
                     }
                 });
+                // MikeyMike: tabbed options panel for the auto-layout optimizer. Reads/writes the same
+                // Optimizer.* settings the optimizer consumes at Run() time (so changes apply on the next
+                // optimize click). Opened from the toolbar "Optimizer Options" button or MikeyMike_Options().
+                qx.Class.define("TABS.GUI.Window.Optimizer", { // [singleton]	MikeyMike: Optimizer Options
+                    type: "singleton",
+                    extend: qx.ui.window.Window,
+                    include: [qx.locale.MTranslation],
+                    construct: function () {
+                        try {
+                            this.base(arguments);
+                            this.set({
+                                layout: new qx.ui.layout.VBox(8),
+                                caption: "TABS: " + this.tr("Optimizer Options"),
+                                icon: TABS.RES.IMG.Stats,
+                                allowMaximize: false,
+                                showMaximize: false,
+                                allowMinimize: false,
+                                showMinimize: false,
+                                resizable: false,
+                                contentPadding: 8
+                            });
+                            this.center();
+                            this._fields = {};
+                            var self = this;
+                            // Build a settings row on a Grid-laid-out page; returns adder helpers.
+                            var pageAdder = function (page) {
+                                var grid = new qx.ui.layout.Grid(8, 4);
+                                grid.setColumnFlex(0, 1);
+                                page.setLayout(grid);
+                                var r = {
+                                    row: 0
+                                };
+                                return {
+                                    spinner: function (label, key, def, min, max, tip) {
+                                        var lbl = new qx.ui.basic.Label(label).set({
+                                            rich: true,
+                                            alignY: "middle"
+                                        });
+                                        if (tip) lbl.setToolTipText(tip);
+                                        var v = parseInt(TABS.SETTINGS.get(key, def), 10);
+                                        if (isNaN(v)) v = def;
+                                        if (v < min) v = min;
+                                        if (v > max) v = max;
+                                        var sp = new qx.ui.form.Spinner(min, v, max);
+                                        if (tip) sp.setToolTipText(tip);
+                                        self._fields[key] = {
+                                            w: sp,
+                                            type: "int",
+                                            def: def
+                                        };
+                                        page.add(lbl, {
+                                            row: r.row,
+                                            column: 0
+                                        });
+                                        page.add(sp, {
+                                            row: r.row,
+                                            column: 1
+                                        });
+                                        r.row++;
+                                    },
+                                    number: function (label, key, def, tip) {
+                                        var lbl = new qx.ui.basic.Label(label).set({
+                                            rich: true,
+                                            alignY: "middle"
+                                        });
+                                        if (tip) lbl.setToolTipText(tip);
+                                        var tf = new qx.ui.form.TextField(String(TABS.SETTINGS.get(key, def))).set({
+                                            width: 60,
+                                            maxLength: 6
+                                        });
+                                        if (tip) tf.setToolTipText(tip);
+                                        self._fields[key] = {
+                                            w: tf,
+                                            type: "float",
+                                            def: def
+                                        };
+                                        page.add(lbl, {
+                                            row: r.row,
+                                            column: 0
+                                        });
+                                        page.add(tf, {
+                                            row: r.row,
+                                            column: 1
+                                        });
+                                        r.row++;
+                                    },
+                                    check: function (label, key, def, tip) {
+                                        var cb = new qx.ui.form.CheckBox(label);
+                                        cb.setValue(TABS.SETTINGS.get(key, def) !== false);
+                                        if (tip) cb.setToolTipText(tip);
+                                        self._fields[key] = {
+                                            w: cb,
+                                            type: "bool",
+                                            def: def
+                                        };
+                                        page.add(cb, {
+                                            row: r.row,
+                                            column: 0,
+                                            colSpan: 2
+                                        });
+                                        r.row++;
+                                    }
+                                };
+                            };
+                            var tabs = new qx.ui.tabview.TabView().set({
+                                contentPadding: 8,
+                                minWidth: 340,
+                                minHeight: 180
+                            });
+                            // --- Movement page (how a unit is allowed to move) ---
+                            var pMove = new qx.ui.tabview.Page(this.tr("Movement"));
+                            var aMove = pageAdder(pMove);
+                            aMove.spinner(this.tr("Max step (cells per move)"), "Optimizer.MaxStep", 1, 1, 8,
+                                this.tr("1 = a unit may only move ONE cell up/down/left/right per try. After an improvement the search re-bases on the new position and steps again, so larger overall moves still build up across rounds."));
+                            aMove.number(this.tr("Weight: left/right moves"), "Optimizer.Weight.Horizontal", 1,
+                                this.tr("Relative chance of trying a horizontal (left/right) move. Higher = more likely to be picked."));
+                            aMove.number(this.tr("Weight: up/down moves"), "Optimizer.Weight.Vertical", 0.75,
+                                this.tr("Relative chance of trying a vertical (up/down) move. Keep below the left/right weight to favour horizontal changes (e.g. 0.75)."));
+                            aMove.check(this.tr("Don't move a unit back to the cell it just left"), "Optimizer.TabuLastCell", true,
+                                this.tr("Prevents a unit bouncing back and forth between the same two cells."));
+                            aMove.spinner(this.tr("Max row drift from start"), "Optimizer.MaxRowDelta", 1, 0, 3,
+                                this.tr("How many rows a unit may drift away from its starting row while climbing (kicks may go further if it helps)."));
+                            tabs.add(pMove);
+                            // --- Search budget page (how hard it searches) ---
+                            var pBud = new qx.ui.tabview.Page(this.tr("Search Budget"));
+                            var aBud = pageAdder(pBud);
+                            aBud.spinner(this.tr("Tweaks tried per round"), "Optimizer.MaxNeighbors", 16, 1, 64,
+                                this.tr("How many candidate layouts to evaluate each round. Higher = more thorough but more simulations."));
+                            aBud.spinner(this.tr("Max rounds per click"), "Optimizer.MaxRounds", 30, 1, 200,
+                                this.tr("Hard cap on climb+kick rounds for a single optimize click."));
+                            aBud.spinner(this.tr("Max simulations per click"), "Optimizer.SimBudget", 150, 1, 1000,
+                                this.tr("Hard cap on battle simulations per click (the main safety net)."));
+                            aBud.spinner(this.tr("Max fruitless kicks"), "Optimizer.MaxKicks", 3, 0, 20,
+                                this.tr("Stop after this many random jumps in a row that find no improvement."));
+                            tabs.add(pBud);
+                            this.add(tabs, {
+                                flex: 1
+                            });
+                            // --- buttons + status ---
+                            this._status = new qx.ui.basic.Label("").set({
+                                rich: true,
+                                alignY: "middle"
+                            });
+                            var bar = new qx.ui.container.Composite(new qx.ui.layout.HBox(6)).set({
+                                paddingTop: 4
+                            });
+                            var btnDefaults = new qx.ui.form.Button(this.tr("Reset Defaults"));
+                            btnDefaults.addListener("execute", this._onResetDefaults, this);
+                            var btnSave = new qx.ui.form.Button(this.tr("Save"));
+                            btnSave.addListener("execute", this._onSave, this);
+                            var btnClose = new qx.ui.form.Button(this.tr("Close"));
+                            btnClose.addListener("execute", function () {
+                                this.close();
+                            }, this);
+                            bar.add(this._status, {
+                                flex: 1
+                            });
+                            bar.add(btnDefaults);
+                            bar.add(btnSave);
+                            bar.add(btnClose);
+                            this.add(bar);
+                        } catch (e) {
+                            console.group("Tiberium Alliances Battle Simulator V2");
+                            console.error("Error setting up TABS.GUI.Window.Optimizer constructor", e);
+                            console.groupEnd();
+                        }
+                    },
+                    members: {
+                        _fields: null,
+                        _status: null,
+                        _onSave: function () {
+                            try {
+                                var key, fld, w, v;
+                                for (key in this._fields) {
+                                    if (!Object.prototype.hasOwnProperty.call(this._fields, key)) continue;
+                                    fld = this._fields[key];
+                                    w = fld.w;
+                                    if (fld.type === "int") {
+                                        v = parseInt(w.getValue(), 10);
+                                        if (isNaN(v)) v = fld.def;
+                                    } else if (fld.type === "float") {
+                                        v = parseFloat(w.getValue());
+                                        if (isNaN(v) || v < 0) v = fld.def;
+                                        w.setValue(String(v)); // reflect the cleaned value back
+                                    } else {
+                                        v = !!w.getValue();
+                                    }
+                                    TABS.SETTINGS.set(key, v);
+                                }
+                                if (this._status) this._status.setValue(this.tr("Saved - applies on the next optimize click."));
+                            } catch (e) {
+                                if (this._status) this._status.setValue("Error saving: " + e);
+                            }
+                        },
+                        _onResetDefaults: function () {
+                            try {
+                                var key, fld;
+                                for (key in this._fields) {
+                                    if (!Object.prototype.hasOwnProperty.call(this._fields, key)) continue;
+                                    fld = this._fields[key];
+                                    if (fld.type === "bool") fld.w.setValue(fld.def !== false);
+                                    else if (fld.type === "float") fld.w.setValue(String(fld.def));
+                                    else fld.w.setValue(fld.def);
+                                }
+                                if (this._status) this._status.setValue(this.tr("Defaults restored - press Save to apply."));
+                            } catch (e) {}
+                        }
+                    }
+                });
             }
 
             function translation() {
@@ -5440,7 +5781,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 
             function waitForGame() {
                 try {
-                    if (typeof qx != 'undefined' && typeof qx.core != 'undfined' && typeof qx.core.Init != 'undefined') {
+                    if (typeof qx != 'undefined' && typeof qx.core != 'undefined' && typeof qx.core.Init != 'undefined') {
                         var app = qx.core.Init.getApplication();
                         if (app !== null && app.initDone === true && ClientLib.Data.MainData.GetInstance().get_Player().get_Id() !== 0 && ClientLib.Data.MainData.GetInstance().get_Server().get_WorldId() !== 0) {
                             try {
@@ -5482,5 +5823,5 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
             window.setTimeout(waitForGame, 1000);
         }.toString() + ")();";
     script.type = "text/javascript";
-    document.getElementsByTagName("head")[0].appendChild(script);
+    (document.head || document.documentElement).appendChild(script);
 })();

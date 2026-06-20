@@ -1,11 +1,12 @@
 // ==UserScript==
-// @name           BaseInfo
-// @version        3.2.8.3
+// @name           MM - Base Info
+// @version        1.0.0
 // @author         Dirk Kántor (NurIcke)
 // @contributor    leo7044 (https://github.com/leo7044)
-// @description    Basis Informationen zur Auswertung und Übergabe an die Allianz Befehlshaber. Rechts oberhalb des Spielfensters befindet sich ein neuer Button der das Script aufruft.
-// @downloadURL    https://raw.githubusercontent.com/leo7044/CnC_TA/master/BaseInfo.user.js
-// @updateURL      https://raw.githubusercontent.com/leo7044/CnC_TA/master/BaseInfo.user.js
+// @contributor    MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
+// @description    BaseInfo panel for CnCTA: per-player overview of all bases (levels, BH/CC/VE/VZ, support, production, credits) in a click-sortable table, plus a side-by-side summary of player stats / total production / first & second offense. MM edition: ships in the shared HUD tray, position + open-state persist across refresh, removed the external scriptarea.net POST + map link.
+// @downloadURL    https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_BaseInfo.user.js
+// @updateURL      https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_BaseInfo.user.js
 // @include        http*://prodgame*.alliances.commandandconquer.com/*/index.aspx*
 // @include        http*://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @icon           data:image/png;base64,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
@@ -14,44 +15,22 @@
 
 (function () {
   var BaseInfoMain = function () {
-    function BaseInfoCreate() {
-      // ########################################### //
-      // ############# S E T T I N G S ############# //
-      // ########################################### //
-      //
-      // ###### CHANGE YOUR OWN BUTTON DESIGN ###### //
-      //
-      // Use 1 for Image and Name Like: [ ((i)) BaseInfo ] *** Standard
-      // Use 2 for Name only. Like: [ BaseInfo ]
-      // Use 3 for Image only. Like: [ ((i)) ]
-      //
-      var BIBUTTONDESIGN = 1; // <- Change only the Number
-      //
-      // ########################################### //
-      //
-      // ##### CHANGE YOUR OWN BUTTON POSITION ##### //
-      //
-      // Use 1 for Top-Right (Left from the World Button) *** Standard
-      // Use 2 for Top-Left (Right from your own Playername)
-      // Use 3 for Bottom-Right (Left from the ServerInfo Area)
-      // Use 4 for Bottom-Left (Top of the Chat)
-      //
-      var BIBUTTONPOSITION = 3; // <- Change only the Number
-      //
-      // ########################################### //
-      // ####### E N D  O F  S E T T I N G S ####### //
-      // ########################################### //
+    // --- [MM Base Info] debug framework (pack-wide MM convention). wlog is gated behind either
+    // window.BASEINFO_DEBUG or the pack-wide window.MM_DEBUG; wwarn/werr always print so genuine
+    // problems aren't hidden. Persist either flag via localStorage to survive reloads:
+    //   localStorage.BASEINFO_DEBUG = '1'   or   localStorage.MM_DEBUG = '1'
+    if (typeof window.BASEINFO_DEBUG === "undefined") {
+      try { window.BASEINFO_DEBUG = (window.localStorage.getItem("BASEINFO_DEBUG") === "1"); } catch (e) { window.BASEINFO_DEBUG = false; }
+    }
+    function _dbg() { return window.BASEINFO_DEBUG || window.MM_DEBUG; }
+    function wlog()  { if (!_dbg()) return; try { console.log.apply(console,  ["[MM Base Info]"].concat([].slice.call(arguments))); } catch (e) {} }
+    function wwarn() {                       try { console.warn.apply(console, ["[MM Base Info]"].concat([].slice.call(arguments))); } catch (e) {} }
+    function werr()  {                       try { console.error.apply(console, ["[MM Base Info]"].concat([].slice.call(arguments))); } catch (e) {} }
 
-      if (BIBUTTONDESIGN == 3) {
-        var BIBUTTONHEIGHT = 32;
-        var BIBUTTONWIDTH = 41;
-      } else if (BIBUTTONDESIGN == 2) {
-        var BIBUTTONHEIGHT = 32;
-        var BIBUTTONWIDTH = 75;
-      } else {
-        var BIBUTTONHEIGHT = 32;
-        var BIBUTTONWIDTH = 100;
-      }
+    function BaseInfoCreate() {
+      // BUTTON DESIGN / POSITION settings removed - BaseInfo now registers into the shared MM HUD
+      // tray (MMCommon.buttons.register), which lays out and positions every script's button in one
+      // user-draggable bar. See TA_MM_Common.user.js -> NS.buttons.
       try {
         qx.Class.define("BaseInfoLang", {
           type: "singleton",
@@ -275,7 +254,7 @@
               ][l];
               this.Data["Allgemeine Informationen"] = [
                 "Allgemeine Informationen",
-                "General Informations",
+                "General Information",
                 "Informa?ii Generale",
                 "Általános Információk",
                 "Informazioni Generali",
@@ -1436,7 +1415,7 @@
               ][l];
               this.Data["inklusive POI Bonus"] = [
                 "inklusive POI Bonus",
-                "inclusiv Bonus POI",
+                "inclusive Bonus POI",
                 "inclusiv de POI",
                 "beleértve POI Bonus",
                 "compresi POI Bonus",
@@ -1939,11 +1918,8 @@
               window.addEventListener("click", this.onClick, false);
               window.addEventListener("keyup", this.onKey, false);
               window.addEventListener("mouseover", this.onMouseOver, false);
-              BIVERSION = "3.2.8";
-              BIAUTHOR = "Dirk Kántor (NurIcke)";
-              BICLASS = "BaseInfo";
-              BIHOMEPAGE = "http://baseinfo.scriptarea.net";
-              BICONTACT = "BaseInfo@scriptarea.net";
+              BIVERSION = "1.0.0";
+              BICLASS = "MM - Base Info";
               BIUSERLANGUAGE = qx.locale.Manager.getInstance()
                 .getLocale()
                 .split("_")[0];
@@ -1951,52 +1927,62 @@
                 "data:image/png;base64,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";
               BIIMAGESMALL =
                 "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAB3RJTUUH3QMQDho5kHvXxwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAARnQU1BAACxjwv8YQUAAAQ+SURBVHjarVRbTFxVFF33MQ9eAzNQWmmFgRKgUBIYWmkxov0g0Vh/bKImxvghavnQGLQxMSZNjTF8IIlJNTHaBORDPxoSP0icKjFUISRCYnF4KCIdBMprZu4M987jvo77jAPWqEk/nNx1z51z9l1n7b3XucD//BP+a2FkZMTn9XqfCwQCnaIo+XmsbVubc3NzN6empr7o7e29fc+7TExMPK7EE2OqqrFkMkVQCFFCkqlakinxvR+CwRvd96RwenrmSkNj01uCvitLmVlI0g5EIUMrDMwWYdkeWHILWH4VNtbWPrt27dOLfX19qX8lnJycfLMl0NZn74bgio9A9pUCkoe4GGCbFGERTNjKFjLSaeD+x7C4uPhJoLX1pX0Ocf9hbGzsgcaTzZfNzUU4Z69Alp2AQsp+3wKW1oGdYsB1DkwrI8X5cC9/DHNxFDW1tS9STZ/6B2Fdff1rtpHME75+Hw6LprfjwK+bhB0iXIUt+GF5G2EpPmA5DEGuhmv0dbDdMI5UHH27p6fHzXkkfgsGg5XlR+77UArPyp4v34BwrJ7UGUA0CahKFixqgW1uQAgFIe4lAF2HFPoeKUcDHM1nDpV5vd8NDQ39llXIGDvjLihwsdAtiCpNrISB3QgRrtJaEYzOS8AzvdQWA9LGOBChTZbJNSReXgiBmZqoKPEA55L5TdO0wzaYIKlJ3kzgDtWsxAArrUHSVwNZcoLluWE4ZDhsIlLzqCQb2ZbK69NQYxGIsqP0oIa2bcOyKCWR2PJ476kZ6QWyRwLO6DcQyw/D0E2IkZ+AYnKIuUoxtHk+DS4ZNrmATP9XU9Lp1B1LN5lRUkidpIlC2rrUA9kxDuHEw9DLqqCvhSCz94CjtFauAz4hG6tXnaL4EuiZdOSAsKWldSqp7Wl6dRNsXoQCmvaQWrKgUdkB2zLhVGeAmhdgeSgFajS8QjabVHUDZSeT69nMAWFzc/Oalti7blXUIXryIuURA5wWbFrLFLdkfZ1xeJBKUWdBqTq4OgWpQ01InTiLpJq4FYvFvv2bD5ltXVW1VCLR8Tz2HI+AoiCkqVwbPyO9NAHn8jiKtodJUhHVKA6DeLcfugzd7UVCUd4lH1p3Hz0+suHh4VfbOx78QIyvwzv5EXza5386ldeVN4tL1uiyT2On7RJMfztuL/1ytaur65V9YVIOTl65lZWVhRJPkV5xvPGsUdspJfLbYTCqq1UN3WyA6noUkWPPQjn1MtLFlfhxenp4YGDgnXA4zCRJEsnPTMjtXSAIQgn95+V2d3d3nzt//omn/cdr62WXQxTtNPcWmOyGSQdoiz4zN4JfXe/v7x+leIXeVehdhevnhIWckFBGKCdwg/JzWXDhwpN1gUCb3+srLRIFUUgklOT8/Pza4ODgPCfijiNECduE3X1Cd06lh5shN+bn5lmucsg9C3eBfySpNaCDjVhuTP0BKVPnFst9kFQAAAAASUVORK5CYII=";
-              BIIMAGESMALL16 =
-                "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAB3RJTUUH3QQUCxMm9zjo1wAAAAlwSFlzAAALEwAACxMBAJqcGAAAAARnQU1BAACxjwv8YQUAAALmSURBVHjatVJbSBRRGP5mdlfX3fXutomLUSqa0kMJpiBGkhCEm/bS5TkMWkh76E2MnkJMKsgu+CZhkiViZRIIUhhRkJC6XnLXS4667uruOrOXmZ3Z05lVl3rqqYF/5sw5//d95//+H/gfz/uRkbMbbu+AEBSn+aA44/b43g0ODl38J7ClpVk//9PZKQiCL7zzi0T4eRqzJLyzRIKCX5h2zPXcbmvL/hPD7C+6uh6l1Nsa35pTmVpN4AO0hjAYNgbEZBASgxLWQzHWgmfMjmdPHp9ubW3d/Itgdm7+oTXbcCPJ0QndwXRANgAhGUgvBtKoqH8cytoMIgW3sCoah0qKCs+rOHZXvavEkmtpImM90G3PAss+YHIF+D6FmJQPWVsG4nBDE2ShfdMBS4bJ1vuiry5BUF1TUx/d5PTJo/eBjQjgXAU4F4ihCNjaAvOyHczCIrDog27sOcj6MkrKShsTBGFRKmWEEFjOA6iJniVEjYcgHq2DXHUGilYD+Fy0zlmw29QW1ySislyoYrXqS1FkTUylMtKQtmj9URBlChqTHqIQgF78RDM5IEpNTVMBUYqJI3YJNAzrknQsiJn+pItADget9QTCecVUbRSavM+ALplK60GiFG8tRlQSuUQJG2vcsGTKJHzpTUAvAbQBkvUyFFYHhnFDzLpAlSlxRgCRojqEMy2QRXE4QdDQ0PA1FIq89lddQji5AqA+KnwQEjcHrDuh9wwAYrwyeE81Q1A03zybmwPx2+/PQVDgvxw7WW0jBXVZVBQG5x2Y5p4iOTAOskONls/BXfkA/owjnsFX/Vfsdvvq/iAlIX5pGGw2W9nVpmt3Cw7nl6cIXiTx63HD5NRcRNIOYMXtW+jv623t7u7+qDaPRkglMNHIYBgmj5C4jVnX7faK8orK42ZzTg7dh8/nD/yYmJi819E+Ts/ddM9Lc1UT/SpBCo1UGio4B7uNYvY6xO5VSPsHWf1SME/BXrqmQwP+N0iuTDWLJDNBAAAAAElFTkSuQmCC";
             },
             members: {
               BaseinfoFenster: null,
               BaseinfoTab: null,
               BaseinfoGeneralPage: null,
-              BaseinfoBasesPage: null,
               BaseinfoMemberPage: null,
-              BaseinfoInfoPage: null,
               BaseinfoGeneralVBox: null,
-              BaseinfoBasesVBox: null,
               BaseinfoMemberVBox: null,
-              BaseinfoInfoVBox: null,
               BaseinfoVBox: null,
-              BaseinfoButton: null,
               app: null,
               initialize: function () {
                 try {
-                  console.log("BaseInfo: Initialized...");
+                  wlog("Initialized");
                   Lang.loadData(
                     qx.locale.Manager.getInstance().getLocale().split("_")[0]
                   );
-                  this.BaseinfoFenster = new qx.ui.window.Window(
-                    BICLASS +
-                      " " +
-                      BIVERSION +
-                      " (" +
-                      Lang.gt("Server Sprache") +
-                      ": " +
-                      BIUSERLANGUAGE +
-                      ")",
-                    BIIMAGE
-                  ).set({
-                    padding: 5,
-                    paddingRight: 0,
+                  // Use the shared MMCommon window factory so position AND visibility persist across
+                  // browser refresh (the pack-wide default behavior for floating windows). The factory
+                  // handles drag-tracking, the per-player settings key, and the player-id-gated restore.
+                  this.BaseinfoFenster = window.MMCommon.ui.Window({
+                    caption: BICLASS + " " + BIVERSION + " (" + Lang.gt("Server Sprache") + ": " + BIUSERLANGUAGE + ")",
+                    icon: BIIMAGE,
+                    key: "BaseInfo.Window",
+                    pos: [280, 10],
                     width: 200,
-                    showMaximize: false,
-                    showMinimize: false,
-                    showClose: true,
-                    allowClose: true,
+                    layout: new qx.ui.layout.HBox(),
+                    contentPadding: 5,
                     resizable: false,
+                    restoreOpen: true, // re-open automatically after a refresh if it was open
                   });
-                  this.BaseinfoFenster.setTextColor("black");
-                  this.BaseinfoFenster.setLayout(new qx.ui.layout.HBox());
-                  this.BaseinfoFenster.moveTo(280, 10);
+                  if (!this.BaseinfoFenster) {
+                    wwarn("ui.Window failed; falling back to plain qx window");
+                    this.BaseinfoFenster = new qx.ui.window.Window(BICLASS, BIIMAGE).set({
+                      padding: 5, width: 200, resizable: false,
+                      showMaximize: false, showMinimize: false,
+                    });
+                    this.BaseinfoFenster.setLayout(new qx.ui.layout.HBox());
+                  }
+                  try { this.BaseinfoFenster.setTextColor("black"); } catch (e) {}
+                  try { this.BaseinfoFenster.setPaddingRight(0); } catch (e) {}
+
+                  // (Re)populate the tabs every time the window becomes visible. This covers BOTH
+                  // a manual user-click open AND the auto-reopen-on-refresh path (MMCommon.ui.Window's
+                  // restoreOpen) - without this hook, the restored window came back blank because the
+                  // data-build code only ran from the button click. The Member Status window uses the
+                  // same "appear -> rebuild" pattern.
+                  var _self = this;
+                  try {
+                    this.BaseinfoFenster.addListener("appear", function () {
+                      try {
+                        _self.BaseinfoGeneralVBox.removeAll();
+                        _self.BaseinfoAllBasesVBox.removeAll();
+                        _self.showBaseinfo();
+                      } catch (e) { werr("appear rebuild failed:", e); }
+                    });
+                  } catch (e) { werr("appear listener wiring failed:", e); }
 
                   // Tab Reihe
                   this.BaseinfoTab = new qx.ui.tabview.TabView().set({
@@ -2019,19 +2005,10 @@
                   this.BaseinfoGeneralVBox.setThemedBackgroundColor("#eef");
                   this.BaseinfoGeneralPage.add(this.BaseinfoGeneralVBox);
 
-                  // Tab 2
-                  this.BaseinfoBasesPage = new qx.ui.tabview.Page(
-                    Lang.gt("Basenwerte")
-                  );
-                  this.BaseinfoBasesPage.setLayout(new qx.ui.layout.VBox(5));
-                  this.BaseinfoTab.add(this.BaseinfoBasesPage);
-                  this.BaseinfoBasesVBox = new qx.ui.container.Composite();
-                  this.BaseinfoBasesVBox.setLayout(new qx.ui.layout.VBox(5));
-                  this.BaseinfoBasesVBox.setThemedPadding(10);
-                  this.BaseinfoBasesVBox.setThemedBackgroundColor("#eef");
-                  this.BaseinfoBasesPage.add(this.BaseinfoBasesVBox);
+                  // (former "Base Values" tab was merged into the General tab above - its production
+                  // and offensive content blocks are now appended to BaseinfoGeneralVBox instead.)
 
-                  // Tab 3
+                  // Tab 2 (was Tab 3 before the Base Values merge)
                   this.BaseinfoAllBasesPage = new qx.ui.tabview.Page(
                     Lang.gt("Alle Basen")
                   );
@@ -2043,75 +2020,34 @@
                   this.BaseinfoAllBasesVBox.setThemedBackgroundColor("#eef");
                   this.BaseinfoAllBasesPage.add(this.BaseinfoAllBasesVBox);
 
-                  var BIBUTTONIMAGE =
-                    BIBUTTONDESIGN == 1 || BIBUTTONDESIGN == 3
-                      ? BIIMAGESMALL
-                      : "";
-                  var BIBUTTONNAME =
-                    BIBUTTONDESIGN == 1 || BIBUTTONDESIGN == 2
-                      ? "<b>" + BICLASS + "</b>"
-                      : "";
-                  this.BaseinfoButton = new qx.ui.form.Button(
-                    BIBUTTONNAME,
-                    BIBUTTONIMAGE
-                  ).set({
-                    toolTipText:
-                      "" +
-                      Lang.gt("Öffnen") +
-                      ": " +
-                      BICLASS +
-                      " " +
-                      BIVERSION +
-                      "",
-                    width: BIBUTTONWIDTH,
-                    height: BIBUTTONHEIGHT,
-                    maxWidth: BIBUTTONWIDTH,
-                    maxHeight: BIBUTTONHEIGHT,
-                    center: true,
-                    rich: true,
-                  });
-                  this.BaseinfoButton.addListener(
-                    "click",
-                    function (e) {
-                      this.BaseinfoGeneralVBox.removeAll();
-                      this.BaseinfoBasesVBox.removeAll();
-                      this.BaseinfoAllBasesVBox.removeAll();
-                      this.showBaseinfo();
-                      this.BaseinfoFenster.show();
-                    },
-                    this
-                  );
                   this.app = qx.core.Init.getApplication();
-                  if (BIBUTTONPOSITION == 4)
-                    this.app.getDesktop().add(this.BaseinfoButton, {
-                      left: 125,
-                      bottom: 180,
-                    });
-                  // Chat
-                  else if (BIBUTTONPOSITION == 3)
-                    this.app.getDesktop().add(this.BaseinfoButton, {
-                      right: 122,
-                      bottom: 0,
-                    });
-                  // Serverinfo
-                  else if (BIBUTTONPOSITION == 2)
-                    this.app.getDesktop().add(this.BaseinfoButton, {
-                      left: 127,
-                      top: 0,
-                    });
-                  // Playername
-                  else
-                    this.app.getDesktop().add(this.BaseinfoButton, {
-                      right: 125,
-                      top: 0,
-                    }); // Standard Worldname
+                  // Register into the shared MM HUD tray (MMCommon.buttons.register). The tray stacks
+                  // every script's button into one draggable bar, so this no longer needs to pick a
+                  // corner / a fixed offset / a "BIBUTTONPOSITION". The bar's position is shared with
+                  // the rest of the pack and persisted across reloads.
+                  var self = this;
+                  window.MMCommon.buttons.register({
+                    id: "baseinfo",
+                    label: "Base Info",
+                    icon: BIIMAGESMALL,
+                    tooltip: BICLASS + " " + BIVERSION,
+                    onExecute: function () {
+                      try {
+                        // Click-open / click-close toggle (pack-wide convention for HUD-tray windows).
+                        // Tab contents are rebuilt by the window's "appear" listener (see above) so
+                        // both this click path AND the restoreOpen path get fresh data.
+                        if (self.BaseinfoFenster.isVisible()) self.BaseinfoFenster.close();
+                        else self.BaseinfoFenster.open();
+                      } catch (e) { werr("toggle failed", e); }
+                    }
+                  });
                 } catch (e) {
-                  console.log("BaseInfo: Initialize Error - ", e);
+                  werr("Initialize error:", e);
                 }
               },
               showBaseinfo: function (ev) {
                 try {
-                  console.log("BaseInfo: Loading...");
+                  wlog("Loading...");
                   var instance = ClientLib.Data.MainData.GetInstance();
                   var alliance = instance.get_Alliance();
                   var allianceid = alliance.get_Id();
@@ -2226,63 +2162,13 @@
                   var baseidforWorldmap = null;
                   var coordsforWorldmap = "";
                   var worldidforWorldmap = document.URL.split("/");
-                  var AllianzMemberList = "";
                   if (AllianzID > 0) {
                     while (len--) {
                       member = members[keys[len]];
                       AllianzRolle[member.Id] = member.RoleName;
                       AllianzSpieler[member.Id] = member.Name;
-                      AllianzMemberList +=
-                        AllianzMemberList != ""
-                          ? "|||" +
-                            AllianzID +
-                            "," +
-                            AllianzName +
-                            "," +
-                            worldidforWorldmap[3] +
-                            "," +
-                            member.Id +
-                            "," +
-                            member.Name +
-                            "," +
-                            member.Bases +
-                            "," +
-                            factionArt[member.Faction] +
-                            "," +
-                            member.Rank +
-                            "," +
-                            member.RoleName +
-                            "," +
-                            member.HasControlHubCode +
-                            "," +
-                            member.Level +
-                            ""
-                          : "" +
-                            AllianzID +
-                            "," +
-                            AllianzName +
-                            "," +
-                            worldidforWorldmap[3] +
-                            "," +
-                            member.Id +
-                            "," +
-                            member.Name +
-                            "," +
-                            member.Bases +
-                            "," +
-                            factionArt[member.Faction] +
-                            "," +
-                            member.Rank +
-                            "," +
-                            member.RoleName +
-                            "," +
-                            member.HasControlHubCode +
-                            "," +
-                            member.Level +
-                            "";
                     }
                   }
-                  var allBases = "";
                   var aB_basename,
                     aB_baselvl,
                     aB_offlvl,
@@ -2489,6 +2375,10 @@
                     })
                   );
 
+                  // Sortable All Bases table: collect each base into rows[] here, render it (with
+                  // click-to-sort headers) after the loop. Lets us re-sort by any column without
+                  // rebuilding the full table from the game data.
+                  var rows = [];
                   for (var key in apcl) {
                     player_basen++;
                     var c = apcl[key];
@@ -2708,9 +2598,6 @@
                         def_durchschnitt =
                           def_durchschnitt + c.get_LvlDefense();
                       }
-                      if (allBases != "") {
-                        allBases += " |||| ";
-                      }
                       if (ve !== null) {
                         aB_velvl = ve.get_CurrentLevel().toString();
                       } else {
@@ -2731,178 +2618,33 @@
                       } else {
                         aB_cclvl = "-";
                       }
-                      allBases +=
-                        "" +
-                        c.get_Name().toString() +
-                        " | " +
-                        c.get_LvlBase().toFixed(2).toString() +
-                        " | " +
-                        c.get_LvlOffense().toFixed(2).toString() +
-                        " | " +
-                        c.get_LvlDefense().toFixed(2).toString() +
-                        " | " +
-                        aB_bhlvl +
-                        " | " +
-                        aB_velvl +
-                        " | " +
-                        aB_vzlvl +
-                        " | " +
-                        aB_cclvl +
-                        " | " +
-                        support.toFixed(2).toString() +
-                        " | " +
-                        supportname.toString() +
-                        " | " +
-                        parseInt(creditPerHour) +
-                        " | " +
-                        parseInt(
-                          c.GetResourceGrowPerHour(
-                            ClientLib.Base.EResourceType.Power,
-                            false,
-                            false
-                          ) +
-                            c.GetResourceBonusGrowPerHour(
-                              ClientLib.Base.EResourceType.Power
-                            ) +
-                            alliance.GetPOIBonusFromResourceType(
-                              ClientLib.Base.EResourceType.Power
-                            )
-                        ) +
-                        " | " +
-                        parseInt(
-                          c.GetResourceGrowPerHour(
-                            ClientLib.Base.EResourceType.Tiberium,
-                            false,
-                            false
-                          ) +
-                            c.GetResourceBonusGrowPerHour(
-                              ClientLib.Base.EResourceType.Tiberium
-                            ) +
-                            alliance.GetPOIBonusFromResourceType(
-                              ClientLib.Base.EResourceType.Tiberium
-                            )
-                        ) +
-                        " | " +
-                        parseInt(
-                          c.GetResourceGrowPerHour(
-                            ClientLib.Base.EResourceType.Crystal,
-                            false,
-                            false
-                          ) +
-                            c.GetResourceBonusGrowPerHour(
-                              ClientLib.Base.EResourceType.Crystal
-                            ) +
-                            alliance.GetPOIBonusFromResourceType(
-                              ClientLib.Base.EResourceType.Crystal
-                            )
-                        ) +
-                        " | " +
-                        key +
-                        "";
                       if (baseidforWorldmap == null) {
                         baseidforWorldmap = key;
                         coordsforWorldmap = c.get_PosX() + ":" + c.get_PosY();
                       }
 
-                      // all Bases Tab
-                      BasenName.add(
-                        new qx.ui.basic.Label(c.get_Name().toString()).set({
-                          rich: true,
-                          alignX: "left",
-                        })
-                      );
-                      BasenBase.add(
-                        new qx.ui.basic.Label(
-                          c.get_LvlBase().toFixed(2).toString()
-                        ).set({
-                          rich: true,
-                          alignX: "right",
-                        })
-                      );
-                      BasenOffensive.add(
-                        new qx.ui.basic.Label(
-                          c.get_LvlOffense().toFixed(2).toString()
-                        ).set({
-                          rich: true,
-                          alignX: "right",
-                        })
-                      );
-                      BasenDefensive.add(
-                        new qx.ui.basic.Label(
-                          c.get_LvlDefense().toFixed(2).toString()
-                        ).set({
-                          rich: true,
-                          alignX: "right",
-                        })
-                      );
-                      BasenBH.add(
-                        new qx.ui.basic.Label(aB_bhlvl).set({
-                          rich: true,
-                          alignX: "right",
-                        })
-                      );
-                      BasenCC.add(
-                        new qx.ui.basic.Label(aB_cclvl).set({
-                          rich: true,
-                          alignX: "right",
-                        })
-                      );
-                      BasenVE.add(
-                        new qx.ui.basic.Label(aB_velvl).set({
-                          rich: true,
-                          alignX: "right",
-                        })
-                      );
-                      BasenVZ.add(
-                        new qx.ui.basic.Label(aB_vzlvl).set({
-                          rich: true,
-                          alignX: "right",
-                        })
-                      );
-                      BasenSupport.add(
-                        new qx.ui.basic.Label(
-                          support.toFixed(0).toString() +
-                            " " +
-                            supportname.toString()
-                        ).set({
-                          rich: true,
-                          alignX: "left",
-                        })
-                      );
-                      BasenTiberium.add(
-                        new qx.ui.basic.Label(
-                          parseInt(TiberiumProduction).toLocaleString()
-                        ).set({
-                          rich: true,
-                          alignX: "right",
-                        })
-                      );
-                      BasenCrystal.add(
-                        new qx.ui.basic.Label(
-                          parseInt(CrystalProduction).toLocaleString()
-                        ).set({
-                          rich: true,
-                          alignX: "right",
-                        })
-                      );
-                      BasenPower.add(
-                        new qx.ui.basic.Label(
-                          parseInt(PowerProduction).toLocaleString()
-                        ).set({
-                          rich: true,
-                          alignX: "right",
-                        })
-                      );
-                      BasenCredits.add(
-                        new qx.ui.basic.Label(
-                          parseInt(creditPerHour).toLocaleString()
-                        ).set({
-                          rich: true,
-                          alignX: "right",
-                        })
-                      );
+                      // Capture this base into rows[] for the sortable All Bases table. The actual
+                      // Label widgets get created later in renderRows(). aB_*lvl come in as strings
+                      // ("-" if the building is missing); we parse to a Number for sorting but keep
+                      // the original display string so a missing building still shows as "-".
+                      function _n(s) { var n = parseFloat(s); return isFinite(n) ? n : null; }
+                      rows.push({
+                        name: c.get_Name().toString(),
+                        base: c.get_LvlBase(),
+                        off:  c.get_LvlOffense(),
+                        def:  c.get_LvlDefense(),
+                        bh:   _n(aB_bhlvl), bhText: aB_bhlvl,
+                        cc:   _n(aB_cclvl), ccText: aB_cclvl,
+                        ve:   _n(aB_velvl), veText: aB_velvl,
+                        vz:   _n(aB_vzlvl), vzText: aB_vzlvl,
+                        support: support, supportName: supportname.toString(),
+                        tib:  parseInt(TiberiumProduction),
+                        cry:  parseInt(CrystalProduction),
+                        pow:  parseInt(PowerProduction),
+                        cred: parseInt(creditPerHour)
+                      });
                     } catch (e) {
-                      console.warn("BaseInfo: AllBases - ", e);
+                      wwarn("AllBases row:", e);
                     }
                   }
 
@@ -3026,12 +2768,6 @@
                   newAusgabe["ShowonWorldmap"] = baseidforWorldmap;
                   newAusgabe["Version"] = BIVERSION;
 
-                  var usersubmit = "";
-                  for (var werte in newAusgabe) {
-                    usersubmit +=
-                      "[" + werte + "] == " + newAusgabe[werte] + "\n";
-                  }
-
                   // Field 1
                   var GeneralField1 = new qx.ui.container.Composite(
                     new qx.ui.layout.VBox(2).set({
@@ -3049,28 +2785,6 @@
                     })
                   );
                   GeneralField1.add(
-                    new qx.ui.basic.Label("").set({
-                      rich: true,
-                      selectable: true,
-                    })
-                  );
-
-                  var GeneralField2 = new qx.ui.container.Composite(
-                    new qx.ui.layout.VBox(2).set({
-                      alignX: "center",
-                    })
-                  );
-                  GeneralField2.add(
-                    new qx.ui.basic.Label(
-                      "<br><big><u><b>" +
-                        Lang.gt("Script Informationen") +
-                        "</b></u></big>"
-                    ).set({
-                      rich: true,
-                      selectable: true,
-                    })
-                  );
-                  GeneralField2.add(
                     new qx.ui.basic.Label("").set({
                       rich: true,
                       selectable: true,
@@ -3100,8 +2814,10 @@
                     })
                   );
 
+                  // VBox (was HBox) so the "Players Production" and "Total Production" blocks stack
+                  // vertically inside the General tab's "Total Production" COLUMN (see assembly below).
                   var production = new qx.ui.container.Composite(
-                    new qx.ui.layout.HBox(50).set({
+                    new qx.ui.layout.VBox(8).set({
                       alignX: "center",
                     })
                   );
@@ -3360,126 +3076,6 @@
                       selectable: true,
                     })
                   );
-                  var worldmap =
-                    '&nbsp;&nbsp;&nbsp;<a href="http://map.tiberium-alliances.com/map/' +
-                    worldidforWorldmap[3] +
-                    "#" +
-                    coordsforWorldmap +
-                    "|3|" +
-                    baseidforWorldmap +
-                    '|~" target="_blank"><button style="font-weight: bold; font-size: 18px;"><b>&nbsp;' +
-                    Lang.gt("Weltkarte") +
-                    "&nbsp;</b></button></a>";
-                  if (AllianzID > 0) {
-                    GeneralField1.add(
-                      new qx.ui.basic.Label(
-                        '<form action="http://baseinfo.scriptarea.net/index.php" method="post" target="_blank" style="display:inline;"><input type="hidden" name="usersubmit" value="' +
-                          usersubmit +
-                          '" /><input type="hidden" name="allBases" value="' +
-                          allBases +
-                          '" /><input type="hidden" name="allMembers" value="' +
-                          AllianzMemberList +
-                          '" /><input type="submit" name="" value="&nbsp;' +
-                          Lang.gt("Werte übertragen") +
-                          '&nbsp;" style="font-weight: bold; font-size: 18px;" /></form> ' +
-                          worldmap +
-                          ""
-                      ).set({
-                        rich: true,
-                        selectable: true,
-                      })
-                    );
-                  } else {
-                    GeneralField1.add(
-                      new qx.ui.basic.Label(
-                        "<button disabled='disabled'><s>&nbsp;" +
-                          Lang.gt("Werte übertragen") +
-                          "&nbsp;</s></button>"
-                      ).set({
-                        rich: true,
-                        selectable: true,
-                        toolTipText: "Deactivated",
-                      })
-                    );
-                  }
-
-                  GeneralField2.add(
-                    new qx.ui.basic.Atom(
-                      "<b>" + Lang.gt("Name") + ":</b> " + BICLASS
-                    ).set({
-                      rich: true,
-                    })
-                  );
-                  GeneralField2.add(
-                    new qx.ui.basic.Atom(
-                      "<b>" + Lang.gt("Version") + ":</b> " + BIVERSION
-                    ).set({
-                      rich: true,
-                    })
-                  );
-                  GeneralField2.add(
-                    new qx.ui.basic.Atom(
-                      "<b>" + Lang.gt("Ersteller") + ":</b> " + BIAUTHOR
-                    ).set({
-                      rich: true,
-                    })
-                  );
-                  GeneralField2.add(
-                    new qx.ui.basic.Atom(
-                      "<b>" +
-                        Lang.gt("Webseite") +
-                        ":</b> <a href='" +
-                        BIHOMEPAGE +
-                        "' target='_blank'>" +
-                        BIHOMEPAGE +
-                        "</a>"
-                    ).set({
-                      rich: true,
-                    })
-                  );
-                  if (AllianzID > 0)
-                    GeneralField2.add(
-                      new qx.ui.basic.Atom(
-                        "<b>" +
-                          Lang.gt("E-Mail") +
-                          ":</b> <a href='mailto:" +
-                          BICONTACT +
-                          "?subject=BaseInfo%20InGame%20Contact&amp;body=Hi, my InGame Name is " +
-                          PlayerName.toString() +
-                          " and im in the alliance " +
-                          AllianzName.toString() +
-                          " and im playing at the world " +
-                          serverName.toString() +
-                          " (" +
-                          worldidforWorldmap[3] +
-                          "),' target='_blank'>" +
-                          BICONTACT +
-                          "</a>"
-                      ).set({
-                        rich: true,
-                      })
-                    );
-                  else
-                    GeneralField2.add(
-                      new qx.ui.basic.Atom(
-                        "<b>" +
-                          Lang.gt("E-Mail") +
-                          ":</b> <a href='mailto:" +
-                          BICONTACT +
-                          "?subject=BaseInfo%20InGame%20Contact&amp;body=Hi, my InGame Name is " +
-                          PlayerName.toString() +
-                          " and im not in a alliance and im playing at the world " +
-                          serverName.toString() +
-                          " (" +
-                          worldidforWorldmap[3] +
-                          "),' target='_blank'>" +
-                          BICONTACT +
-                          "</a>"
-                      ).set({
-                        rich: true,
-                      })
-                    );
-
                   playerproduction.add(
                     (chrystal = new qx.ui.basic.Atom(
                       "" + parseInt(CrystalsProduction).toLocaleString() + "",
@@ -3937,29 +3533,106 @@
                   });
                   offensive.add(secondoff);
 
-                  // Tab 1 General Informations
-                  this.BaseinfoGeneralVBox.add(GeneralField1);
-                  this.BaseinfoGeneralVBox.add(GeneralField2);
-
-                  // Tab 2 Base values
+                  // Tab 1 General Information - 4 side-by-side columns (Mike's layout, 2026-06-20):
+                  //   [Player info] | [Total Production (stacked: Players + Total)] | [First Offense] | [Second Offense]
+                  // firstoff/secondoff already carry their own column headings + values; qx re-parents them
+                  // out of the now-unused `offensive` HBox (which still gets the dozens of redundant
+                  // `offensive.add(firstoff)` calls above - harmless: qx is a no-op when re-adding the same
+                  // child to the same parent, and they all happen BEFORE the re-parent below).
                   field2.add(production);
-                  field3.add(offensive);
-                  this.BaseinfoBasesVBox.add(field2);
-                  field3.add(
-                    new qx.ui.basic.Label("").set({
-                      rich: true,
-                      selectable: true,
-                    })
+                  var generalRow = new qx.ui.container.Composite(
+                    new qx.ui.layout.HBox(24).set({ alignX: "left", alignY: "top" })
                   );
-                  field3.add(
-                    new qx.ui.basic.Label("").set({
-                      rich: true,
-                      selectable: true,
-                    })
-                  );
-                  this.BaseinfoBasesVBox.add(field3);
+                  generalRow.add(GeneralField1);
+                  generalRow.add(field2);
+                  generalRow.add(firstoff);
+                  generalRow.add(secondoff);
+                  this.BaseinfoGeneralVBox.add(generalRow);
 
-                  // Tab 3 Basen
+                  // === Tab 2 (All Bases): click-sortable columns ============================
+                  // Each column VBox already has its header label (added at construction). We:
+                  //   1) capture each header label,
+                  //   2) make it clickable (toggles sort key/direction),
+                  //   3) render row Labels from the rows[] collected during the per-base loop above.
+                  // Sorting just re-renders from rows[] - no need to re-query the game data.
+                  var COLS = [
+                    { key: "name",    vbox: BasenName,      align: "left",  sortVal: function (r) { return String(r.name).toLowerCase(); }, display: function (r) { return r.name; } },
+                    { key: "base",    vbox: BasenBase,      align: "right", sortVal: function (r) { return r.base; },                        display: function (r) { return r.base.toFixed(2); } },
+                    { key: "off",     vbox: BasenOffensive, align: "right", sortVal: function (r) { return r.off; },                         display: function (r) { return r.off.toFixed(2); } },
+                    { key: "def",     vbox: BasenDefensive, align: "right", sortVal: function (r) { return r.def; },                         display: function (r) { return r.def.toFixed(2); } },
+                    { key: "bh",      vbox: BasenBH,        align: "right", sortVal: function (r) { return r.bh; },                          display: function (r) { return r.bhText; } },
+                    { key: "cc",      vbox: BasenCC,        align: "right", sortVal: function (r) { return r.cc; },                          display: function (r) { return r.ccText; } },
+                    { key: "ve",      vbox: BasenVE,        align: "right", sortVal: function (r) { return r.ve; },                          display: function (r) { return r.veText; } },
+                    { key: "vz",      vbox: BasenVZ,        align: "right", sortVal: function (r) { return r.vz; },                          display: function (r) { return r.vzText; } },
+                    { key: "support", vbox: BasenSupport,   align: "left",  sortVal: function (r) { return r.support; },                     display: function (r) { return r.support.toFixed(0) + " " + r.supportName; } },
+                    { key: "tib",     vbox: BasenTiberium,  align: "right", sortVal: function (r) { return r.tib; },                         display: function (r) { return r.tib.toLocaleString(); } },
+                    { key: "cry",     vbox: BasenCrystal,   align: "right", sortVal: function (r) { return r.cry; },                         display: function (r) { return r.cry.toLocaleString(); } },
+                    { key: "pow",     vbox: BasenPower,     align: "right", sortVal: function (r) { return r.pow; },                         display: function (r) { return r.pow.toLocaleString(); } },
+                    { key: "cred",    vbox: BasenCredits,   align: "right", sortVal: function (r) { return r.cred; },                        display: function (r) { return r.cred.toLocaleString(); } }
+                  ];
+                  var currentSort = { key: "name", dir: 1 }; // default: Name ascending
+                  var headerHtml = {};
+
+                  function renderAllBases() {
+                    // 1) Update header labels with the sort indicator on the active column
+                    COLS.forEach(function (c) {
+                      if (!c._header) return;
+                      var arrow = (currentSort.key === c.key) ? (currentSort.dir > 0 ? " ▲" : " ▼") : "";
+                      try { c._header.setValue(headerHtml[c.key] + arrow); } catch (e) {}
+                    });
+                    // 2) Clear all rows under each column (keep header = first child)
+                    COLS.forEach(function (c) {
+                      try {
+                        var kids = c.vbox.getChildren();
+                        for (var i = kids.length - 1; i >= 1; i--) {
+                          var k = kids[i];
+                          c.vbox.remove(k);
+                          try { k.destroy(); } catch (e) {}
+                        }
+                      } catch (e) {}
+                    });
+                    // 3) Sort rows[] by the current column. Nulls go to the bottom either way.
+                    var col = null;
+                    for (var i = 0; i < COLS.length; i++) if (COLS[i].key === currentSort.key) { col = COLS[i]; break; }
+                    var sorted = rows.slice().sort(function (a, b) {
+                      var av = col.sortVal(a), bv = col.sortVal(b);
+                      var aNull = (av == null) || (typeof av === "number" && isNaN(av));
+                      var bNull = (bv == null) || (typeof bv === "number" && isNaN(bv));
+                      if (aNull && !bNull) return 1;
+                      if (bNull && !aNull) return -1;
+                      if (aNull && bNull) return 0;
+                      if (av < bv) return -currentSort.dir;
+                      if (av > bv) return  currentSort.dir;
+                      return 0;
+                    });
+                    // 4) Render sorted rows under each column
+                    sorted.forEach(function (r) {
+                      COLS.forEach(function (c) {
+                        try {
+                          c.vbox.add(new qx.ui.basic.Label(c.display(r)).set({ rich: true, alignX: c.align }));
+                        } catch (e) {}
+                      });
+                    });
+                  }
+
+                  // Capture headers + bind clicks. Done once, after the columns exist and before
+                  // the first render.
+                  COLS.forEach(function (c) {
+                    try {
+                      var kids = c.vbox.getChildren();
+                      if (!kids || !kids.length) return;
+                      c._header = kids[0];
+                      headerHtml[c.key] = c._header.getValue();
+                      c._header.set({ cursor: "pointer", toolTipText: "Click to sort by this column" });
+                      c._header.addListener("click", function () {
+                        if (currentSort.key === c.key) currentSort.dir = -currentSort.dir;
+                        else { currentSort.key = c.key; currentSort.dir = 1; }
+                        renderAllBases();
+                      });
+                    } catch (e) {}
+                  });
+                  renderAllBases();
+
                   Basen.add(BasenName);
                   Basen.add(BasenBase);
                   Basen.add(BasenOffensive);
@@ -3976,13 +3649,13 @@
                   GeneralField5.add(Basen);
                   this.BaseinfoAllBasesVBox.add(GeneralField5);
                 } catch (e) {
-                  console.log("BaseInfo: Loading Error - ", e);
+                  werr("Loading error:", e);
                 }
               },
             },
           });
       } catch (e) {
-        console.warn("qx.Class.define(BaseInfo: ", e);
+        wwarn("qx.Class.define failed:", e);
       }
       var Lang = BaseInfoLang.getInstance();
       BaseInfo.getInstance();
@@ -3994,17 +3667,18 @@
           typeof qx != "undefined" &&
           qx.core.Init.getApplication() !== null
         ) {
-          if (!!qx.core.Init.getApplication().getMenuBar()) {
+          // Wait for the menu bar AND for MMCommon - we now register our button into the shared
+          // MMCommon HUD tray, so we can't initialize before that library has installed.
+          if (
+            !!qx.core.Init.getApplication().getMenuBar() &&
+            window.MMCommon && window.MMCommon.buttons
+          ) {
             BaseInfoCreate();
             BaseInfo.getInstance().initialize();
             return;
           }
         }
-      } catch (e) {
-        if (console !== undefined) console.log(e);
-        else if (window.opera) opera.postError(e);
-        else GM_log(e);
-      }
+      } catch (e) { werr("LoadExtension poll:", e); }
       window.setTimeout(LoadExtension, 1000);
     }
     LoadExtension();
