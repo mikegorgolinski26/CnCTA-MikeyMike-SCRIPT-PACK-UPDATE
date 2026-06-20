@@ -847,6 +847,37 @@
                 var sortCol = -1;        // -1 => default sort by ticks (payoff time) ascending
                 var sortDir = 1;         // 1 asc, -1 desc
                 var doneState = {};       // building id -> 'done' | 'failed' (survives re-sort; cleared on full Refresh)
+                var filtersRestored = false, suppressFilterEvents = false; // for player-id-gated filter restore
+
+                // Select the option whose model matches `model` in a SelectBox.
+                function selectByModel(sb, model) {
+                    try {
+                        var items = sb.getSelectables ? sb.getSelectables() : sb.getChildren();
+                        for (var i = 0; i < items.length; i++) {
+                            if (items[i].getModel && items[i].getModel() === model) { sb.setSelection([items[i]]); return; }
+                        }
+                    } catch (e) {}
+                }
+
+                // Restore the filter controls from settings ONCE, but only after the player id is loaded
+                // (before that the settings store resolves to the default bucket and we'd read defaults -
+                // exactly why "Show" wasn't sticking). Called from refreshTab, which runs on tab appear.
+                function restoreFiltersOnce() {
+                    if (filtersRestored) return;
+                    var pid = 0; try { pid = ClientLib.Data.MainData.GetInstance().get_Player().get_Id(); } catch (e) {}
+                    if (!pid) return; // wait for player id
+                    filtersRestored = true;
+                    suppressFilterEvents = true;
+                    try {
+                        selectByModel(showSelect, MM.settings.get("BaseTools.UpgradeShowMode", "transfer"));
+                        selectByModel(resSelect, MM.settings.get("BaseTools.UpgradeResourceFilter", "All"));
+                        keepUpgraded = MM.settings.get("BaseTools.UpgradeKeepRows", true);
+                        cbKeep.setValue(keepUpgraded);
+                        spinTopN.setValue(MM.settings.get("BaseTools.UpgradeTopN", 5));
+                        wlog("restored filters: show=" + currentMode() + " res=" + (resSelect.getSelection()[0] && resSelect.getSelection()[0].getModel()) + " keep=" + keepUpgraded);
+                    } catch (e) { werr("restoreFiltersOnce failed:", e); }
+                    suppressFilterEvents = false;
+                }
 
                 // Readable palette: all data cells are near-white so nothing is hard to read (the old
                 // amber-everything was the readability problem). State is conveyed by the Action column.
@@ -855,6 +886,17 @@
                 var COLOR_WAIT = "#ffb74d";  // not affordable yet - amber, bold (red was hard to read)
                 var COLOR_FAIL = "#ff8a8a";  // failed action (readable red)
                 function boldLabel(lbl) { try { lbl.setFont(qx.bom.Font.fromString("bold 11px sans-serif")); } catch (e) {} return lbl; }
+                // Uniform, rounded status badge so the Action column reads cleanly (fixed width + centered
+                // text means every badge is the same size instead of shrink-wrapping to its text).
+                function makeBadge(text, fg, bg, tip) {
+                    var lbl = new qx.ui.basic.Label(text).set({
+                        textColor: fg, width: 120, textAlign: "center", paddingTop: 3, paddingBottom: 3
+                    });
+                    try { lbl.setDecorator(new qx.ui.decoration.Decorator().set({ radius: 4, backgroundColor: bg })); }
+                    catch (e) { try { lbl.setBackgroundColor(bg); } catch (e2) {} }
+                    if (tip) lbl.setToolTipText(tip);
+                    return boldLabel(lbl);
+                }
 
                 function fmtNum(n) {
                     if (typeof n !== "number" || !isFinite(n)) return "-";
@@ -912,7 +954,7 @@
 
                     var rows = sortedData();
                     if (!rows.length) {
-                        grid.add(new qx.ui.basic.Label("(nothing to show - try unchecking 'Affordable now only')").set({ textColor: "#888888" }), { row: 1, column: 0, colSpan: ACTION_COL + 1 });
+                        grid.add(new qx.ui.basic.Label("(nothing to show - try the 'Show' filter, e.g. 'All candidates')").set({ textColor: "#888888" }), { row: 1, column: 0, colSpan: ACTION_COL + 1 });
                         return;
                     }
                     for (var r = 0; r < rows.length; r++) {
@@ -964,11 +1006,7 @@
                     // Already acted on this render-cycle? Show the sticky status as a readable badge.
                     if (doneState[cand.id]) {
                         var ok = doneState[cand.id] === "done";
-                        return boldLabel(new qx.ui.basic.Label(ok ? "✓ Upgraded" : "✗ failed").set({
-                            textColor: ok ? "#bff5bf" : "#ffc9c9",
-                            backgroundColor: ok ? "#1e4d1e" : "#5a1e1e",
-                            paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2
-                        }));
+                        return makeBadge(ok ? "✓ Upgraded" : "✗ failed", ok ? "#bff5bf" : "#ffc9c9", ok ? "#1e4d1e" : "#5a1e1e");
                     }
                     if (cand.state === 1) {
                         var btn = new qx.ui.form.Button("⬆ Upgrade").set({ appearance: "button-text-small", toolTipText: "Upgrade this building now" });
@@ -998,12 +1036,7 @@
                         ? "Could be covered by transfer, but you can't afford the transfer fee right now"
                         : "Affordable in about " + (cand.etaSeconds > 0 ? fmtTime(cand.etaSeconds) : "?") + " from this base's production";
                     var waitTxt = (cand.etaSeconds > 0) ? ("⏳ " + fmtTime(cand.etaSeconds)) : "wait";
-                    return boldLabel(new qx.ui.basic.Label(waitTxt).set({
-                        textColor: "#ffe08a",
-                        backgroundColor: "#4a3814",
-                        paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2,
-                        toolTipText: waitTip
-                    }));
+                    return makeBadge(waitTxt, "#ffe08a", "#4a3814", waitTip);
                 }
 
                 // ---- batch upgrade: walk the visible, sorted, affordable rows ----
@@ -1069,6 +1102,7 @@
 
                 function refreshTab() {
                     try {
+                        restoreFiltersOnce();  // player-id-gated: restore saved Show/Resource/Keep/TopN once
                         rebuildBaseOptions(); // (re)populate the Base dropdown now that city data is available
                         doneState = {}; // full recompute: forget previous "✓ Upgraded" marks (levels/costs changed)
                         var all = computeUpgradeCandidates(currentFilterOpts());
@@ -1087,6 +1121,7 @@
                     refreshTab();
                 });
                 showSelect.addListener("changeSelection", function () {
+                    if (suppressFilterEvents) return;
                     MM.settings.set("BaseTools.UpgradeShowMode", currentMode());
                     refreshTab();
                 });
@@ -1096,6 +1131,7 @@
                     wlog("UpgradeKeepRows =", keepUpgraded);
                 });
                 resSelect.addListener("changeSelection", function () {
+                    if (suppressFilterEvents) return;
                     var sel = resSelect.getSelection()[0];
                     MM.settings.set("BaseTools.UpgradeResourceFilter", sel ? sel.getModel() : "All");
                     refreshTab();
