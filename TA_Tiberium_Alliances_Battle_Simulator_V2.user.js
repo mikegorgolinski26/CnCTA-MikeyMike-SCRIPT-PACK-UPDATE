@@ -2688,7 +2688,6 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             } catch (e) {
                                 this.__prevAuto = null;
                             }
-                            TABS.APISimulation.getInstance().addListener("OnSimulateBattleFinished", this.__onSimDone, this);
                             this.__log("Optimizing: testing " + this.__total + " layouts (" + (this.__presetNum === 7 ? "best non win" : "best win") + ")...");
                             this.__next();
                         },
@@ -2698,7 +2697,6 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.__finish(true);
                         },
                         __next: function () {
-                            var self = this;
                             clearTimeout(this.__stepT);
                             if (!this.__running) return;
                             if (this.__queue.length === 0) {
@@ -2708,69 +2706,93 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             var cand = this.__queue.shift();
                             this.__done++;
                             // If this exact layout is already cached & valid, skip the server round-trip;
-                            // it will still be considered by the final selection (which reads the whole cache).
+                            // it is still considered by the final selection (which reads the whole cache).
                             try {
                                 var cached = TABS.CACHE.getInstance().check(this.__clone(cand), this.__cityid, this.__ownid);
                                 if (cached && cached.result !== null) {
-                                    this.__log("Skipped cached layout " + this.__done + "/" + this.__total);
+                                    this.__log("Already cached " + this.__done + "/" + this.__total + " - skipping");
                                     this.__deferNext();
                                     return;
                                 }
                             } catch (e) {}
-                            // Apply the candidate to the live formation, then simulate it.
-                            try {
-                                TABS.UTIL.Formation.Set(cand, this.__cityid, this.__ownid);
-                            } catch (e) {
-                                this.__deferNext(); // bad candidate -> skip
-                                return;
-                            }
-                            this.__stepT = setTimeout(function () {
-                                self.__awaitSim();
-                            }, 200);
+                            this.__simulateCandidate(cand);
                         },
-                        __awaitSim: function () {
+                        // Simulate a candidate by sending its unit coordinates straight to the server.
+                        // This does NOT move any live units, so it works reliably for every arrangement.
+                        __simulateCandidate: function (cand) {
                             var self = this,
-                                api = TABS.APISimulation.getInstance();
-                            if (!this.__running) return;
-                            if (api.getLock()) { // previous sim still locked; wait for it
-                                this.__stepT = setTimeout(function () {
-                                    self.__awaitSim();
-                                }, 200);
+                                armyUnits = [],
+                                i;
+                            for (i = 0; i < cand.length; i++)
+                                if (cand[i].enabled && cand[i].h > 0) armyUnits.push({
+                                    i: cand[i].id,
+                                    x: cand[i].x,
+                                    y: cand[i].y
+                                });
+                            if (armyUnits.length === 0) { // nothing enabled to simulate
+                                this.__deferNext();
                                 return;
                             }
                             this.__simReturned = false;
-                            api.SimulateBattle();
-                            // Safety net: if no result event arrives, move on so we never hang.
+                            // Safety net: if no response arrives, move on so we never hang.
                             clearTimeout(this.__safetyT);
                             this.__safetyT = setTimeout(function () {
                                 if (self.__running && !self.__simReturned) self.__deferNext();
-                            }, 8000);
+                            }, 9000);
+                            try {
+                                ClientLib.Net.CommunicationManager.GetInstance().SendSimpleCommand("SimulateBattle", {
+                                    battleSetup: {
+                                        d: this.__cityid,
+                                        a: this.__ownid,
+                                        u: armyUnits,
+                                        s: 0
+                                    }
+                                }, webfrontend.phe.cnc.Util.createEventDelegate(ClientLib.Net.CommandResult, this, function (a, b) {
+                                    self.__onCandidateResult(cand, b);
+                                }), null);
+                            } catch (e) {
+                                this.__log("Sim send error: " + e);
+                                this.__deferNext();
+                            }
                         },
-                        __onSimDone: function () {
-                            if (!this.__running) return;
+                        __onCandidateResult: function (cand, data) {
                             this.__simReturned = true;
                             clearTimeout(this.__safetyT);
+                            try {
+                                if (data && data.d) {
+                                    var merged = TABS.UTIL.Formation.Merge(this.__clone(cand), data.d.a),
+                                        cache = TABS.CACHE.getInstance().check(merged, data.d.di, data.d.ai);
+                                    if (cache.result === null) {
+                                        cache.result = {
+                                            stats: TABS.UTIL.Stats.get_Stats(data).getAny(),
+                                            formation: merged,
+                                            combat: data.d
+                                        };
+                                        TABS.CACHE.getInstance().add(cache, data.d.di, data.d.ai);
+                                    }
+                                }
+                            } catch (e) {
+                                this.__log("Sim result error: " + e);
+                            }
                             this.__log("Tested " + this.__done + "/" + this.__total + " layouts...");
                             this.__deferNext();
                         },
                         __deferNext: function () {
                             var self = this,
-                                api = TABS.APISimulation.getInstance();
+                                delay = 450;
+                            try {
+                                delay = TABS.SETTINGS.get("Optimizer.SimDelayMs", 450);
+                            } catch (e) {}
                             clearTimeout(this.__stepT);
-                            var wait = function () {
-                                if (!self.__running) return;
-                                if (!api.getLock()) self.__next(); // lock cleared -> safe to apply & sim next
-                                else self.__stepT = setTimeout(wait, 200);
-                            };
-                            this.__stepT = setTimeout(wait, 100);
+                            // small gap between simulations to stay gentle on the server
+                            this.__stepT = setTimeout(function () {
+                                self.__next();
+                            }, delay);
                         },
                         __finish: function (stopped) {
                             this.__running = false;
                             clearTimeout(this.__stepT);
                             clearTimeout(this.__safetyT);
-                            try {
-                                TABS.APISimulation.getInstance().removeListener("OnSimulateBattleFinished", this.__onSimDone, this);
-                            } catch (e) {}
                             // Restore auto-simulate to its previous state.
                             if (this.__prevAuto !== null) {
                                 try {
