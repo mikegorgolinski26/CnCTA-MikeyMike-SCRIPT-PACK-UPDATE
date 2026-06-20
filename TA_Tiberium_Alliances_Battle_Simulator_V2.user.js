@@ -3203,6 +3203,33 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 row: 5,
                                 column: 2
                             });
+                            // MikeyMike: auto layout optimizer buttons (full-width, labeled)
+                            var btnOptWin = new qx.ui.form.Button(this.tr("Best Win")).set({
+                                toolTipText: this.tr("Auto-try several army layouts and apply the WINNING layout (enemy destroyed) with the lowest repair time."),
+                                height: 20,
+                                show: "label",
+                                center: true,
+                                appearance: "button-addpoints"
+                            });
+                            btnOptWin.addListener("click", this.onClick_btnOptimizeWin, this);
+                            this.boxMove.add(btnOptWin, {
+                                row: 6,
+                                column: 0,
+                                colSpan: 3
+                            });
+                            var btnOptNonWin = new qx.ui.form.Button(this.tr("Best Non Win")).set({
+                                toolTipText: this.tr("Auto-try several army layouts and apply the best-value layout: balances lowest remaining enemy health with lowest repair time. Does NOT require a full kill."),
+                                height: 20,
+                                show: "label",
+                                center: true,
+                                appearance: "button-addpoints"
+                            });
+                            btnOptNonWin.addListener("click", this.onClick_btnOptimizeNonWin, this);
+                            this.boxMove.add(btnOptNonWin, {
+                                row: 7,
+                                column: 0,
+                                colSpan: 3
+                            });
                             // Move Box init by Netquik
                             this.boxMove.xy = TABS.SETTINGS.get("GUI.Window.MoveBox.position", [390, 470]);
                             this.PlayArea.getLayoutParent().getLayoutParent().add(this.boxMove, {
@@ -3420,6 +3447,12 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             var formation = TABS.UTIL.Formation.Get(),
                                 formation = TABS.UTIL.Formation.SwapLines(formation, 3, 4);
                             TABS.UTIL.Formation.Set(formation);
+                        },
+                        onClick_btnOptimizeWin: function (e) { // MikeyMike: lowest repair, must win (preset #6)
+                            TABS.OPTIMIZER.getInstance().Run(6);
+                        },
+                        onClick_btnOptimizeNonWin: function (e) { // MikeyMike: balanced best value (preset #7)
+                            TABS.OPTIMIZER.getInstance().Run(7);
                         },
                         onClick_btnDisable: function (e) {
                             var formation = TABS.UTIL.Formation.Get();
