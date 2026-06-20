@@ -52,12 +52,13 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
   layout at button-click, evaluates slight tweaks each round (move one unit to a nearby
   empty cell, or swap two units), adopts the best improving tweak, and when a local
   optimum is reached does random "kicks" to jump to a new region and climb again.
-  Each tweak is simulated directly via SimulateBattle in a concurrent worker pool - no
-  live units are moved. Already-simulated layouts persist in the cache PER BASE, so they
-  count as "tried": clicking the button again skips them and explores new permutations
-  (avoiding ones already tried) until the base changes (cache invalidates).
-  Settings: Optimizer.Concurrency (5), Optimizer.MaxNeighbors per round (20),
-  Optimizer.MaxRounds (16), Optimizer.SimBudget total sims (150), Optimizer.MaxKicks (3).
+  Each tweak is applied to the live army (units are actually moved) then simulated - the
+  server simulates the stored arrangement, so units must really move to vary the result.
+  This is sequential (one live army). Already-simulated layouts persist in the cache PER
+  BASE, so they count as "tried": clicking the button again skips them and explores new
+  permutations (avoiding ones already tried) until the base changes (cache invalidates).
+  Settings: Optimizer.MaxNeighbors per round (16), Optimizer.MaxRounds (30),
+  Optimizer.SimBudget total sims (150), Optimizer.MaxKicks (3).
 - To show the BestWin (#6) and BestDF0 (#7) columns, widen the Stats window (columns 7-8).
 ----------------
 */
@@ -2607,12 +2608,12 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         __currentKey: null, // its cache hash
                         __lastBest: null, // best score tuple seen so far this run (lower = better)
                         __round: 0,
-                        __maxRounds: 40, // hard cap on rounds (climb + kick) per click
-                        __maxNeighbors: 20, // tweaks evaluated per round
-                        __simBudget: 250, // hard cap on simulations per click (safety net)
+                        __maxRounds: 30, // hard cap on rounds (climb + kick) per click
+                        __maxNeighbors: 16, // tweaks evaluated per round (sequential, so keep modest)
+                        __simBudget: 150, // hard cap on simulations per click (safety net)
                         __simsUsed: 0,
                         __kicksUsed: 0, // consecutive non-improving kicks (reset on any improvement)
-                        __maxKicks: 4, // stop after this many fruitless kicks in a row
+                        __maxKicks: 3, // stop after this many fruitless kicks in a row
                         __onDrain: null, // callback when the current eval batch finishes
                         isRunning: function () {
                             return this.__running === true;
@@ -2729,6 +2730,23 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 if (a[i] !== b[i]) return a[i] - b[i];
                             return 0;
                         },
+                        __describe: function (stats) { // short human summary of a sim result
+                            try {
+                                var pct = function (h) {
+                                    var m = (h.max || 0) + (h.maxFront || 0),
+                                        e = (h.end || 0) + (h.endFront || 0);
+                                    return m > 0 ? Math.round(100 * e / m) + "%" : "-";
+                                };
+                                var r = stats.Offense.Overall.Resource,
+                                    rep = Math.max(
+                                        r[ClientLib.Base.EResourceType.RepairChargeAir],
+                                        r[ClientLib.Base.EResourceType.RepairChargeInf],
+                                        r[ClientLib.Base.EResourceType.RepairChargeVeh]);
+                                return "enemy " + pct(stats.Enemy.Overall.HealthPoints) + ", DF " + pct(stats.Enemy.Defense_Facility.HealthPoints) + ", maxRepair " + Math.round(rep);
+                            } catch (e) {
+                                return "?";
+                            }
+                        },
                         __bestEntry: function () { // best simulated layout for this base (by active preset)
                             var prios = TABS.STATS.getPreset(this.__presetNum).Prio,
                                 sorted = [],
@@ -2838,14 +2856,13 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     return d;
                                 }
                             };
-                            var c = gi("Optimizer.Concurrency", 5);
-                            if (c < 1) c = 1;
-                            if (c > 12) c = 12;
-                            this.__concurrency = c;
-                            this.__maxNeighbors = gi("Optimizer.MaxNeighbors", 20);
-                            this.__maxRounds = gi("Optimizer.MaxRounds", 40);
-                            this.__simBudget = gi("Optimizer.SimBudget", 250);
-                            this.__maxKicks = gi("Optimizer.MaxKicks", 4);
+                            // Must be sequential: each candidate physically moves the live army before
+                            // simulating, so only one can be in flight at a time.
+                            this.__concurrency = 1;
+                            this.__maxNeighbors = gi("Optimizer.MaxNeighbors", 16);
+                            this.__maxRounds = gi("Optimizer.MaxRounds", 30);
+                            this.__simBudget = gi("Optimizer.SimBudget", 150);
+                            this.__maxKicks = gi("Optimizer.MaxKicks", 3);
                             // Avoid interference: pause auto-simulate while we drive simulations ourselves.
                             try {
                                 var auto = TABS.PreArmyUnits.AutoSimulate.getInstance();
@@ -2854,7 +2871,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             } catch (e) {
                                 this.__prevAuto = null;
                             }
-                            this.__log("Hill-climb starting (" + (this.__presetNum === 7 ? "best DF=0" : "best win") + ", " + this.__concurrency + " at a time)...");
+                            this.__log("Optimizing (" + (this.__presetNum === 7 ? "best DF=0" : "best win") + "): moving units + simulating each tweak...");
                             // Step 1: ensure the starting layout is simulated, then begin tweak rounds.
                             this.__evalList([this.__clone(this.__current)], this.__startRound);
                         },
@@ -2895,19 +2912,17 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 if (cb) cb.call(this);
                             }
                         },
-                        // Simulate a candidate by sending its unit coordinates straight to the server.
-                        // No live units are moved, so it works reliably for every arrangement.
+                        // Apply a candidate to the LIVE army (actually move the units), then simulate it.
+                        // The server simulates the stored army arrangement, so the units must really be
+                        // moved for each candidate to produce a different result. Sequential by nature.
                         __launch: function (cand) {
                             var self = this,
-                                armyUnits = [],
-                                i, finished = false;
-                            for (i = 0; i < cand.length; i++)
-                                if (cand[i].enabled && cand[i].h > 0) armyUnits.push({
-                                    i: cand[i].id,
-                                    x: cand[i].x,
-                                    y: cand[i].y
-                                });
-                            if (armyUnits.length === 0) { // nothing enabled to simulate
+                                finished = false;
+                            // Move the units into the candidate arrangement.
+                            try {
+                                TABS.UTIL.Formation.Set(cand, this.__cityid, this.__ownid);
+                            } catch (e) {
+                                this.__log("Set error: " + e);
                                 this.__onSimComplete(null, null);
                                 return;
                             }
@@ -2918,28 +2933,47 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     self.__onSimComplete(null, null);
                                 }
                             }, 12000);
-                            try {
-                                ClientLib.Net.CommunicationManager.GetInstance().SendSimpleCommand("SimulateBattle", {
-                                    battleSetup: {
-                                        d: this.__cityid,
-                                        a: this.__ownid,
-                                        u: armyUnits,
-                                        s: 0
+                            // Give the move a moment to register, then read the live layout and simulate it.
+                            setTimeout(function () {
+                                if (finished) return;
+                                try {
+                                    var live = TABS.UTIL.Formation.Get(self.__cityid, self.__ownid),
+                                        armyUnits = [],
+                                        i;
+                                    for (i = 0; i < live.length; i++)
+                                        if (live[i].enabled && live[i].h > 0) armyUnits.push({
+                                            i: live[i].id,
+                                            x: live[i].x,
+                                            y: live[i].y
+                                        });
+                                    if (armyUnits.length === 0) {
+                                        clearTimeout(safety);
+                                        finished = true;
+                                        self.__onSimComplete(null, null);
+                                        return;
                                     }
-                                }, webfrontend.phe.cnc.Util.createEventDelegate(ClientLib.Net.CommandResult, this, function (a, b) {
-                                    if (finished) return;
-                                    finished = true;
+                                    ClientLib.Net.CommunicationManager.GetInstance().SendSimpleCommand("SimulateBattle", {
+                                        battleSetup: {
+                                            d: self.__cityid,
+                                            a: self.__ownid,
+                                            u: armyUnits,
+                                            s: 0
+                                        }
+                                    }, webfrontend.phe.cnc.Util.createEventDelegate(ClientLib.Net.CommandResult, self, function (a, b) {
+                                        if (finished) return;
+                                        finished = true;
+                                        clearTimeout(safety);
+                                        self.__onSimComplete(live, b);
+                                    }), null);
+                                } catch (e) {
                                     clearTimeout(safety);
-                                    self.__onSimComplete(cand, b);
-                                }), null);
-                            } catch (e) {
-                                clearTimeout(safety);
-                                if (!finished) {
-                                    finished = true;
-                                    this.__log("Sim send error: " + e);
-                                    this.__onSimComplete(null, null);
+                                    if (!finished) {
+                                        finished = true;
+                                        self.__log("Sim send error: " + e);
+                                        self.__onSimComplete(null, null);
+                                    }
                                 }
-                            }
+                            }, 150);
                         },
                         __onSimComplete: function (cand, data) {
                             try {
@@ -2992,6 +3026,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             }
                             var best = this.__bestEntry(),
                                 s = best ? this.__tuple(best.result.stats) : null;
+                            if (best) this.__log("Best so far: " + this.__describe(best.result.stats) + " (" + this.__simsUsed + " sims)");
                             if (s && (this.__lastBest === null || this.__cmp(s, this.__lastBest) < 0)) {
                                 // overall best improved (incl. a lower-repair win) -> keep going, reset kicks
                                 this.__lastBest = s;
