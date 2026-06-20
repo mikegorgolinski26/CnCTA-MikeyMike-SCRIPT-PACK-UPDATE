@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name            MM - Base Tools
-// @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Successor to MaelstromTools Dev (Mod v1.7 MCV) - slimmed down, rebuilt on the MM - Common Library.
+// @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @version         1.0.0
@@ -11,39 +11,36 @@
 
 /*
 ================================================================================
- MM - Base Tools   (successor to MaelstromTools Dev Mod v1.7 MCV)
+ MM - Base Tools
 ================================================================================
- Replaces MaelstromTools with a slimmer, MMCommon-backed toolkit. Ships four
- tabs in a single dockable window:
+ A slimmer, MMCommon-backed per-base toolkit. Ships four tabs in a single
+ dockable window (position / size / open-state / last-tab all persist):
 
    Collect & Repair   - one-click collect-all-packages, repair-all-units,
                         repair-all-buildings across every base; plus a
-                        periodic auto-collect / auto-repair timer.
-   Production         - overall production overview (per base + totals).
-                        [SCAFFOLD - port from MaelstromTools.Production]
-   Upgrade Priority   - prioritized upgrade list per resource type (the
-                        HuffyTools algorithm). [SCAFFOLD - reimagined UI]
+                        periodic auto-collect / auto-repair timer. Bottom-right
+                        notification buttons appear only when there's work to do.
+   Production         - per-base + grand-total production (Package / Continuous /
+                        Alliance Bonus / Total per h). Killed bases excluded
+                        from totals.
+   Upgrade Priority   - one unified, sortable table across all bases and resource
+                        types; per-base/resource/availability filters (all
+                        persisted); one-click upgrade and transfer-then-upgrade.
    Layout Optimizer   - one-click optimize for tiberium / crystal / power /
                         credits via building rearrangement. [PHASE A:
-                        recommend-only overlay; PHASE B: auto-apply via
-                        the sniffed CityBuilding.MoveBuilding(x,y) primitive.]
+                        recommend-only overlay; PHASE B: auto-apply via the
+                        sniffed CityBuilding move primitive. NOT YET BUILT.]
 
- Plus conditionally-visible HUD-tray buttons that pop up only when there is
- actually something to collect / repair (mirrors MaelstromTools' UX).
+ Credit: the original tool this descends from was authored by Maelstrom,
+ HuffyLuf, KRS_L, Krisan, DLwarez and NetquiK (see @author). This is a ground-up
+ MikeyMike rebuild on MMCommon - the logic was reimplemented as plain functions,
+ not the original qx class structure.
 
- Settings (all via MMCommon.settings, per player+world):
-   BaseTools.autoCollectPackages   (default true)
-   BaseTools.autoRepairUnits       (default false)
-   BaseTools.autoRepairBuildings   (default true)
-   BaseTools.AutoCollectTimerMin   (default 5)
+ Settings (all via MMCommon.settings, per player+world): BaseTools.* (auto-collect
+ / auto-repair toggles + timer, plus the Upgrade Priority filter selections).
 
  Debug: window.MMBASETOOLS_DEBUG = true  (or window.MM_DEBUG = true) for verbose
         [MM Base Tools] logs.
-
- NOT YET PORTED (will arrive in subsequent versions): Production tab,
- Upgrade Priority tab, Layout Optimizer tab. The original MaelstromTools script
- stays available alongside (background.js id 10006) until this script reaches
- feature parity, then it will be retired.
 ================================================================================
 */
 
@@ -79,7 +76,7 @@
 
         // Aggregate counts: how many bases have collectable packages / repairable units / repairable buildings.
         // The repair-availability check needs a Vis.Mode (City for buildings, ArmySetup for units), exactly
-        // like MaelstromTools' checkRepairAll() did - this is the authoritative game-side check.
+        // like the original tool's checkRepairAll() did - this is the authoritative game-side check.
         function counts() {
             var out = { collect: 0, repUnits: 0, repBld: 0 };
             try {
@@ -134,7 +131,7 @@
         }
 
         // ===== Upgrade Priority engine (faithful port of HuffyTools.UpgradePriority) ====
-        // Original lived in MaelstromTools as a per-resource-tab table. Here it's one flat
+        // The original lived as a per-resource-tab table. Here it's one flat
         // candidate list across all bases AND all resource types, so the UI can show a single
         // sortable table (the "Option B" design). The math is preserved verbatim from the
         // original getPrioList(); the only behavior FIX is the cross-base transfer-affordability
@@ -342,7 +339,7 @@
 
         // Send the UpgradeBuilding command, then confirm success by EFFECT - i.e. watch the building's
         // level actually reach the target. The command's result code is NOT a reliable success signal
-        // (the original MaelstromTools ignored it entirely), so verifying by effect is what lets us show
+        // (the original tool ignored it entirely), so verifying by effect is what lets us show
         // an honest "✓ Upgraded" vs "✗ failed".
         function sendUpgrade(cand, onDone) {
             try {
@@ -546,7 +543,7 @@
             // For each resource shows Continuous (base production), Bonus (extra from packages),
             // POI (alliance POI bonus), and Total / h. Credits has no POI bonus, so its third row
             // is Total / BaseLevel (production per base level - a quick "is this base pulling its
-            // weight" metric the original had). Ported from MaelstromTools.Production.
+            // weight" metric the original had). Ported from the original tool's production view.
             function buildProductionTab() {
                 var page = new qx.ui.tabview.Page("Production");
                 page.setLayout(new qx.ui.layout.VBox(6));
@@ -801,7 +798,7 @@
                 var keepUpgraded = MM.settings.get("BaseTools.UpgradeKeepRows", true);
                 var cbKeep = new qx.ui.form.CheckBox("Keep upgraded rows (clear on Refresh)").set({
                     value: keepUpgraded, alignY: "middle",
-                    toolTipText: "On: upgraded rows stay marked '✓ Upgraded' until you Refresh.\nOff: each row vanishes the instant its upgrade succeeds (like the old MaelstromTools behavior)."
+                    toolTipText: "On: upgraded rows stay marked '✓ Upgraded' until you Refresh.\nOff: each row vanishes the instant its upgrade succeeds (the classic behavior)."
                 });
                 ctrls.add(cbKeep);
 
@@ -1189,12 +1186,12 @@
             });
 
             // Notification action buttons: pop into the game's desktop, bottom-right, only when there is
-            // work to do (mirrors MaelstromTools' original UX exactly - same 50x40 icon-only style with
+            // work to do (mirrors the original tool's UX exactly - same 50x40 icon-only style with
             // "button-standard-nod" appearance, same faction icons, same right-anchored stacking).
             // These live OUTSIDE the shared HUD tray on purpose: the tray collects window-toggle buttons
             // (always-present, low-attention), while these are attention-grabbing action buttons.
             // Resolve a game icon path. Note: ClientLib.File.FileManager.GetFileSrcByName() was the old
-            // way (and is what MaelstromTools still ships with) but that method no longer exists in the
+            // way (and is what the original tool still ships with) but that method no longer exists in the
             // current ClientLib. The working approach (per TA_Info_Sticker, which still loads icons fine)
             // is to pass the raw "ui/..." path string directly to qx - qx's own ResourceManager resolves
             // it against the game's asset base. Faction-specific path first, fall back to ui/icons/ if the
@@ -1232,7 +1229,7 @@
                 function () { repairAll(ClientLib.Vis.Mode.ArmySetup); window.setTimeout(refresh, 500); }
             );
             // Fixed slots in the bottom-right corner so the user's eye learns where each button lives.
-            // Hidden buttons leave their slot empty (no shifting) - same as MaelstromTools' behavior.
+            // Hidden buttons leave their slot empty (no shifting) - same as the original tool's behavior.
             try {
                 var desktop = qx.core.Init.getApplication().getDesktop();
                 desktop.add(btnCollect,  { right: 5,   bottom: 140 });
