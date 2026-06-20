@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.1
+// @version         1.0.2
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_Common.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_Common.user.js
@@ -35,6 +35,31 @@
 
 (function () {
     var MMCommon_main = function () {
+        // ---------------------------------------------------------------------
+        // Console-noise guard: filter qx's unload-listener registration.
+        // ---------------------------------------------------------------------
+        // Chromium's Permissions Policy disallows 'unload' listeners on this
+        // page, but qooxdoo still tries to add them during startup and the
+        // browser logs a "Permissions policy violation: unload is not allowed"
+        // message every time. The registration is blocked anyway - the
+        // listener never would have fired - so we just no-op the call to keep
+        // the console clean. Only the exact 'unload' event is filtered;
+        // 'beforeunload' (used by the game and by our ui.Window for refresh
+        // detection) is untouched. Idempotent. Must run BEFORE qx attaches
+        // its observers; placed first in MMCommon_main and outside the
+        // if-already-installed guard so it applies even if MMCommon is somehow
+        // injected twice.
+        try {
+            if (!window.__MM_unloadGuardInstalled && typeof EventTarget !== 'undefined') {
+                var origAdd = EventTarget.prototype.addEventListener;
+                EventTarget.prototype.addEventListener = function (type, listener, options) {
+                    if (type === 'unload') return; // browser blocks this anyway; suppress the violation log
+                    return origAdd.apply(this, arguments);
+                };
+                window.__MM_unloadGuardInstalled = true;
+            }
+        } catch (e) { /* cosmetic - never break MMCommon over this */ }
+
         if (window.MMCommon) return; // already installed
 
         // Verbose logging is off by default; persist the toggle so it survives a reload. Enable with:
@@ -44,7 +69,7 @@
         }
 
         var NS = {
-            version: "1.0.1"
+            version: "1.0.2"
         };
 
         // -------------------------------------------------------------------
@@ -271,9 +296,12 @@
         // ui: consistent, movable, position-persistent MMCommon window factory.
         NS.ui = {
             num: NS.num, // convenience alias
-            // Create a window with standard chrome whose position (and optional width) persist via
-            // MMCommon.settings. opts: { caption, icon, key, layout, width, pos:[x,y], resizable,
-            //   contentPadding, restoreOpen, dock }
+            // Create a window with standard chrome whose position (and optional size) persist via
+            // MMCommon.settings. opts: { caption, icon, key, layout, width, height, pos:[x,y], resizable,
+            //   contentPadding, restoreOpen, persistSize, dock }
+            //   persistSize: true  -> remember BOTH width and height across reloads (use width/height as
+            //                         the first-run defaults). Without it, only width persists (legacy),
+            //                         and only when opts.width is set.
             //   dock: true (or a px threshold, default 24) enables edge-docking - when a drag settles
             //   within the threshold of a viewport edge the window snaps flush to it, the edge persists,
             //   and a docked window re-hugs that edge on viewport/content resize and after a refresh.
@@ -295,28 +323,59 @@
                     var lastSaved = null, pollId = null;
 
                     // Save current bounds (only when actually changed). Polled while visible so this works
-                    // even if this qooxdoo build doesn't fire a "move" event on drag.
+                    // even if this qooxdoo build doesn't fire a "move"/"resize" event on drag. When
+                    // persistSize is on we save width+height here too (the dedicated "resize" listener
+                    // isn't reliable across qooxdoo builds, but this poll is - same mechanism that makes
+                    // position persistence work).
                     function savePos() {
                         try {
                             var b = win.getBounds();
                             if (!b || b.left == null) return;
-                            var v = b.left + "," + b.top;
+                            var v = b.left + "," + b.top + (opts.persistSize ? ("," + b.width + "x" + b.height) : "");
                             if (v === lastSaved) return;
                             lastSaved = v;
                             NS.settings.set(key + ".pos", [b.left, b.top]);
-                            NS.log.log("window", key, "saved pos", [b.left, b.top]);
+                            if (opts.persistSize) {
+                                if (b.width) NS.settings.set(key + ".w", b.width);
+                                if (b.height) NS.settings.set(key + ".h", b.height);
+                            }
+                            NS.log.log("window", key, "saved", v);
                         } catch (e) {}
                     }
-                    // Apply saved position/size. Re-applied on every "appear" so it survives a browser
-                    // refresh (the game is fully loaded by show-time, so the per-player/world settings key
-                    // resolves and the window is in the DOM so moveTo sticks).
+                    // Apply saved position/size. CRITICAL: this must NOT run before the player id is loaded.
+                    // Until then the settings store resolves to the "default" bucket (not
+                    // MM.SETTINGS.<pid>.<wid>), so we'd read defaults and clobber the real saved geometry -
+                    // this is the same trap that broke open-state restore. Returns false when the player id
+                    // isn't ready yet, so restoreGeometry() can retry.
                     function applyPos() {
                         try {
+                            var pid = 0;
+                            try { pid = ClientLib.Data.MainData.GetInstance().get_Player().get_Id(); } catch (e) {}
+                            if (!pid) return false;
                             var p = NS.settings.get(key + ".pos", defPos);
                             if (p && p.length === 2) { win.moveTo(p[0], p[1]); lastSaved = p[0] + "," + p[1]; }
-                            if (opts.width) { var w = NS.settings.get(key + ".w", opts.width); if (w) win.setWidth(w); }
-                            NS.log.log("window", key, "positioned at", p);
-                        } catch (e) {}
+                            if (opts.persistSize) {
+                                var sw = NS.settings.get(key + ".w", opts.width || null);
+                                var sh = NS.settings.get(key + ".h", opts.height || null);
+                                if (sw) win.setWidth(sw);
+                                if (sh) win.setHeight(sh);
+                                // Re-apply once after layout settles - a single early set can be overridden
+                                // by the window's content size hint before it's fully realized.
+                                window.setTimeout(function () { try { if (sw) win.setWidth(sw); if (sh) win.setHeight(sh); } catch (e) {} }, 300);
+                                NS.log.log("window", key, "restored pos", p, "size", sw + "x" + sh, "(pid", pid + ")");
+                            } else {
+                                if (opts.width) { var w = NS.settings.get(key + ".w", opts.width); if (w) win.setWidth(w); }
+                                NS.log.log("window", key, "restored pos", p, "(pid", pid + ")");
+                            }
+                            return true;
+                        } catch (e) { return false; }
+                    }
+                    // Apply saved geometry as soon as the player id is ready, retrying briefly if it isn't.
+                    function restoreGeometry() {
+                        if (applyPos()) return;
+                        var t = 0, id = window.setInterval(function () {
+                            if (applyPos() || ++t > 40) window.clearInterval(id);
+                        }, 150);
                     }
 
                     // --- edge-docking (opt-in via opts.dock, but OFF unless the user enables it) ----------
@@ -419,9 +478,9 @@
                         win.addListener("resize", function () { if (win.isVisible()) reanchorDock(); });
                     }
 
-                    applyPos();
+                    restoreGeometry();
                     win.addListener("appear", function () {
-                        applyPos();
+                        restoreGeometry();
                         if (DOCK_WIRED) reanchorDock();
                         try { NS.settings.set(key + ".open", true); } catch (e) {}
                         try { if (pollId == null) pollId = window.setInterval(savePos, 1500); } catch (e) {}
@@ -444,7 +503,19 @@
                         try { NS.settings.set(key + ".open", false); } catch (e) {}
                     });
                     win.addListener("move", function () { savePos(); scheduleSnap(); }); // save + (if enabled) edge-snap after the drag settles
-                    if (opts.width) {
+                    if (opts.persistSize) {
+                        // Persist both dimensions on resize (getBounds is the real on-screen size; getWidth
+                        // can read null when the size came from a layout rather than an explicit set).
+                        win.addListener("resize", function () {
+                            try {
+                                var b = win.getBounds();
+                                if (b) {
+                                    if (b.width) NS.settings.set(key + ".w", b.width);
+                                    if (b.height) NS.settings.set(key + ".h", b.height);
+                                }
+                            } catch (e) {}
+                        });
+                    } else if (opts.width) {
                         win.addListener("resize", function () { try { NS.settings.set(key + ".w", win.getWidth()); } catch (e) {} });
                     }
 
