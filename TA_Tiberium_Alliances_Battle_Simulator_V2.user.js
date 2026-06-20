@@ -57,8 +57,11 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
   This is sequential (one live army). Already-simulated layouts persist in the cache PER
   BASE, so they count as "tried": clicking the button again skips them and explores new
   permutations (avoiding ones already tried) until the base changes (cache invalidates).
+  Row guardrail: during normal climbing each unit may only move within
+  Optimizer.MaxRowDelta rows (default 1) of its STARTING row; kicks may exceed it
+  but a result is only kept if it is a net improvement.
   Settings: Optimizer.MaxNeighbors per round (16), Optimizer.MaxRounds (30),
-  Optimizer.SimBudget total sims (150), Optimizer.MaxKicks (3).
+  Optimizer.SimBudget total sims (150), Optimizer.MaxKicks (3), Optimizer.MaxRowDelta (1).
 - To show the BestWin (#6) and BestDF0 (#7) columns, widen the Stats window (columns 7-8).
 ----------------
 */
@@ -2616,6 +2619,8 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         __maxKicks: 3, // stop after this many fruitless kicks in a row
                         __onDrain: null, // callback when the current eval batch finishes
                         __batch: null, // last evaluated batch (for diagnostics)
+                        __startRows: null, // unit id -> starting row (for the row guardrail)
+                        __maxRowDelta: 1, // climb guardrail: max rows a unit may move from its start
                         isRunning: function () {
                             return this.__running === true;
                         },
@@ -2662,11 +2667,33 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                         x: x,
                                         y: y
                                     });
+                            // center rows (per unit) so the guardrail never pushes an already-out-of-bounds
+                            // unit (e.g. moved by a beneficial kick) even further from its start.
+                            var centerRows = {};
+                            for (i = 0; i < base.length; i++)
+                                if (base[i].h > 0) centerRows[base[i].id] = base[i].y;
+                            var withinGuardrail = function (f) {
+                                var sr = self.__startRows,
+                                    md = self.__maxRowDelta,
+                                    j, sy, dev, cdev;
+                                if (!sr) return true;
+                                for (j = 0; j < f.length; j++) {
+                                    if (!(f[j].enabled && f[j].h > 0)) continue;
+                                    sy = sr[f[j].id];
+                                    if (sy === undefined) continue;
+                                    dev = Math.abs(f[j].y - sy);
+                                    cdev = Math.abs((centerRows[f[j].id] !== undefined ? centerRows[f[j].id] : sy) - sy);
+                                    // allowed if within the limit, or not further out than it already is
+                                    if (dev > md && dev > cdev) return false;
+                                }
+                                return true;
+                            };
                             var out = [],
                                 seen = {},
                                 cap = this.__maxNeighbors,
                                 push = function (f) {
                                     if (out.length >= cap) return;
+                                    if (!withinGuardrail(f)) return; // row guardrail (climb stays near start)
                                     var key = cache.calcUnitsHash(self.__clone(f), self.__ownid);
                                     // skip the center, dupes in this batch, and any layout already simulated
                                     // (a valid cache entry) - this is what persists "tried" across clicks.
@@ -2843,6 +2870,10 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.__orig = this.__clone(live);
                             this.__current = this.__clone(live);
                             this.__currentKey = TABS.CACHE.getInstance().calcUnitsHash(this.__clone(live), this.__ownid);
+                            // record each unit's starting row for the climb guardrail
+                            this.__startRows = {};
+                            for (var si2 = 0; si2 < live.length; si2++)
+                                if (live[si2].h > 0) this.__startRows[live[si2].id] = live[si2].y;
                             this.__lastBest = null;
                             this.__round = 0;
                             this.__simsUsed = 0;
@@ -2864,6 +2895,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.__maxRounds = gi("Optimizer.MaxRounds", 30);
                             this.__simBudget = gi("Optimizer.SimBudget", 150);
                             this.__maxKicks = gi("Optimizer.MaxKicks", 3);
+                            this.__maxRowDelta = gi("Optimizer.MaxRowDelta", 1);
                             // Avoid interference: pause auto-simulate while we drive simulations ourselves.
                             try {
                                 var auto = TABS.PreArmyUnits.AutoSimulate.getInstance();
@@ -2872,7 +2904,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             } catch (e) {
                                 this.__prevAuto = null;
                             }
-                            this.__log("Optimizing (" + (this.__presetNum === 7 ? "best DF=0" : "best win") + "): moving units + simulating each tweak...");
+                            this.__log("Optimizing (" + (this.__presetNum === 7 ? "best DF=0" : "best win") + "): climb within " + String.fromCharCode(177) + this.__maxRowDelta + " row(s) of start, kicks may go further if it helps...");
                             // Step 1: ensure the starting layout is simulated, then begin tweak rounds.
                             this.__evalList([this.__clone(this.__current)], this.__startRound);
                         },
