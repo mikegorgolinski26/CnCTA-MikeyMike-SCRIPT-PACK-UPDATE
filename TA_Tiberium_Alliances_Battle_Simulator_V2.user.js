@@ -39,9 +39,10 @@ codes by NetquiK
 codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 ----------------
 - Two auto-optimize sim modes, each with its own button (floating toolbar) + column:
-  * "Best Win" (preset #6 "BestWin"): only layouts that fully destroy the enemy
-    (total health 0), then the LOWEST max repair time (max of inf/veh/air repair
-    charge). If none can win it reports that and keeps your formation.
+  * "Best Win" (preset #6 "BestWin"): PRIMARY = fully destroy the enemy (total
+    health 0); SECONDARY = lowest max repair time (max of inf/veh/air repair
+    charge). After a win is found the search KEEPS GOING to lower repair further,
+    and only stops once it can no longer improve. If none can win it reports that.
     Console: window.MikeyMike_OptimizeRepair()
   * "Best DF 0" (preset #7 "BestDF0"): targets the enemy DEFENSE FACILITY (DF);
     selects the layout that gets DF health as close to 0 as possible, then the
@@ -2606,12 +2607,12 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         __currentKey: null, // its cache hash
                         __lastBest: null, // best score tuple seen so far this run (lower = better)
                         __round: 0,
-                        __maxRounds: 16, // max rounds (climb + kick) per click
+                        __maxRounds: 40, // hard cap on rounds (climb + kick) per click
                         __maxNeighbors: 20, // tweaks evaluated per round
-                        __simBudget: 150, // total simulations cap per click
+                        __simBudget: 250, // hard cap on simulations per click (safety net)
                         __simsUsed: 0,
-                        __kicksUsed: 0,
-                        __maxKicks: 3, // random restarts per click to escape a local optimum
+                        __kicksUsed: 0, // consecutive non-improving kicks (reset on any improvement)
+                        __maxKicks: 4, // stop after this many fruitless kicks in a row
                         __onDrain: null, // callback when the current eval batch finishes
                         isRunning: function () {
                             return this.__running === true;
@@ -2842,9 +2843,9 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             if (c > 12) c = 12;
                             this.__concurrency = c;
                             this.__maxNeighbors = gi("Optimizer.MaxNeighbors", 20);
-                            this.__maxRounds = gi("Optimizer.MaxRounds", 16);
-                            this.__simBudget = gi("Optimizer.SimBudget", 150);
-                            this.__maxKicks = gi("Optimizer.MaxKicks", 3);
+                            this.__maxRounds = gi("Optimizer.MaxRounds", 40);
+                            this.__simBudget = gi("Optimizer.SimBudget", 250);
+                            this.__maxKicks = gi("Optimizer.MaxKicks", 4);
                             // Avoid interference: pause auto-simulate while we drive simulations ourselves.
                             try {
                                 var auto = TABS.PreArmyUnits.AutoSimulate.getInstance();
@@ -2992,8 +2993,9 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             var best = this.__bestEntry(),
                                 s = best ? this.__tuple(best.result.stats) : null;
                             if (s && (this.__lastBest === null || this.__cmp(s, this.__lastBest) < 0)) {
-                                // overall best improved -> keep climbing from it
+                                // overall best improved (incl. a lower-repair win) -> keep going, reset kicks
                                 this.__lastBest = s;
+                                this.__kicksUsed = 0;
                                 this.__startRound();
                             } else {
                                 // no improvement this round -> random kick to a new, untried region
