@@ -47,10 +47,13 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
     selects the layout that gets DF health as close to 0 as possible, then the
     LOWEST max repair time. Reports the lowest repair for DF=0.
     Console: window.MikeyMike_OptimizeDF0()
-- New TABS.OPTIMIZER engine: automatically tries many battle layouts derived from the
-  current army (mirrors, row swaps + mirrored variants, one-space shifts), simulating
-  each directly via SimulateBattle in a concurrent worker pool (Optimizer.Concurrency,
-  default 5; Optimizer.MaxCandidates, default 48), then applies that mode's best layout.
+- New TABS.OPTIMIZER engine: HILL CLIMB search. Starts from the layout at button-click,
+  evaluates a batch of slight tweaks each round (move one unit to a nearby empty cell, or
+  swap two units), adopts the best improving tweak as the new center, and repeats until no
+  tweak improves (local optimum) or a cap is hit. Each tweak is simulated directly via
+  SimulateBattle in a concurrent worker pool - no live units are moved.
+  Settings: Optimizer.Concurrency (5), Optimizer.MaxNeighbors per round (24),
+  Optimizer.MaxRounds (20), Optimizer.SimBudget total sims (200).
 - To show the BestWin (#6) and BestDF0 (#7) columns, widen the Stats window (columns 7-8).
 ----------------
 */
@@ -2594,8 +2597,18 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         __safetyT: null,
                         __inflight: 0, // simulations currently in flight (worker pool)
                         __concurrency: 5, // how many simulations to run at once
-                        __maxCandidates: 48, // hard cap on simulations per run
                         __presetNum: 6, // 6 = Best Win, 7 = Best DF 0
+                        // hill-climb state
+                        __current: null, // best formation found so far (search center)
+                        __currentKey: null, // its cache hash
+                        __currentScore: null, // its score tuple (lower = better)
+                        __round: 0,
+                        __maxRounds: 20, // max hill-climb rounds
+                        __maxNeighbors: 24, // tweaks evaluated per round
+                        __simBudget: 200, // total simulations cap per run
+                        __simsUsed: 0,
+                        __runKeys: null, // layouts already considered this run
+                        __onDrain: null, // callback when the current eval batch finishes
                         isRunning: function () {
                             return this.__running === true;
                         },
@@ -2617,58 +2630,110 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             }
                             return out;
                         },
-                        __buildCandidates: function (live) {
-                            var F = TABS.UTIL.Formation,
+                        // Generate "slight adjustments" of a formation: move one enabled unit to a nearby
+                        // empty cell, or swap two enabled units. Skips layouts already tried this run.
+                        __genNeighbors: function (base) {
+                            var self = this,
                                 cache = TABS.CACHE.getInstance(),
-                                self = this,
-                                out = [],
+                                X = 4,
+                                Y = 4,
+                                i, x, y;
+                            try {
+                                X = ClientLib.Base.Util.get_ArmyMaxSlotCountX();
+                                Y = ClientLib.Base.Util.get_ArmyMaxSlotCountY();
+                            } catch (e) {}
+                            var units = []; // indices of enabled units
+                            for (i = 0; i < base.length; i++)
+                                if (base[i].enabled && base[i].h > 0) units.push(i);
+                            var occ = {}; // cells occupied by any standing unit
+                            for (i = 0; i < base.length; i++)
+                                if (base[i].h > 0) occ[base[i].x + "," + base[i].y] = true;
+                            var empties = [];
+                            for (x = 0; x < X; x++)
+                                for (y = 0; y < Y; y++)
+                                    if (!occ[x + "," + y]) empties.push({
+                                        x: x,
+                                        y: y
+                                    });
+                            var out = [],
                                 seen = {},
-                                add = function (f) {
-                                    if (!f) return;
-                                    // calcUnitsHash sorts in place, so hash a throwaway clone
+                                cap = this.__maxNeighbors,
+                                push = function (f) {
+                                    if (out.length >= cap) return;
                                     var key = cache.calcUnitsHash(self.__clone(f), self.__ownid);
-                                    if (key && !seen[key]) {
+                                    if (key && key !== self.__currentKey && !seen[key] && !self.__runKeys[key]) {
                                         seen[key] = true;
                                         out.push(f);
                                     }
-                                },
-                                cl = function () {
-                                    return self.__clone(live);
-                                },
-                                rows = 1,
-                                cap = this.__maxCandidates,
-                                a, b;
-                            try {
-                                rows = ClientLib.Base.Util.get_ArmyMaxSlotCountY();
-                            } catch (e) {
-                                rows = 1;
-                            }
-                            try {
-                                cap = TABS.SETTINGS.get("Optimizer.MaxCandidates", this.__maxCandidates);
-                            } catch (e) {}
-                            // 1) current layout
-                            add(cl());
-                            // 2) mirrors
-                            add(F.Mirror(cl(), "h", null));
-                            add(F.Mirror(cl(), "v", null));
-                            add(F.Mirror(F.Mirror(cl(), "h", null), "v", null));
-                            // 3) row swaps + their mirrored variants (front/back order drives repair a lot)
-                            for (a = 1; a <= rows; a++)
-                                for (b = a + 1; b <= rows; b++) {
-                                    add(F.SwapLines(cl(), a, b));
-                                    add(F.Mirror(F.SwapLines(cl(), a, b), "h", null));
-                                    add(F.Mirror(F.SwapLines(cl(), a, b), "v", null));
+                                };
+                            var moves = [],
+                                swaps = [],
+                                u, c, f, ia, ib, tx, ty, a, b;
+                            // moves: each enabled unit -> its nearest empty cells
+                            for (u = 0; u < units.length; u++) {
+                                ia = units[u];
+                                var ux = base[ia].x,
+                                    uy = base[ia].y,
+                                    cells = empties.slice().sort(function (p, q) {
+                                        return (Math.abs(p.x - ux) + Math.abs(p.y - uy)) - (Math.abs(q.x - ux) + Math.abs(q.y - uy));
+                                    }),
+                                    take = Math.min(cells.length, 3);
+                                for (c = 0; c < take; c++) {
+                                    f = self.__clone(base);
+                                    f[ia].x = cells[c].x;
+                                    f[ia].y = cells[c].y;
+                                    moves.push(f);
                                 }
-                            // 4) one-space shifts in each direction
-                            add(F.Shift(cl(), "u", null));
-                            add(F.Shift(cl(), "d", null));
-                            add(F.Shift(cl(), "l", null));
-                            add(F.Shift(cl(), "r", null));
-                            // 5) a couple of shift + mirror combos
-                            add(F.Mirror(F.Shift(cl(), "u", null), "h", null));
-                            add(F.Mirror(F.Shift(cl(), "d", null), "h", null));
-                            if (out.length > cap) out = out.slice(0, cap);
+                            }
+                            // swaps: exchange positions of two enabled units
+                            for (a = 0; a < units.length; a++)
+                                for (b = a + 1; b < units.length; b++) {
+                                    ia = units[a];
+                                    ib = units[b];
+                                    f = self.__clone(base);
+                                    tx = f[ia].x;
+                                    ty = f[ia].y;
+                                    f[ia].x = f[ib].x;
+                                    f[ia].y = f[ib].y;
+                                    f[ib].x = tx;
+                                    f[ib].y = ty;
+                                    swaps.push(f);
+                                }
+                            // interleave so a capped round sees both moves and swaps
+                            var si = 0,
+                                mi = 0;
+                            while ((si < swaps.length || mi < moves.length) && out.length < cap) {
+                                if (si < swaps.length) push(swaps[si++]);
+                                if (mi < moves.length) push(moves[mi++]);
+                            }
                             return out;
+                        },
+                        __tuple: function (stats) { // score tuple for the active preset; lower = better
+                            var prios = TABS.STATS.getPreset(this.__presetNum).Prio,
+                                t = [],
+                                i;
+                            for (i = 0; i < prios.length; i++) t.push(TABS.STATS.selectPrio(stats, prios[i]));
+                            return t;
+                        },
+                        __cmp: function (a, b) { // lexicographic compare of score tuples
+                            if (!a) return 1;
+                            if (!b) return -1;
+                            for (var i = 0; i < a.length; i++)
+                                if (a[i] !== b[i]) return a[i] - b[i];
+                            return 0;
+                        },
+                        __bestEntry: function () { // best simulated layout this run (by active preset)
+                            var prios = TABS.STATS.getPreset(this.__presetNum).Prio,
+                                sorted = [],
+                                i;
+                            try {
+                                sorted = TABS.CACHE.getInstance().getPrio(prios, this.__cityid, this.__ownid);
+                            } catch (e) {
+                                sorted = [];
+                            }
+                            for (i = 0; i < sorted.length; i++)
+                                if (sorted[i] && sorted[i].result && sorted[i].result.valid && sorted[i].result.formation && this.__runKeys[sorted[i].key]) return sorted[i];
+                            return null;
                         },
                         Run: function (presetNum) {
                             if (this.__running) {
@@ -2692,10 +2757,29 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.__ownid = ownCity.get_Id();
                             this.__cityid = tgtCity.get_Id();
                             this.__orig = this.__clone(live);
-                            this.__queue = this.__buildCandidates(live);
-                            this.__total = this.__queue.length;
-                            this.__done = 0;
+                            this.__current = this.__clone(live);
+                            this.__currentKey = TABS.CACHE.getInstance().calcUnitsHash(this.__clone(live), this.__ownid);
+                            this.__currentScore = null;
+                            this.__round = 0;
+                            this.__simsUsed = 0;
+                            this.__runKeys = {};
+                            this.__inflight = 0;
                             this.__running = true;
+                            // settings (with sane defaults / clamps)
+                            var gi = function (k, d) {
+                                try {
+                                    return TABS.SETTINGS.get(k, d);
+                                } catch (e) {
+                                    return d;
+                                }
+                            };
+                            var c = gi("Optimizer.Concurrency", 5);
+                            if (c < 1) c = 1;
+                            if (c > 12) c = 12;
+                            this.__concurrency = c;
+                            this.__maxNeighbors = gi("Optimizer.MaxNeighbors", 24);
+                            this.__maxRounds = gi("Optimizer.MaxRounds", 20);
+                            this.__simBudget = gi("Optimizer.SimBudget", 200);
                             // Avoid interference: pause auto-simulate while we drive simulations ourselves.
                             try {
                                 var auto = TABS.PreArmyUnits.AutoSimulate.getInstance();
@@ -2704,41 +2788,51 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             } catch (e) {
                                 this.__prevAuto = null;
                             }
-                            this.__inflight = 0;
-                            var c = 5;
-                            try {
-                                c = TABS.SETTINGS.get("Optimizer.Concurrency", 5);
-                            } catch (e) {}
-                            if (c < 1) c = 1;
-                            if (c > 12) c = 12;
-                            this.__concurrency = c;
-                            this.__log("Optimizing: testing " + this.__total + " layouts (" + (this.__presetNum === 7 ? "best DF=0" : "best win") + ", " + this.__concurrency + " at a time)...");
-                            this.__pump();
+                            this.__log("Hill-climb starting (" + (this.__presetNum === 7 ? "best DF=0" : "best win") + ", " + this.__concurrency + " at a time)...");
+                            // Step 1: ensure the starting layout is simulated, then begin tweak rounds.
+                            this.__evalList([this.__clone(this.__current)], this.__startRound);
                         },
                         Stop: function () {
                             if (!this.__running) return;
                             this.__log("Optimizer stopped by user.");
                             this.__finish(true);
                         },
+                        // Evaluate a batch of candidate layouts concurrently, then call onDrain().
+                        __evalList: function (list, onDrain) {
+                            this.__queue = list || [];
+                            this.__onDrain = onDrain || null;
+                            this.__pumpRound();
+                        },
                         // Worker pool: keep up to __concurrency simulations in flight at once.
-                        __pump: function () {
+                        __pumpRound: function () {
                             if (!this.__running) return;
                             while (this.__inflight < this.__concurrency && this.__queue.length > 0) {
+                                if (this.__simsUsed >= this.__simBudget) { // budget reached: stop launching
+                                    this.__queue = [];
+                                    break;
+                                }
                                 var cand = this.__queue.shift(),
-                                    skip = false;
+                                    key = null;
+                                try {
+                                    key = TABS.CACHE.getInstance().calcUnitsHash(this.__clone(cand), this.__ownid);
+                                } catch (e) {}
+                                if (key) this.__runKeys[key] = true; // mark as considered this run
+                                // skip the server round-trip if this layout is already simulated & valid
+                                var skip = false;
                                 try {
                                     var cached = TABS.CACHE.getInstance().check(this.__clone(cand), this.__cityid, this.__ownid);
-                                    if (cached && cached.result !== null) skip = true; // already simulated
+                                    if (cached && cached.result !== null) skip = true;
                                 } catch (e) {}
-                                if (skip) {
-                                    this.__done++; // counts toward progress, uses no slot
-                                    continue;
-                                }
+                                if (skip) continue;
                                 this.__inflight++;
+                                this.__simsUsed++;
                                 this.__launch(cand);
                             }
-                            this.__log("Tested " + this.__done + "/" + this.__total + " (" + this.__inflight + " running)...");
-                            if (this.__queue.length === 0 && this.__inflight === 0) this.__finish(false);
+                            if (this.__queue.length === 0 && this.__inflight === 0) {
+                                var cb = this.__onDrain;
+                                this.__onDrain = null;
+                                if (cb) cb.call(this);
+                            }
                         },
                         // Simulate a candidate by sending its unit coordinates straight to the server.
                         // No live units are moved, so it works reliably for every arrangement.
@@ -2753,14 +2847,14 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     y: cand[i].y
                                 });
                             if (armyUnits.length === 0) { // nothing enabled to simulate
-                                this.__complete(null, null);
+                                this.__onSimComplete(null, null);
                                 return;
                             }
                             // Per-request safety net so a lost response can't stall the pool.
                             var safety = setTimeout(function () {
                                 if (!finished) {
                                     finished = true;
-                                    self.__complete(null, null);
+                                    self.__onSimComplete(null, null);
                                 }
                             }, 12000);
                             try {
@@ -2775,18 +2869,18 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     if (finished) return;
                                     finished = true;
                                     clearTimeout(safety);
-                                    self.__complete(cand, b);
+                                    self.__onSimComplete(cand, b);
                                 }), null);
                             } catch (e) {
                                 clearTimeout(safety);
                                 if (!finished) {
                                     finished = true;
                                     this.__log("Sim send error: " + e);
-                                    this.__complete(null, null);
+                                    this.__onSimComplete(null, null);
                                 }
                             }
                         },
-                        __complete: function (cand, data) {
+                        __onSimComplete: function (cand, data) {
                             try {
                                 if (cand && data && data.d) {
                                     var merged = TABS.UTIL.Formation.Merge(this.__clone(cand), data.d.a),
@@ -2804,8 +2898,43 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 this.__log("Sim result error: " + e);
                             }
                             if (this.__inflight > 0) this.__inflight--;
-                            this.__done++;
-                            this.__pump(); // launch the next queued candidate / finish when drained
+                            this.__pumpRound(); // launch next / fire onDrain when this batch is done
+                        },
+                        // Adopt the best layout so far as the search center, then evaluate its neighbors.
+                        __startRound: function () {
+                            if (!this.__running) return;
+                            var best = this.__bestEntry();
+                            if (best) {
+                                this.__currentScore = this.__tuple(best.result.stats);
+                                this.__current = best.result.formation;
+                                this.__currentKey = best.key;
+                            }
+                            if (this.__round >= this.__maxRounds || this.__simsUsed >= this.__simBudget) {
+                                this.__finish(false);
+                                return;
+                            }
+                            var neighbors = this.__genNeighbors(this.__current);
+                            if (!neighbors.length) { // local optimum / nothing new to try
+                                this.__finish(false);
+                                return;
+                            }
+                            this.__round++;
+                            this.__log("Round " + this.__round + ": trying " + neighbors.length + " tweaks (" + this.__simsUsed + " sims used)...");
+                            this.__evalList(neighbors, this.__afterRound);
+                        },
+                        __afterRound: function () {
+                            if (!this.__running) return;
+                            var best = this.__bestEntry(),
+                                newScore = best ? this.__tuple(best.result.stats) : null;
+                            if (newScore && this.__cmp(newScore, this.__currentScore) < 0) {
+                                // a tweak improved things -> move the search center and keep climbing
+                                this.__current = best.result.formation;
+                                this.__currentKey = best.key;
+                                this.__currentScore = newScore;
+                                this.__startRound();
+                            } else {
+                                this.__finish(false); // no improvement -> stop at this local optimum
+                            }
                         },
                         __finish: function (stopped) {
                             this.__running = false;
