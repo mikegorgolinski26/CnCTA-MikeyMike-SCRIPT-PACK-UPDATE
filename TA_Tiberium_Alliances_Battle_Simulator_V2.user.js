@@ -2592,8 +2592,10 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         __simReturned: false,
                         __stepT: null,
                         __safetyT: null,
-                        __maxCandidates: 24, // hard cap on simulations per run (server-friendly)
-                        __presetNum: 6, // the "Lowest Repair (win required)" preset
+                        __inflight: 0, // simulations currently in flight (worker pool)
+                        __concurrency: 5, // how many simulations to run at once
+                        __maxCandidates: 48, // hard cap on simulations per run
+                        __presetNum: 6, // 6 = Best Win, 7 = Best Non Win
                         isRunning: function () {
                             return this.__running === true;
                         },
@@ -2630,28 +2632,42 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                         out.push(f);
                                     }
                                 },
+                                cl = function () {
+                                    return self.__clone(live);
+                                },
                                 rows = 1,
+                                cap = this.__maxCandidates,
                                 a, b;
                             try {
                                 rows = ClientLib.Base.Util.get_ArmyMaxSlotCountY();
                             } catch (e) {
                                 rows = 1;
                             }
+                            try {
+                                cap = TABS.SETTINGS.get("Optimizer.MaxCandidates", this.__maxCandidates);
+                            } catch (e) {}
                             // 1) current layout
-                            add(this.__clone(live));
+                            add(cl());
                             // 2) mirrors
-                            add(F.Mirror(this.__clone(live), "h", null));
-                            add(F.Mirror(this.__clone(live), "v", null));
-                            add(F.Mirror(F.Mirror(this.__clone(live), "h", null), "v", null));
-                            // 3) row swaps (front/back ordering matters a lot for repair)
+                            add(F.Mirror(cl(), "h", null));
+                            add(F.Mirror(cl(), "v", null));
+                            add(F.Mirror(F.Mirror(cl(), "h", null), "v", null));
+                            // 3) row swaps + their mirrored variants (front/back order drives repair a lot)
                             for (a = 1; a <= rows; a++)
-                                for (b = a + 1; b <= rows; b++)
-                                    add(F.SwapLines(this.__clone(live), a, b));
-                            // 4) horizontally-mirrored row swaps for a little more diversity
-                            for (a = 1; a <= rows; a++)
-                                for (b = a + 1; b <= rows; b++)
-                                    add(F.Mirror(F.SwapLines(this.__clone(live), a, b), "h", null));
-                            if (out.length > this.__maxCandidates) out = out.slice(0, this.__maxCandidates);
+                                for (b = a + 1; b <= rows; b++) {
+                                    add(F.SwapLines(cl(), a, b));
+                                    add(F.Mirror(F.SwapLines(cl(), a, b), "h", null));
+                                    add(F.Mirror(F.SwapLines(cl(), a, b), "v", null));
+                                }
+                            // 4) one-space shifts in each direction
+                            add(F.Shift(cl(), "u", null));
+                            add(F.Shift(cl(), "d", null));
+                            add(F.Shift(cl(), "l", null));
+                            add(F.Shift(cl(), "r", null));
+                            // 5) a couple of shift + mirror combos
+                            add(F.Mirror(F.Shift(cl(), "u", null), "h", null));
+                            add(F.Mirror(F.Shift(cl(), "d", null), "h", null));
+                            if (out.length > cap) out = out.slice(0, cap);
                             return out;
                         },
                         Run: function (presetNum) {
@@ -2688,41 +2704,48 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             } catch (e) {
                                 this.__prevAuto = null;
                             }
-                            this.__log("Optimizing: testing " + this.__total + " layouts (" + (this.__presetNum === 7 ? "best non win" : "best win") + ")...");
-                            this.__next();
+                            this.__inflight = 0;
+                            var c = 5;
+                            try {
+                                c = TABS.SETTINGS.get("Optimizer.Concurrency", 5);
+                            } catch (e) {}
+                            if (c < 1) c = 1;
+                            if (c > 12) c = 12;
+                            this.__concurrency = c;
+                            this.__log("Optimizing: testing " + this.__total + " layouts (" + (this.__presetNum === 7 ? "best non win" : "best win") + ", " + this.__concurrency + " at a time)...");
+                            this.__pump();
                         },
                         Stop: function () {
                             if (!this.__running) return;
                             this.__log("Optimizer stopped by user.");
                             this.__finish(true);
                         },
-                        __next: function () {
-                            clearTimeout(this.__stepT);
+                        // Worker pool: keep up to __concurrency simulations in flight at once.
+                        __pump: function () {
                             if (!this.__running) return;
-                            if (this.__queue.length === 0) {
-                                this.__finish(false);
-                                return;
-                            }
-                            var cand = this.__queue.shift();
-                            this.__done++;
-                            // If this exact layout is already cached & valid, skip the server round-trip;
-                            // it is still considered by the final selection (which reads the whole cache).
-                            try {
-                                var cached = TABS.CACHE.getInstance().check(this.__clone(cand), this.__cityid, this.__ownid);
-                                if (cached && cached.result !== null) {
-                                    this.__log("Already cached " + this.__done + "/" + this.__total + " - skipping");
-                                    this.__deferNext();
-                                    return;
+                            while (this.__inflight < this.__concurrency && this.__queue.length > 0) {
+                                var cand = this.__queue.shift(),
+                                    skip = false;
+                                try {
+                                    var cached = TABS.CACHE.getInstance().check(this.__clone(cand), this.__cityid, this.__ownid);
+                                    if (cached && cached.result !== null) skip = true; // already simulated
+                                } catch (e) {}
+                                if (skip) {
+                                    this.__done++; // counts toward progress, uses no slot
+                                    continue;
                                 }
-                            } catch (e) {}
-                            this.__simulateCandidate(cand);
+                                this.__inflight++;
+                                this.__launch(cand);
+                            }
+                            this.__log("Tested " + this.__done + "/" + this.__total + " (" + this.__inflight + " running)...");
+                            if (this.__queue.length === 0 && this.__inflight === 0) this.__finish(false);
                         },
                         // Simulate a candidate by sending its unit coordinates straight to the server.
-                        // This does NOT move any live units, so it works reliably for every arrangement.
-                        __simulateCandidate: function (cand) {
+                        // No live units are moved, so it works reliably for every arrangement.
+                        __launch: function (cand) {
                             var self = this,
                                 armyUnits = [],
-                                i;
+                                i, finished = false;
                             for (i = 0; i < cand.length; i++)
                                 if (cand[i].enabled && cand[i].h > 0) armyUnits.push({
                                     i: cand[i].id,
@@ -2730,15 +2753,16 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     y: cand[i].y
                                 });
                             if (armyUnits.length === 0) { // nothing enabled to simulate
-                                this.__deferNext();
+                                this.__complete(null, null);
                                 return;
                             }
-                            this.__simReturned = false;
-                            // Safety net: if no response arrives, move on so we never hang.
-                            clearTimeout(this.__safetyT);
-                            this.__safetyT = setTimeout(function () {
-                                if (self.__running && !self.__simReturned) self.__deferNext();
-                            }, 9000);
+                            // Per-request safety net so a lost response can't stall the pool.
+                            var safety = setTimeout(function () {
+                                if (!finished) {
+                                    finished = true;
+                                    self.__complete(null, null);
+                                }
+                            }, 12000);
                             try {
                                 ClientLib.Net.CommunicationManager.GetInstance().SendSimpleCommand("SimulateBattle", {
                                     battleSetup: {
@@ -2748,18 +2772,23 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                         s: 0
                                     }
                                 }, webfrontend.phe.cnc.Util.createEventDelegate(ClientLib.Net.CommandResult, this, function (a, b) {
-                                    self.__onCandidateResult(cand, b);
+                                    if (finished) return;
+                                    finished = true;
+                                    clearTimeout(safety);
+                                    self.__complete(cand, b);
                                 }), null);
                             } catch (e) {
-                                this.__log("Sim send error: " + e);
-                                this.__deferNext();
+                                clearTimeout(safety);
+                                if (!finished) {
+                                    finished = true;
+                                    this.__log("Sim send error: " + e);
+                                    this.__complete(null, null);
+                                }
                             }
                         },
-                        __onCandidateResult: function (cand, data) {
-                            this.__simReturned = true;
-                            clearTimeout(this.__safetyT);
+                        __complete: function (cand, data) {
                             try {
-                                if (data && data.d) {
+                                if (cand && data && data.d) {
                                     var merged = TABS.UTIL.Formation.Merge(this.__clone(cand), data.d.a),
                                         cache = TABS.CACHE.getInstance().check(merged, data.d.di, data.d.ai);
                                     if (cache.result === null) {
@@ -2774,20 +2803,9 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             } catch (e) {
                                 this.__log("Sim result error: " + e);
                             }
-                            this.__log("Tested " + this.__done + "/" + this.__total + " layouts...");
-                            this.__deferNext();
-                        },
-                        __deferNext: function () {
-                            var self = this,
-                                delay = 450;
-                            try {
-                                delay = TABS.SETTINGS.get("Optimizer.SimDelayMs", 450);
-                            } catch (e) {}
-                            clearTimeout(this.__stepT);
-                            // small gap between simulations to stay gentle on the server
-                            this.__stepT = setTimeout(function () {
-                                self.__next();
-                            }, delay);
+                            if (this.__inflight > 0) this.__inflight--;
+                            this.__done++;
+                            this.__pump(); // launch the next queued candidate / finish when drained
                         },
                         __finish: function (stopped) {
                             this.__running = false;
