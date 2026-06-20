@@ -47,13 +47,16 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
     selects the layout that gets DF health as close to 0 as possible, then the
     LOWEST max repair time. Reports the lowest repair for DF=0.
     Console: window.MikeyMike_OptimizeDF0()
-- New TABS.OPTIMIZER engine: HILL CLIMB search. Starts from the layout at button-click,
-  evaluates a batch of slight tweaks each round (move one unit to a nearby empty cell, or
-  swap two units), adopts the best improving tweak as the new center, and repeats until no
-  tweak improves (local optimum) or a cap is hit. Each tweak is simulated directly via
-  SimulateBattle in a concurrent worker pool - no live units are moved.
-  Settings: Optimizer.Concurrency (5), Optimizer.MaxNeighbors per round (24),
-  Optimizer.MaxRounds (20), Optimizer.SimBudget total sims (200).
+- New TABS.OPTIMIZER engine: ITERATED LOCAL SEARCH (hill climb + kicks). Starts from the
+  layout at button-click, evaluates slight tweaks each round (move one unit to a nearby
+  empty cell, or swap two units), adopts the best improving tweak, and when a local
+  optimum is reached does random "kicks" to jump to a new region and climb again.
+  Each tweak is simulated directly via SimulateBattle in a concurrent worker pool - no
+  live units are moved. Already-simulated layouts persist in the cache PER BASE, so they
+  count as "tried": clicking the button again skips them and explores new permutations
+  (avoiding ones already tried) until the base changes (cache invalidates).
+  Settings: Optimizer.Concurrency (5), Optimizer.MaxNeighbors per round (20),
+  Optimizer.MaxRounds (16), Optimizer.SimBudget total sims (150), Optimizer.MaxKicks (3).
 - To show the BestWin (#6) and BestDF0 (#7) columns, widen the Stats window (columns 7-8).
 ----------------
 */
@@ -2598,16 +2601,17 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         __inflight: 0, // simulations currently in flight (worker pool)
                         __concurrency: 5, // how many simulations to run at once
                         __presetNum: 6, // 6 = Best Win, 7 = Best DF 0
-                        // hill-climb state
-                        __current: null, // best formation found so far (search center)
+                        // hill-climb / iterated-local-search state
+                        __current: null, // current search center (formation)
                         __currentKey: null, // its cache hash
-                        __currentScore: null, // its score tuple (lower = better)
+                        __lastBest: null, // best score tuple seen so far this run (lower = better)
                         __round: 0,
-                        __maxRounds: 20, // max hill-climb rounds
-                        __maxNeighbors: 24, // tweaks evaluated per round
-                        __simBudget: 200, // total simulations cap per run
+                        __maxRounds: 16, // max rounds (climb + kick) per click
+                        __maxNeighbors: 20, // tweaks evaluated per round
+                        __simBudget: 150, // total simulations cap per click
                         __simsUsed: 0,
-                        __runKeys: null, // layouts already considered this run
+                        __kicksUsed: 0,
+                        __maxKicks: 3, // random restarts per click to escape a local optimum
                         __onDrain: null, // callback when the current eval batch finishes
                         isRunning: function () {
                             return this.__running === true;
@@ -2661,7 +2665,9 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 push = function (f) {
                                     if (out.length >= cap) return;
                                     var key = cache.calcUnitsHash(self.__clone(f), self.__ownid);
-                                    if (key && key !== self.__currentKey && !seen[key] && !self.__runKeys[key]) {
+                                    // skip the center, dupes in this batch, and any layout already simulated
+                                    // (a valid cache entry) - this is what persists "tried" across clicks.
+                                    if (key && key !== self.__currentKey && !seen[key] && !cache.get(key, self.__cityid)) {
                                         seen[key] = true;
                                         out.push(f);
                                     }
@@ -2722,7 +2728,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 if (a[i] !== b[i]) return a[i] - b[i];
                             return 0;
                         },
-                        __bestEntry: function () { // best simulated layout this run (by active preset)
+                        __bestEntry: function () { // best simulated layout for this base (by active preset)
                             var prios = TABS.STATS.getPreset(this.__presetNum).Prio,
                                 sorted = [],
                                 i;
@@ -2732,7 +2738,65 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 sorted = [];
                             }
                             for (i = 0; i < sorted.length; i++)
-                                if (sorted[i] && sorted[i].result && sorted[i].result.valid && sorted[i].result.formation && this.__runKeys[sorted[i].key]) return sorted[i];
+                                if (sorted[i] && sorted[i].result && sorted[i].result.valid && sorted[i].result.formation) return sorted[i];
+                            return null;
+                        },
+                        // Perturb a formation with n random moves/swaps (for kicks).
+                        __randomPerturb: function (base, n) {
+                            var f = this.__clone(base),
+                                X = 4,
+                                Y = 4,
+                                i, x, y, k;
+                            try {
+                                X = ClientLib.Base.Util.get_ArmyMaxSlotCountX();
+                                Y = ClientLib.Base.Util.get_ArmyMaxSlotCountY();
+                            } catch (e) {}
+                            for (k = 0; k < n; k++) {
+                                var units = [];
+                                for (i = 0; i < f.length; i++)
+                                    if (f[i].enabled && f[i].h > 0) units.push(i);
+                                if (!units.length) break;
+                                var occ = {};
+                                for (i = 0; i < f.length; i++)
+                                    if (f[i].h > 0) occ[f[i].x + "," + f[i].y] = true;
+                                var empties = [];
+                                for (x = 0; x < X; x++)
+                                    for (y = 0; y < Y; y++)
+                                        if (!occ[x + "," + y]) empties.push({
+                                            x: x,
+                                            y: y
+                                        });
+                                if (Math.random() < 0.5 && empties.length) {
+                                    var u = units[Math.floor(Math.random() * units.length)],
+                                        e = empties[Math.floor(Math.random() * empties.length)];
+                                    f[u].x = e.x;
+                                    f[u].y = e.y;
+                                } else if (units.length >= 2) {
+                                    var a = units[Math.floor(Math.random() * units.length)],
+                                        b = units[Math.floor(Math.random() * units.length)];
+                                    if (a !== b) {
+                                        var tx = f[a].x,
+                                            ty = f[a].y;
+                                        f[a].x = f[b].x;
+                                        f[a].y = f[b].y;
+                                        f[b].x = tx;
+                                        f[b].y = ty;
+                                    }
+                                }
+                            }
+                            return f;
+                        },
+                        // Find an untried (not yet simulated) layout by perturbing `base`.
+                        __kick: function (base) {
+                            var cache = TABS.CACHE.getInstance(),
+                                attempts = 0,
+                                f, key, n;
+                            while (attempts++ < 40) {
+                                n = 2 + Math.floor(Math.random() * 3); // 2-4 random changes
+                                f = this.__randomPerturb(base, n);
+                                key = cache.calcUnitsHash(this.__clone(f), this.__ownid);
+                                if (key && !cache.get(key, this.__cityid)) return f; // untried
+                            }
                             return null;
                         },
                         Run: function (presetNum) {
@@ -2759,10 +2823,10 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.__orig = this.__clone(live);
                             this.__current = this.__clone(live);
                             this.__currentKey = TABS.CACHE.getInstance().calcUnitsHash(this.__clone(live), this.__ownid);
-                            this.__currentScore = null;
+                            this.__lastBest = null;
                             this.__round = 0;
                             this.__simsUsed = 0;
-                            this.__runKeys = {};
+                            this.__kicksUsed = 0;
                             this.__inflight = 0;
                             this.__running = true;
                             // settings (with sane defaults / clamps)
@@ -2777,9 +2841,10 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             if (c < 1) c = 1;
                             if (c > 12) c = 12;
                             this.__concurrency = c;
-                            this.__maxNeighbors = gi("Optimizer.MaxNeighbors", 24);
-                            this.__maxRounds = gi("Optimizer.MaxRounds", 20);
-                            this.__simBudget = gi("Optimizer.SimBudget", 200);
+                            this.__maxNeighbors = gi("Optimizer.MaxNeighbors", 20);
+                            this.__maxRounds = gi("Optimizer.MaxRounds", 16);
+                            this.__simBudget = gi("Optimizer.SimBudget", 150);
+                            this.__maxKicks = gi("Optimizer.MaxKicks", 3);
                             // Avoid interference: pause auto-simulate while we drive simulations ourselves.
                             try {
                                 var auto = TABS.PreArmyUnits.AutoSimulate.getInstance();
@@ -2811,12 +2876,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     this.__queue = [];
                                     break;
                                 }
-                                var cand = this.__queue.shift(),
-                                    key = null;
-                                try {
-                                    key = TABS.CACHE.getInstance().calcUnitsHash(this.__clone(cand), this.__ownid);
-                                } catch (e) {}
-                                if (key) this.__runKeys[key] = true; // mark as considered this run
+                                var cand = this.__queue.shift();
                                 // skip the server round-trip if this layout is already simulated & valid
                                 var skip = false;
                                 try {
@@ -2900,12 +2960,13 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             if (this.__inflight > 0) this.__inflight--;
                             this.__pumpRound(); // launch next / fire onDrain when this batch is done
                         },
-                        // Adopt the best layout so far as the search center, then evaluate its neighbors.
+                        // Climb: re-center on the best layout so far, then evaluate its untried neighbors.
                         __startRound: function () {
                             if (!this.__running) return;
                             var best = this.__bestEntry();
                             if (best) {
-                                this.__currentScore = this.__tuple(best.result.stats);
+                                var s = this.__tuple(best.result.stats);
+                                if (this.__lastBest === null || this.__cmp(s, this.__lastBest) < 0) this.__lastBest = s;
                                 this.__current = best.result.formation;
                                 this.__currentKey = best.key;
                             }
@@ -2914,8 +2975,8 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 return;
                             }
                             var neighbors = this.__genNeighbors(this.__current);
-                            if (!neighbors.length) { // local optimum / nothing new to try
-                                this.__finish(false);
+                            if (!neighbors.length) { // immediate neighborhood already explored -> jump elsewhere
+                                this.__tryKick();
                                 return;
                             }
                             this.__round++;
@@ -2924,17 +2985,46 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         },
                         __afterRound: function () {
                             if (!this.__running) return;
+                            if (this.__simsUsed >= this.__simBudget || this.__round >= this.__maxRounds) {
+                                this.__finish(false);
+                                return;
+                            }
                             var best = this.__bestEntry(),
-                                newScore = best ? this.__tuple(best.result.stats) : null;
-                            if (newScore && this.__cmp(newScore, this.__currentScore) < 0) {
-                                // a tweak improved things -> move the search center and keep climbing
-                                this.__current = best.result.formation;
-                                this.__currentKey = best.key;
-                                this.__currentScore = newScore;
+                                s = best ? this.__tuple(best.result.stats) : null;
+                            if (s && (this.__lastBest === null || this.__cmp(s, this.__lastBest) < 0)) {
+                                // overall best improved -> keep climbing from it
+                                this.__lastBest = s;
                                 this.__startRound();
                             } else {
-                                this.__finish(false); // no improvement -> stop at this local optimum
+                                // no improvement this round -> random kick to a new, untried region
+                                this.__tryKick();
                             }
+                        },
+                        // Iterated local search: jump to an untried region (avoids already-tried layouts,
+                        // which persist in the cache across button clicks) and climb again.
+                        __tryKick: function () {
+                            if (!this.__running) return;
+                            if (this.__kicksUsed >= this.__maxKicks || this.__simsUsed >= this.__simBudget || this.__round >= this.__maxRounds) {
+                                this.__finish(false);
+                                return;
+                            }
+                            var best = this.__bestEntry(),
+                                base = (best && best.result && best.result.formation) ? best.result.formation : this.__current,
+                                kicked = this.__kick(base);
+                            if (!kicked) { // could not find any untried layout
+                                this.__finish(false);
+                                return;
+                            }
+                            this.__kicksUsed++;
+                            this.__round++;
+                            this.__current = kicked;
+                            try {
+                                this.__currentKey = TABS.CACHE.getInstance().calcUnitsHash(this.__clone(kicked), this.__ownid);
+                            } catch (e) {}
+                            var batch = this.__genNeighbors(kicked);
+                            batch.unshift(kicked); // make sure the kicked layout itself is simulated
+                            this.__log("Kick " + this.__kicksUsed + "/" + this.__maxKicks + ": exploring a new region, " + batch.length + " layouts (" + this.__simsUsed + " sims used)...");
+                            this.__evalList(batch, this.__afterRound);
                         },
                         __finish: function (stopped) {
                             this.__running = false;
