@@ -2615,6 +2615,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         __kicksUsed: 0, // consecutive non-improving kicks (reset on any improvement)
                         __maxKicks: 3, // stop after this many fruitless kicks in a row
                         __onDrain: null, // callback when the current eval batch finishes
+                        __batch: null, // last evaluated batch (for diagnostics)
                         isRunning: function () {
                             return this.__running === true;
                         },
@@ -2883,8 +2884,45 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         // Evaluate a batch of candidate layouts concurrently, then call onDrain().
                         __evalList: function (list, onDrain) {
                             this.__queue = list || [];
+                            this.__batch = (list || []).slice(); // keep a copy for the round diagnostic
                             this.__onDrain = onDrain || null;
                             this.__pumpRound();
+                        },
+                        // Diagnostic: spread of results across the last batch (to confirm tweaks actually vary).
+                        __batchExtremes: function () {
+                            if (!this.__batch || !this.__batch.length) return null;
+                            var cache = TABS.CACHE.getInstance(),
+                                minR = Infinity,
+                                maxR = -Infinity,
+                                minE = Infinity,
+                                n = 0,
+                                i, key, r;
+                            for (i = 0; i < this.__batch.length; i++) {
+                                try {
+                                    key = cache.calcUnitsHash(this.__clone(this.__batch[i]), this.__ownid);
+                                } catch (e) {
+                                    continue;
+                                }
+                                r = cache.get(key, this.__cityid);
+                                if (!r || !r.stats) continue;
+                                n++;
+                                var res = r.stats.Offense.Overall.Resource,
+                                    rep = Math.max(res[ClientLib.Base.EResourceType.RepairChargeAir], res[ClientLib.Base.EResourceType.RepairChargeInf], res[ClientLib.Base.EResourceType.RepairChargeVeh]),
+                                    eh = r.stats.Enemy.Overall.HealthPoints,
+                                    em = (eh.max || 0) + (eh.maxFront || 0),
+                                    ee = (eh.end || 0) + (eh.endFront || 0),
+                                    epct = em > 0 ? Math.round(100 * ee / em) : 0;
+                                if (rep < minR) minR = rep;
+                                if (rep > maxR) maxR = rep;
+                                if (epct < minE) minE = epct;
+                            }
+                            if (!n) return null;
+                            return {
+                                n: n,
+                                minR: Math.round(minR),
+                                maxR: Math.round(maxR),
+                                minE: minE
+                            };
                         },
                         // Worker pool: keep up to __concurrency simulations in flight at once.
                         __pumpRound: function () {
@@ -2912,68 +2950,76 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 if (cb) cb.call(this);
                             }
                         },
-                        // Apply a candidate to the LIVE army (actually move the units), then simulate it.
-                        // The server simulates the stored army arrangement, so the units must really be
-                        // moved for each candidate to produce a different result. Sequential by nature.
+                        // Apply a candidate to the LIVE army (actually move the units), wait for the game's
+                        // "arrangement changed" event (so the move is really registered), then simulate it.
+                        // Sequential by nature (one live army). This event-driven wait is what makes the
+                        // simulated result reflect the candidate instead of the pre-move layout.
                         __launch: function (cand) {
                             var self = this,
-                                finished = false;
-                            // Move the units into the candidate arrangement.
-                            try {
-                                TABS.UTIL.Formation.Set(cand, this.__cityid, this.__ownid);
-                            } catch (e) {
-                                this.__log("Set error: " + e);
-                                this.__onSimComplete(null, null);
-                                return;
-                            }
-                            // Per-request safety net so a lost response can't stall the pool.
-                            var safety = setTimeout(function () {
-                                if (!finished) {
-                                    finished = true;
-                                    self.__onSimComplete(null, null);
-                                }
-                            }, 12000);
-                            // Give the move a moment to register, then read the live layout and simulate it.
-                            setTimeout(function () {
-                                if (finished) return;
+                                done = false,
+                                simStarted = false,
+                                pa = TABS.PreArmyUnits.getInstance(),
+                                safety;
+                            var finish = function (live, data) {
+                                if (done) return;
+                                done = true;
+                                clearTimeout(safety);
+                                try {
+                                    pa.removeListener("OnCityPreArmyUnitsChanged", onChange, self);
+                                } catch (e) {}
+                                self.__onSimComplete(live, data);
+                            };
+                            var doSim = function () {
+                                if (simStarted || done) return;
+                                simStarted = true;
+                                try {
+                                    pa.removeListener("OnCityPreArmyUnitsChanged", onChange, self);
+                                } catch (e) {}
                                 try {
                                     var live = TABS.UTIL.Formation.Get(self.__cityid, self.__ownid),
-                                        armyUnits = [],
+                                        u = [],
                                         i;
                                     for (i = 0; i < live.length; i++)
-                                        if (live[i].enabled && live[i].h > 0) armyUnits.push({
+                                        if (live[i].enabled && live[i].h > 0) u.push({
                                             i: live[i].id,
                                             x: live[i].x,
                                             y: live[i].y
                                         });
-                                    if (armyUnits.length === 0) {
-                                        clearTimeout(safety);
-                                        finished = true;
-                                        self.__onSimComplete(null, null);
+                                    if (!u.length) {
+                                        finish(null, null);
                                         return;
                                     }
                                     ClientLib.Net.CommunicationManager.GetInstance().SendSimpleCommand("SimulateBattle", {
                                         battleSetup: {
                                             d: self.__cityid,
                                             a: self.__ownid,
-                                            u: armyUnits,
+                                            u: u,
                                             s: 0
                                         }
                                     }, webfrontend.phe.cnc.Util.createEventDelegate(ClientLib.Net.CommandResult, self, function (a, b) {
-                                        if (finished) return;
-                                        finished = true;
-                                        clearTimeout(safety);
-                                        self.__onSimComplete(live, b);
+                                        finish(live, b);
                                     }), null);
                                 } catch (e) {
-                                    clearTimeout(safety);
-                                    if (!finished) {
-                                        finished = true;
-                                        self.__log("Sim send error: " + e);
-                                        self.__onSimComplete(null, null);
-                                    }
+                                    self.__log("Sim send error: " + e);
+                                    finish(null, null);
                                 }
-                            }, 150);
+                            };
+                            var onChange = function () {
+                                doSim();
+                            }; // move registered -> safe to simulate
+                            safety = setTimeout(function () {
+                                if (!simStarted) doSim(); // no change event (e.g., no-op move): sim anyway
+                                else finish(null, null); // sim sent but no response
+                            }, 10000);
+                            try {
+                                pa.addListener("OnCityPreArmyUnitsChanged", onChange, self);
+                            } catch (e) {}
+                            try {
+                                TABS.UTIL.Formation.Set(cand, this.__cityid, this.__ownid);
+                            } catch (e) {
+                                this.__log("Set error: " + e);
+                                doSim();
+                            }
                         },
                         __onSimComplete: function (cand, data) {
                             try {
@@ -3025,7 +3071,9 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 return;
                             }
                             var best = this.__bestEntry(),
-                                s = best ? this.__tuple(best.result.stats) : null;
+                                s = best ? this.__tuple(best.result.stats) : null,
+                                ext = this.__batchExtremes();
+                            if (ext) this.__log("Round tweaks: " + ext.n + " sims, maxRepair " + ext.minR + ".." + ext.maxR + ", best enemy " + ext.minE + "%");
                             if (best) this.__log("Best so far: " + this.__describe(best.result.stats) + " (" + this.__simsUsed + " sims)");
                             if (s && (this.__lastBest === null || this.__cmp(s, this.__lastBest) < 0)) {
                                 // overall best improved (incl. a lower-repair win) -> keep going, reset kicks
