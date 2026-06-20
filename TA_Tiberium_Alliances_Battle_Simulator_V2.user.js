@@ -1518,10 +1518,10 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                             ]
                                     };
                                 case 6:
-                                    // Lowest Repair (win required) -- MikeyMike
+                                    // Best Win: cheapest winning layout (enemy destroyed) -- MikeyMike
                                     return {
-                                        Name: "LowRep",
-                                            Description: "Requires a winning layout (enemy destroyed) first,<br>then selects the cached layout with the LOWEST offense repair time<br>(lowest max of inf/veh/air repair charge, which repair in parallel).<br>Tie-broken by surviving offense health, then battle duration.<br>Use the wand button on this column (or window.MikeyMike_OptimizeRepair())<br>to auto-try several layouts and apply the best one.",
+                                        Name: "BestWin",
+                                            Description: "BEST WIN.<br>Among layouts that fully destroy the enemy (health 0),<br>selects the one with the LOWEST max repair time<br>(lowest max of inf/veh/air repair charge, which repair in parallel).<br>The 'Best Win' button auto-tries several layouts; if none can win<br>it reports that and leaves your formation unchanged.",
                                             Prio: [
                                                 [TABS.STATS.Prio.Enemy, TABS.STATS.Type.HealthPointPercent, false, 0, false],
                                                 [TABS.STATS.Prio.Offense, TABS.STATS.Type.RepairChargeOffense, false, 0, false],
@@ -1530,12 +1530,15 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                             ]
                                     };
                                 case 7:
-                                    // Best Option (balanced: lowest remaining enemy health + lowest repair) -- MikeyMike
+                                    // Best Non Win: closest to a kill, then lowest max repair -- MikeyMike
                                     return {
-                                        Name: "Best",
-                                            Description: "Balanced 'best value' pick.<br>Minimizes a combined score of remaining enemy health (less = more damage dealt)<br>and your own army losses (less = lower repair time), each as a 0-100% fraction.<br>Unlike 'LowRep' it does NOT require a full kill, so it can prefer a cheap near-kill.<br>Weights are adjustable via the Optimizer.BestBalance.wEnemy / wRepair settings.<br>Use the wand button on this column to auto-try several layouts.",
+                                        Name: "BestN-W",
+                                            Description: "BEST NON WIN.<br>For when a full kill is not possible:<br>selects the layout that gets enemy health AS CLOSE TO 0 as possible,<br>then the LOWEST max repair time (max of inf/veh/air repair charge).<br>The 'Best Non Win' button auto-tries several layouts and applies the best.",
                                             Prio: [
-                                                [TABS.STATS.Prio.BestBalance, null, false, 0, false]
+                                                [TABS.STATS.Prio.Enemy, TABS.STATS.Type.HealthPointPercent, false, 0, false],
+                                                [TABS.STATS.Prio.Offense, TABS.STATS.Type.RepairChargeOffense, false, 0, false],
+                                                [TABS.STATS.Prio.Offense, TABS.STATS.Type.HealthPointPercent, false, 0, false],
+                                                [TABS.STATS.Prio.BattleDuration, null, false, 0, false]
                                             ]
                                     };
                                 default:
@@ -2686,7 +2689,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 this.__prevAuto = null;
                             }
                             TABS.APISimulation.getInstance().addListener("OnSimulateBattleFinished", this.__onSimDone, this);
-                            this.__log("Optimizing: testing " + this.__total + " layouts (" + (this.__presetNum === 7 ? "best value" : "lowest repair, must win") + ")...");
+                            this.__log("Optimizing: testing " + this.__total + " layouts (" + (this.__presetNum === 7 ? "best non win" : "best win") + ")...");
                             this.__next();
                         },
                         Stop: function () {
@@ -2774,20 +2777,54 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     TABS.PreArmyUnits.AutoSimulate.getInstance().setEnabled(this.__prevAuto);
                                 } catch (e) {}
                             }
-                            // Select & apply the best lowest-repair winning layout from the cache.
-                            var best = null;
+                            // Rank all simulated layouts: lowest remaining enemy health, then lowest max repair time.
+                            var prios = TABS.STATS.getPreset(7).Prio,
+                                sorted = [],
+                                valids = [],
+                                i;
                             try {
-                                best = TABS.CACHE.getInstance().getPrio1(TABS.STATS.getPreset(this.__presetNum).Prio, this.__cityid, this.__ownid);
+                                sorted = TABS.CACHE.getInstance().getPrio(prios, this.__cityid, this.__ownid);
                             } catch (e) {
-                                best = null;
+                                sorted = [];
                             }
-                            if (best && best.result && best.result.formation) {
+                            for (i = 0; i < sorted.length; i++) {
+                                if (sorted[i] && sorted[i].result && sorted[i].result.valid && sorted[i].result.formation) valids.push(sorted[i]);
+                            }
+                            var enemyEnd = function (entry) { // remaining enemy total health (0 = full kill)
                                 try {
-                                    ClientLib.Data.MainData.GetInstance().get_Cities().set_CurrentOwnCityId(best.result.ownid);
-                                    TABS.UTIL.Formation.Set(best.result.formation, best.result.cityid, best.result.ownid);
-                                    this.__log((stopped ? "Stopped. " : "Done. ") + "Applied lowest-repair winning layout.");
+                                    var h = entry.result.stats.Enemy.Overall.HealthPoints;
+                                    return (h.end || 0) + (h.endFront || 0);
                                 } catch (e) {
-                                    this.__log("Finished, but could not apply best layout: " + e);
+                                    return Number.MAX_VALUE;
+                                }
+                            };
+                            var chosen = null,
+                                noWin = false;
+                            if (this.__presetNum === 6) {
+                                // Best Win: only layouts that fully destroy the enemy; valids are pre-sorted so the
+                                // first kill found is also the cheapest (lowest max repair) kill.
+                                for (i = 0; i < valids.length; i++) {
+                                    if (enemyEnd(valids[i]) <= 0) {
+                                        chosen = valids[i];
+                                        break;
+                                    }
+                                }
+                                if (!chosen) noWin = true;
+                            } else {
+                                // Best Non Win: closest to a kill, then lowest max repair (= first valid entry).
+                                chosen = valids.length ? valids[0] : null;
+                            }
+                            if (chosen) {
+                                try {
+                                    ClientLib.Data.MainData.GetInstance().get_Cities().set_CurrentOwnCityId(chosen.result.ownid);
+                                    TABS.UTIL.Formation.Set(chosen.result.formation, chosen.result.cityid, chosen.result.ownid);
+                                    var killed = enemyEnd(chosen) <= 0;
+                                    this.__log((stopped ? "Stopped. " : "Done. ") + (this.__presetNum === 6 ?
+                                        "Applied cheapest winning layout (lowest max repair time)." :
+                                        (killed ? "A full kill is possible; applied cheapest winning layout." :
+                                            "No full kill possible; applied closest-to-kill layout with lowest max repair time.")));
+                                } catch (e) {
+                                    this.__log("Finished, but could not apply layout: " + e);
                                 }
                             } else {
                                 if (this.__orig) {
@@ -2795,8 +2832,13 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                         TABS.UTIL.Formation.Set(this.__orig, this.__cityid, this.__ownid);
                                     } catch (e) {}
                                 }
-                                this.__log((stopped ? "Stopped. " : "Done. ") + "No layout found; restored original.");
+                                this.__log((stopped ? "Stopped. " : "Done. ") + (noWin ?
+                                    "No winning layout found (enemy can't be destroyed) - try 'Best Non Win'. Restored original." :
+                                    "No layout found; restored original."));
                             }
+                            try {
+                                TABS.GUI.Window.Stats.getInstance().__updateStats();
+                            } catch (e) {}
                         }
                     },
                     defer: function () {
@@ -3218,7 +3260,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 colSpan: 3
                             });
                             var btnOptNonWin = new qx.ui.form.Button(this.tr("Best Non Win")).set({
-                                toolTipText: this.tr("Auto-try several army layouts and apply the best-value layout: balances lowest remaining enemy health with lowest repair time. Does NOT require a full kill."),
+                                toolTipText: this.tr("Auto-try several army layouts for when a full kill is NOT possible: applies the layout that gets enemy health as close to 0 as possible, then the lowest max repair time."),
                                 height: 20,
                                 show: "label",
                                 center: true,
