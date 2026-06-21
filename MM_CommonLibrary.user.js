@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.16
+// @version         1.0.17
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.16"
+            version: "1.0.17"
         };
 
         // -------------------------------------------------------------------
@@ -1903,7 +1903,7 @@
                             if (!t) return null;
                             t.add(btn);
                         }
-                        slots.push({ id: opts.id, btn: btn });
+                        slots.push({ id: opts.id, label: opts.label, btn: btn });
                         feedMenu(opts);
                         return btn;
                     } catch (e) {
@@ -1926,6 +1926,17 @@
                     try { NS.settings.set(KEY + ".show", v); } catch (e) {}
                     applyVisible(v);
                     return v;
+                },
+                // Show/hide a single registered button by its label (used by the CnC Pack menu to instantly
+                // add/remove a script's button when you enable/disable that script). No-op if no match.
+                setButtonEnabled: function (label, on) {
+                    try {
+                        for (var i = 0; i < slots.length; i++) {
+                            if (slots[i].label === label && slots[i].btn) {
+                                if (on === false) slots[i].btn.exclude(); else slots[i].btn.show();
+                            }
+                        }
+                    } catch (e) {}
                 }
             };
         })();
@@ -2179,7 +2190,21 @@
 
             // Update item values + the Open submenu in place, WITHOUT rebuilding the menu (a rebuild would
             // collapse the menu mid-use). Falls back to build() if we haven't built yet.
+            // Instantly add/remove each script's HUD/menu button to match its enabled state (so toggling a
+            // script in the CnC Pack menu adds/removes its button right away, not on reload). Matches a button
+            // to a script by its label == the short (MM-stripped) script name.
+            function syncButtonsEnabled() {
+                try {
+                    if (!NS.buttons || !NS.buttons.setButtonEnabled || !state.scripts) return;
+                    for (var i = 0; i < state.scripts.length; i++) {
+                        var s = state.scripts[i];
+                        if (!isPackScript(s)) continue;
+                        NS.buttons.setButtonEnabled(cleanName(s.name), state.enabled[s.id] !== false);
+                    }
+                } catch (e) {}
+            }
             function onStateUpdated() {
+                syncButtonsEnabled();
                 if (!built) { if (!build()) scheduleEnsure(); return; }
                 try {
                     for (var id in itemsById) { try { itemsById[id].setValue(state.enabled[id] === true); } catch (e) {} }

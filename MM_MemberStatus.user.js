@@ -3,7 +3,7 @@
 // @description     Dockable, color-coded "Member Status" overview of online/away alliance members (with highest offense/defense levels when your access exposes them). MikeyMike rework of InFlames2k's "AllianceMemberOnline", rebuilt on the MM - Common Library.
 // @author          InFlames2k (Patrick Schubert)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.0
+// @version         1.2.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
@@ -22,10 +22,11 @@
  MMCommon.buttons.register (CommonButtonHandler) and MMCommon.ui.Window
  (dockable/persistent window) instead of hand-rolled UI.
 
- DISPLAY OPTION (1.1.0): right-click the roster -> "Dock in game menu bar" to show
- the same list as a menu-styled "Members" section inside the game's right-side base
- bar (the Info Sticker look), via MMCommon.menubar; "Use floating window" reverts.
- Default stays the floating window.
+ DISPLAY (1.2.0): an UNPINNED, frameless, movable floating panel like MM - Next MCV
+ (drag by body, position persists, on-screen clamp). A PIN button in its header docks
+ it INTO the game's base menu bar as a menu-styled "Members" section (the Info Sticker
+ "locked" look) via MMCommon.menubar; click the pin again to pop back out to the
+ movable panel. The roster colours adapt to the light docked / dark floating backgrounds.
 
  Shows "Off" (BestOffenseLvl = highest army level) and "Def" (BestDefenseLvl =
  highest defense level) columns, but only when your alliance access exposes that
@@ -56,54 +57,67 @@
             // --- the member list (a Grid of colored labels, rebuilt each refresh) ---
             var listBox = new qx.ui.container.Composite(new qx.ui.layout.Grid(12, 3));
 
-            // --- the window (movable + position-persistent via MMCommon.ui.Window).
-            // No fixed width: the window shrink-wraps to its content so everything is visible on open.
+            // PINNED = docked into the game's base menu bar (the "locked dock" look); UNPINNED = a frameless,
+            // movable floating panel like MM - Next MCV (same drag + on-screen clamp). The pin button toggles.
+            function menuOn() { try { return MM.settings.get("AllianceOverview.MenuBar", false) === true; } catch (e) { return false; } }
+            function pinIcon(on) { return on ? "FactionUI/icons/icn_thread_pin_active.png" : "FactionUI/icons/icn_thread_pin_inactive.png"; }
+
+            // pin button - icon reflects the pinned state; clicking it docks <-> floats
+            var pinBtn = new qx.ui.form.Button(null, pinIcon(menuOn())).set({
+                show: "icon", width: 20, height: 20, maxWidth: 22, maxHeight: 22, padding: 1, decorator: null,
+                cursor: "pointer", toolTipText: "Pin into the game menu / unpin to a movable panel"
+            });
+            pinBtn.addListener("execute", function () { try { setMenuMode(!menuOn()); } catch (e) {} });
+            // the frameless float panel drags by its body (mousedown anywhere starts a drag) - stop the pin's
+            // mousedown from bubbling so clicking it pins/unpins instead of starting a drag.
+            pinBtn.addListener("mousedown", function (e) { try { e.stopPropagation(); } catch (x) {} });
+            function updatePin() { try { pinBtn.setIcon(pinIcon(menuOn())); } catch (e) {} }
+
+            // header (title + pin) - kept WITH the content so it shows in both the floating and docked states
+            var titleLbl = new qx.ui.basic.Label("Members").set({ font: "bold", rich: true, alignY: "middle" });
+            var headerRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(4).set({ alignY: "middle" }));
+            headerRow.add(titleLbl);
+            headerRow.add(new qx.ui.core.Spacer(), { flex: 1 });
+            headerRow.add(pinBtn);
+
+            // content = header + roster; this whole block re-parents between the float panel and the dock panel
+            var content = new qx.ui.container.Composite(new qx.ui.layout.VBox(3));
+            content.add(headerRow);
+            content.add(listBox);
+
+            // --- the floating ("unpinned") panel: frameless + movable + on-screen clamp, like MM - Next MCV ---
             var win = MM.ui.Window({
                 caption: "Member Status",
                 key: "AllianceOverview.Window",
                 pos: [240, 120],
-                restoreOpen: true, // re-open automatically after a refresh if it was open
-                // dock disabled for now - the snap targeting needs more work, see TA_MM_Common.ui.Window
+                restoreOpen: true,
+                frameless: true,
+                dock: true,
                 layout: new qx.ui.layout.VBox()
             });
             if (!win) { LOG.err("could not create window"); return; }
-            win.add(listBox);
+            win.add(content);
 
-            // ---- optional: dock the roster into the game's base menu bar (the Info Sticker "menu look") ----
-            // Opt-in (default = the floating window); toggled by the right-click menu on the roster. The SAME
-            // listBox grid is re-parented between the window and an in-bar menu-styled panel, so the rendering
-            // is identical. All guarded - if MMCommon.menubar isn't reachable, it stays a floating window.
-            function menuOn() { try { return MM.settings.get("AllianceOverview.MenuBar", false) === true; } catch (e) { return false; } }
+            // --- the docked ("pinned") panel: a menu-styled section inside the game's base bar ---
             var mb = { panel: null, dock: null, built: false };
-            function makeDisplayMenu() {
-                var menu = new qx.ui.menu.Menu();
-                var toBar = new qx.ui.menu.Button("Dock in game menu bar");
-                toBar.addListener("execute", function () { setMenuMode(true); });
-                var toFloat = new qx.ui.menu.Button("Use floating window");
-                toFloat.addListener("execute", function () { setMenuMode(false); });
-                menu.add(toBar); menu.add(toFloat);
-                return menu;
-            }
             function buildMenuPanel() {
                 if (mb.built) return mb.panel;
                 try {
                     if (!MM.menubar || !MM.menubar.styledPanel) return null;
                     mb.panel = MM.menubar.styledPanel({ width: 160, spacing: 2, marginLeft: 5 });
-                    mb.panel.add(new qx.ui.basic.Label("Members").set({ font: "bold", textColor: "#595969", textAlign: "center", alignX: "center" }));
-                    try { mb.panel.setContextMenu(makeDisplayMenu()); } catch (e) {}
                     mb.dock = MM.menubar.dock(mb.panel, { pos: null, enabled: function () { return menuOn(); } });
                     mb.built = true;
                 } catch (e) { LOG.err("buildMenuPanel:", e); mb.panel = null; }
                 return mb.panel;
             }
-            // move the roster grid into whichever container is active (the menu panel or the float window)
-            function placeList() {
+            // move the content into whichever container is active (the in-bar panel or the float panel)
+            function placeContent() {
                 try {
                     var host = menuOn() ? buildMenuPanel() : win;
                     if (!host) host = win;
-                    var cur = listBox.getLayoutParent && listBox.getLayoutParent();
-                    if (cur !== host) { if (cur && cur.remove) cur.remove(listBox); host.add(listBox); }
-                } catch (e) { LOG.err("placeList:", e); }
+                    var cur = content.getLayoutParent && content.getLayoutParent();
+                    if (cur !== host) { if (cur && cur.remove) cur.remove(content); host.add(content); }
+                } catch (e) { LOG.err("placeContent:", e); }
             }
             function isShown() {
                 try { return menuOn() ? !!(mb.panel && mb.panel.isVisible && mb.panel.isVisible()) : win.isVisible(); } catch (e) { return false; }
@@ -111,12 +125,17 @@
             function setMenuMode(on) {
                 try {
                     MM.settings.set("AllianceOverview.MenuBar", on === true);
-                    if (on) { buildMenuPanel(); if (mb.dock) mb.dock.refresh(); placeList(); if (mb.panel) mb.panel.show(); try { win.close(); } catch (e) {} }
-                    else { placeList(); if (mb.dock) mb.dock.refresh(); try { win.open(); } catch (e) {} }
+                    updatePin();
+                    if (on) { buildMenuPanel(); if (mb.dock) mb.dock.refresh(); placeContent(); if (mb.panel) mb.panel.show(); try { win.close(); } catch (e) {} }
+                    else { placeContent(); if (mb.dock) mb.dock.refresh(); try { win.open(); } catch (e) {} }
                     refresh();
                 } catch (e) { LOG.err("setMenuMode:", e); }
             }
-            try { listBox.setContextMenu(makeDisplayMenu()); } catch (e) {}
+            // colour set per mode: light/dark-readable. Floating = dark MM panel; docked = light mission-bar texture.
+            function colors() {
+                if (menuOn()) return { title: "#2a3a4a", header: "#2a3a4a", online: "#15691a", away: "#9a4500", level: "#16527a", none: "#556070" };
+                return { title: "#cfe6ff", header: "#ffffff", online: COL_ONLINE, away: COL_AWAY, level: COL_LEVEL, none: "#888888" };
+            }
 
             function clearList() {
                 try {
@@ -126,7 +145,7 @@
             }
 
             function header(text, tip) {
-                var h = new qx.ui.basic.Label("<b>" + text + "</b>").set({ rich: true, textColor: "#ffffff" });
+                var h = new qx.ui.basic.Label("<b>" + text + "</b>").set({ rich: true, textColor: colors().header });
                 if (tip) h.setToolTipText(tip);
                 return h;
             }
@@ -137,9 +156,11 @@
             }
 
             function render(rows) {
+                var C = colors();
+                try { titleLbl.setTextColor(C.title); } catch (e) {}
                 clearList();
                 if (!rows.length) {
-                    listBox.add(new qx.ui.basic.Label("(no members online)").set({ textColor: "#888888" }), { row: 0, column: 0 });
+                    listBox.add(new qx.ui.basic.Label("(no members online)").set({ textColor: C.none }), { row: 0, column: 0 });
                     return;
                 }
                 // Show the Off/Def level columns only if enabled AND the data is populated (i.e. your
@@ -161,13 +182,13 @@
                     var m = rows[i];
                     var online = (m.OnlineState === EState.Online);
                     listBox.add(new qx.ui.basic.Label(m.Name).set({
-                        textColor: online ? COL_ONLINE : COL_AWAY,
+                        textColor: online ? C.online : C.away,
                         toolTipText: m.RoleName || "",
                         rich: false
                     }), { row: r, column: 0 });
                     if (hasLevels) {
-                        listBox.add(new qx.ui.basic.Label(fmtLvl(m.BestOffenseLvl)).set({ textColor: COL_LEVEL, textAlign: "right" }), { row: r, column: 1 });
-                        listBox.add(new qx.ui.basic.Label(fmtLvl(m.BestDefenseLvl)).set({ textColor: COL_LEVEL, textAlign: "right" }), { row: r, column: 2 });
+                        listBox.add(new qx.ui.basic.Label(fmtLvl(m.BestOffenseLvl)).set({ textColor: C.level, textAlign: "right" }), { row: r, column: 1 });
+                        listBox.add(new qx.ui.basic.Label(fmtLvl(m.BestDefenseLvl)).set({ textColor: C.level, textAlign: "right" }), { row: r, column: 2 });
                     }
                     r++;
                 }
@@ -212,7 +233,7 @@
                     try {
                         if (menuOn()) {
                             if (mb.panel && mb.panel.isVisible && mb.panel.isVisible()) mb.panel.exclude();
-                            else { buildMenuPanel(); placeList(); if (mb.panel) mb.panel.show(); if (mb.dock) mb.dock.refresh(); refresh(); }
+                            else { buildMenuPanel(); placeContent(); if (mb.panel) mb.panel.show(); if (mb.dock) mb.dock.refresh(); refresh(); }
                         } else {
                             if (win.isVisible()) win.close(); else { win.open(); refresh(); }
                         }
@@ -220,14 +241,15 @@
                 }
             });
 
-            // if the menu-bar display was chosen previously, build + show it now (instead of the float window).
+            // if the panel was PINNED (docked) previously, build + show it now (instead of the float panel).
             // The base bar can lag a few seconds behind nav-ready, so poll until it's reachable (fast appear).
+            updatePin();
             if (menuOn()) {
                 var mTries = 0;
                 (function tryMenu() {
                     try {
                         if (!menuOn()) return;
-                        if (buildMenuPanel()) { placeList(); refresh(); return; }
+                        if (buildMenuPanel()) { placeContent(); refresh(); return; }
                     } catch (e) {}
                     if (++mTries < 60) window.setTimeout(tryMenu, 500);
                 })();
