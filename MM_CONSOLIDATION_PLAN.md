@@ -235,6 +235,27 @@ Priority order (high → low), with the new MM name and the one-line reason:
 - **Phase 4 — Salvage-then-retire (§5):** as each MMCommon module / MM keeper lands, lift the named bit from
   its donors and delete them. Batch the deletes.
 - **Phase 5 — Decide the 5 pending (§6)** with Mike.
+### Outbound-network audit result (2026-06-21)
+Full sweep of all 50 userscripts + the extension's own files for outbound calls (`$.post`/`fetch`/`XHR`/
+`sendBeacon`/`GM_xmlhttpRequest`/`@require`/`externally_connectable`):
+- **Removed:** leoStats + BaseShare (POSTed your data off-site) — gone. **And the extension's own
+  `cncta.tweakness.net` usage-stat collector** (manifest `externally_connectable`+optional perm, background
+  `check`/`onMessageExternal`/`CNCTA_stat`, options.js `sendstat`/`check_stat` fetches, options.html privacy
+  link) — the real analog to leoStats inside OUR build; was opt-in/off-by-default (inert) but fully excised
+  (build 1.0.21).
+- **Remaining runtime external touches = the cnctaopt/cncopt link buttons only** — `window.open()` to the
+  base-planner site, **user-initiated** (click a menu button), base layout in the URL. cnctaopt.com is the
+  live community planner (→ becomes `MMCommon.cnctaopt.encode`); cncopt.com is dead (View_Player_Base → retire).
+  Not silent exfiltration.
+- **Cosmetic publish-polish (NOT data exfiltration):** options.html + updated.html auto-load a Creative
+  Commons license badge image from `i.creativecommons.org` (leaks IP/timing when those pages open) — localize
+  the badge or drop it (also a licensing decision — the pages still carry the upstream CC BY-NC-SA badge).
+  Plus many inert author/homepage/@icon URLs in legacy-script metadata/comments (vanish as those scripts retire).
+- **`GM_xmlhttpRequest` grants** in 3 scripts (CnCTAOpt_Link, Map, View_Player_Base) are declared but **never
+  called** — no actual cross-origin requests.
+- `CNCTA_enabledscriptstat` is still written to **local** storage (never sent) — harmless dead bookkeeping,
+  optional later cleanup.
+
 - **Phase 6 — Publish gate:** security verification — build-wide grep for `fetch(`/`XHR`/`$.post`/remote
   `@require` returns nothing outside our own domain, and confirm no legacy file was bundled verbatim (every
   shipped script is an MM rebuild with our header); branding/version/CHANGELOG hygiene; icons/store listing;
