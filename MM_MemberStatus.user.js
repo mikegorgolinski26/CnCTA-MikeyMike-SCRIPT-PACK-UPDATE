@@ -3,7 +3,7 @@
 // @description     Dockable, color-coded "Member Status" overview of online/away alliance members (with highest offense/defense levels when your access exposes them). MikeyMike rework of InFlames2k's "AllianceMemberOnline", rebuilt on the MM - Common Library.
 // @author          InFlames2k (Patrick Schubert)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.6
+// @version         1.2.7
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
@@ -27,9 +27,24 @@
  button in its header locks it into a solid menu-styled panel anchored on the DESKTOP
  just LEFT of the game's base bar ({right:128}) - the same solid button-missionbar panel
  the in-bar MM Tools / MCV sections use (MMCommon.menubar.styledPanel), placed beside the
- bar rather than inside it. Click the pin again to pop back to the movable panel.
- KNOWN ISSUE (2026-06-21): the docked panel's styling is verified live, but it does not
- yet auto-appear on reload while pinned - the startup/placeContent flow needs finishing.
+ bar rather than inside it, and framed top+bottom with the game's messaging caps for the docked
+ "system menu" look (the Info Sticker frame). Click the pin again to pop back to the movable panel.
+ 1.2.7 (docked panel made to match the Info Sticker it's based on):
+   - Palette flips with the mode: DOCKED uses the Info Sticker scheme (dark-slate #595969 title +
+     column headers, near-black #282828 Off/Def numbers) so it's readable on the light menu texture
+     instead of the washed-out white/yellow that only suited the dark floating panel; FLOATING keeps
+     the light-on-dark scheme. Coloured player names stay green/amber in both states.
+   - Pin button restyled to the Info Sticker pin: a small forum-light SoundButton with a 15x15 icon
+     (was an oversized bare icon).
+   - Docked frame now matches the game's OWN menu: rounded messaging end caps top and bottom, with the
+     names section sitting on the game's "pane-navigation-bar" GRAY backing (inset 5px so the gray shows
+     as a strip down the left, exactly like the MM Tools menu). The gray backs only the data section so
+     its square corners never poke out behind the rounded caps; the caps elongate out to the gray edge.
+   - Docked body slimmed (tight 5px column gap).
+   - Floating panel no longer transparent on first load (content carries its dark bg by default).
+   - Pinned panel now AUTO-DOCKS on reload: the pinned flag moved to a global localStorage key read
+     synchronously at startup (the per-player setting loads too late - the pid-timing trap), with a
+     one-time migration of users who pinned before this build.
 
  Shows "Off" (BestOffenseLvl = highest army level) and "Def" (BestDefenseLvl =
  highest defense level) columns, but only when your alliance access exposes that
@@ -58,18 +73,31 @@
             var COL_LEVEL = MM.settings.get("AllianceOverview.Color.Level", "#ffe14d"); // bright yellow, easy to read on the dark window
 
             // --- the member list (a Grid of colored labels, rebuilt each refresh) ---
-            var listBox = new qx.ui.container.Composite(new qx.ui.layout.Grid(12, 3));
+            // tight column gap (5px) keeps the docked panel narrow - the member rows are what set the
+            // panel's width, so a smaller gap is what actually makes the docked body slimmer.
+            var listBox = new qx.ui.container.Composite(new qx.ui.layout.Grid(5, 3));
 
             // PINNED = docked into the game's base menu bar (the "locked dock" look); UNPINNED = a frameless,
             // movable floating panel like MM - Next MCV (same drag + on-screen clamp). The pin button toggles.
-            function menuOn() { try { return MM.settings.get("AllianceOverview.MenuBar", false) === true; } catch (e) { return false; } }
+            // Pinned/docked state lives in a GLOBAL localStorage key (NOT the pid-keyed MM.settings):
+            // build() runs right after nav-ready, BEFORE the per-player settings bucket loads, so a pid-keyed
+            // read would always return the "float" default and the panel would never auto-dock on reload (the
+            // same pid-timing trap the buttons-dock mode hit -> MM.HUDTray.dock). The per-player setting is kept
+            // in sync for continuity + one-time migration of users who pinned before this fix.
+            var DOCK_KEY = "MM.MemberStatus.dock";
+            function menuOn() { try { return window.localStorage.getItem(DOCK_KEY) === "1"; } catch (e) { return false; } }
             function pinIcon(on) { return on ? "FactionUI/icons/icn_thread_pin_active.png" : "FactionUI/icons/icn_thread_pin_inactive.png"; }
 
-            // pin button - icon reflects the pinned state; clicking it docks <-> floats
-            var pinBtn = new qx.ui.form.Button(null, pinIcon(menuOn())).set({
-                show: "icon", width: 20, height: 20, maxWidth: 22, maxHeight: 22, padding: 1, decorator: null,
-                cursor: "pointer", toolTipText: "Pin into the game menu / unpin to a movable panel"
+            // pin button - styled like the legacy Info Sticker pin: a small forum-light SoundButton with a
+            // 15x15 icon (NOT a bare oversized icon), so it matches the docked menu it sits beside.
+            var pinBtn;
+            try { pinBtn = new webfrontend.ui.SoundButton(); } catch (e) { pinBtn = new qx.ui.form.Button(); }
+            pinBtn.set({
+                decorator: "button-forum-light", icon: pinIcon(menuOn()), show: "icon", iconPosition: "top",
+                cursor: "pointer", width: 22, height: 19, maxWidth: 22, maxHeight: 19, padding: 0, alignY: "middle",
+                toolTipText: "Pin into the game menu / unpin to a movable panel"
             });
+            try { var _pic = pinBtn.getChildControl("icon"); _pic.setWidth(15); _pic.setHeight(15); _pic.setScale(true); } catch (e) {}
             pinBtn.addListener("execute", function () { try { setMenuMode(!menuOn()); } catch (e) {} });
             // the frameless float panel drags by its body (mousedown anywhere starts a drag) - stop the pin's
             // mousedown from bubbling so clicking it pins/unpins instead of starting a drag.
@@ -92,6 +120,9 @@
             var content = new qx.ui.container.Composite(new qx.ui.layout.VBox(4));
             content.add(headerRow);
             content.add(listBox);
+            // default to the floating (dark, opaque) look so the panel is never transparent on first load
+            // - placeContent() overrides this per mode (transparent when docked, dark when floating).
+            try { content.setBackgroundColor("#23282b"); content.setPadding(8); } catch (e) {}
 
             // --- the floating ("unpinned") panel: frameless + movable + on-screen clamp, like MM - Next MCV ---
             var win = MM.ui.Window({
@@ -110,24 +141,50 @@
             try { if (menuOn()) MM.settings.set("AllianceOverview.Window.open", false); } catch (e) {}
 
             // --- the docked ("pinned") panel: a menu-styled panel anchored NEXT TO the base bar (the Info
-            // Sticker look - a separate panel BESIDE the bar, NOT inserted into it). It sits to the LEFT of
-            // the bar and re-anchors via a light poll. Added to the game desktop, like the HUD tray.
-            // Built the same way the legacy Info Sticker built its left panel: a panel added to the game
-            // DESKTOP anchored to the RIGHT edge, 124px in (= just LEFT of the base nav bar, the rightmost
-            // ~124px strip), using the game's region-select panel texture + dark-red side borders for the
-            // "system menu" look. No bar-rect math - the {right:124} anchor places it beside the bar by itself.
+            // Sticker look - a separate panel BESIDE the bar, NOT inserted into it). Added to the game DESKTOP
+            // anchored to the RIGHT edge ({right:128}), so it sits just LEFT of the base nav bar. It's built to
+            // match the game's OWN docked menu (see buildSidePanel below): rounded messaging end caps top and
+            // bottom + the "pane-navigation-bar" gray backing behind the names section. No bar-rect math - the
+            // {right:128} anchor places it beside the bar by itself.
+            // sp.panel = the widget added to the desktop that we show/hide; sp.body = the inner container
+            // the content re-parents into.
             var sp = { panel: null, body: null, built: false };
             function buildSidePanel() {
                 if (sp.built) return sp.panel;
                 try {
                     var app = qx.core.Init.getApplication();
                     if (!app || !app.getDesktop || !MM.menubar || !MM.menubar.styledPanel) return null;
-                    // Use the SAME solid menu-styled panel the in-bar MM Tools / MCV sections use (the
-                    // button-missionbar texture - solid, which Mike approved), just placed on the game DESKTOP
-                    // just LEFT of the base bar ({right:128}) instead of inserted INTO it.
-                    sp.panel = MM.menubar.styledPanel({ width: 170, spacing: 2, padding: [6, 8, 6, 8] });
-                    sp.body = sp.panel;
-                    app.getDesktop().add(sp.panel, { right: 128, top: 130 });
+                    // The docked panel mirrors the game's OWN docked menu (the MM Tools section): rounded blue
+                    // messaging end caps top and bottom, with the member rows ("data section") in between sitting
+                    // on the game's "pane-navigation-bar" GRAY backing. Structure (top to bottom):
+                    //   holder (transparent) -> [ topCap , dataSection(gray) -> body , botCap ]
+                    // Key points learned the hard way with Mike:
+                    //  - The gray backing goes on the DATA SECTION ONLY, never the outer holder - the gray has
+                    //    square corners, so if it spanned the whole panel its corners would poke out behind the
+                    //    ROUNDED caps. Scoped to the data section, the gray is exactly as tall as the names.
+                    //  - The body is inset 5px on the left (marginLeft) so the gray shows as a strip down the
+                    //    left edge - the same 5px inset the game menu uses (pane width 128 vs button panel 123).
+                    //  - The caps GROW to the panel width (allowGrowX); the -5 left margin extends their rounded
+                    //    frame (whose art is inset within the image) out to that same gray edge.
+                    // All of this is content-driven, so it scales to any roster regardless of name length.
+                    var holder = new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({ maxWidth: 240, alignX: "right" });
+                    var topCap = new qx.ui.basic.Image("ui/common/bgr_messaging_t.png").set({ allowGrowX: true, height: 11, scale: true, zIndex: 12, marginLeft: -5 });
+                    var botCap = new qx.ui.basic.Image("ui/common/bgr_messaging_b.png").set({ allowGrowX: true, height: 11, scale: true, zIndex: 12, marginLeft: -5 });
+                    // the game's caps are drawn for the right edge; flip them horizontally (as Info Sticker does).
+                    topCap.addListener("appear", function () { try { topCap.getContentElement().getDomElement().style.transform = "scale(-1,1)"; } catch (e) {} });
+                    botCap.addListener("appear", function () { try { botCap.getContentElement().getDomElement().style.transform = "scale(-1,1)"; } catch (e) {} });
+                    // body = the SAME solid button-missionbar panel the in-bar MM Tools / MCV sections use.
+                    var body = MM.menubar.styledPanel({ width: 124, spacing: 2, padding: [4, 6, 4, 6] });
+                    body.setMarginLeft(5); // inset over the gray backing -> gray strip on the left of the names
+                    // gray backing wraps ONLY the data section, so it's exactly as tall as the names.
+                    var dataSection = new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({ allowGrowX: true, decorator: "pane-navigation-bar" });
+                    dataSection.add(body);
+                    holder.add(topCap);
+                    holder.add(dataSection);
+                    holder.add(botCap);
+                    sp.panel = holder;
+                    sp.body = body;
+                    app.getDesktop().add(holder, { right: 128, top: 130 });
                     sp.built = true;
                 } catch (e) { LOG.err("buildSidePanel:", e); sp.panel = null; }
                 return sp.panel;
@@ -150,6 +207,7 @@
             }
             function setMenuMode(on) {
                 try {
+                    try { window.localStorage.setItem(DOCK_KEY, on === true ? "1" : "0"); } catch (e) {}
                     MM.settings.set("AllianceOverview.MenuBar", on === true);
                     updatePin();
                     if (on) { buildSidePanel(); placeContent(); if (sp.panel) sp.panel.show(); try { win.close(); } catch (e) {} }
@@ -157,9 +215,18 @@
                     refresh();
                 } catch (e) { LOG.err("setMenuMode:", e); }
             }
-            // one light/saturated set - readable on BOTH the dark floating panel and the solid blue
-            // button-missionbar docked panel.
+            // The two states sit on opposite backgrounds, so the text palette must flip with them:
+            //  - DOCKED = the light button-missionbar texture (the Info Sticker look) -> use the EXACT
+            //    Info Sticker palette: dark-slate title/headers (#595969, the same colour the MM Tools
+            //    dock label uses) + near-black off/def numbers (#282828). Light text washes out here.
+            //  - FLOATING = the dark #23282b panel (Loot Summary look) -> light title/headers + the
+            //    bright-yellow level colour, which read well on dark.
+            // Player names keep their online-green / away-amber in BOTH states (both are dark enough to
+            // read on the light texture - Mike confirmed the coloured names look good docked).
             function colors() {
+                if (menuOn()) {
+                    return { title: "#595969", header: "#595969", online: COL_ONLINE, away: COL_AWAY, level: "#282828", none: "#595969" };
+                }
                 return { title: "#cfe6ff", header: "#ffffff", online: COL_ONLINE, away: COL_AWAY, level: COL_LEVEL, none: "#cfe0ea" };
             }
 
@@ -275,16 +342,41 @@
             // if the panel was PINNED (docked) previously, build + show it now (instead of the float panel).
             // The base bar can lag a few seconds behind nav-ready, so poll until it's reachable (fast appear).
             updatePin();
+            // Populate the correct container for the CURRENT mode synchronously NOW (the desktop is ready by
+            // the time build() runs). This (a) gives the floating panel its dark background on first load so it
+            // isn't transparent until the first pin/unpin, and (b) docks + shows the panel immediately when
+            // pinned instead of waiting on a deferred poll - fixing the "doesn't auto-appear on reload" bug.
+            // A short retry stays as a safety net only if the desktop/menu bar wasn't reachable on this pass.
+            placeContent();
             if (menuOn()) {
-                var mTries = 0;
-                (function tryMenu() {
-                    try {
-                        if (!menuOn()) return;
-                        if (buildSidePanel()) { placeContent(); if (sp.panel) sp.panel.show(); refresh(); return; }
-                    } catch (e) {}
-                    if (++mTries < 60) window.setTimeout(tryMenu, 500);
-                })();
+                if (sp.panel) sp.panel.show();
+                refresh();
+                if (!sp.built) {
+                    var mTries = 0;
+                    (function tryMenu() {
+                        try {
+                            if (!menuOn()) return;
+                            if (buildSidePanel()) { placeContent(); if (sp.panel) sp.panel.show(); refresh(); return; }
+                        } catch (e) {}
+                        if (++mTries < 60) window.setTimeout(tryMenu, 500);
+                    })();
+                }
             }
+
+            // MIGRATION (one-time): users who pinned BEFORE this build have their state only in the per-player
+            // AllianceOverview.MenuBar setting, which isn't loaded yet at build() time. Once the player id is
+            // ready (settings bucket present), if the global key was never written, seed it from the per-player
+            // setting and dock if it was pinned - so the pin survives the upgrade without a manual re-pin.
+            (function migrate(tries) {
+                try { if (window.localStorage.getItem(DOCK_KEY) !== null) return; } catch (e) { return; }
+                var pid = 0;
+                try { pid = ClientLib.Data.MainData.GetInstance().get_Player().get_Id(); } catch (e) {}
+                if (!pid) { if (tries < 40) window.setTimeout(function () { migrate(tries + 1); }, 500); return; }
+                try {
+                    if (MM.settings.get("AllianceOverview.MenuBar", false) === true) { setMenuMode(true); }
+                    else { window.localStorage.setItem(DOCK_KEY, "0"); }
+                } catch (e) {}
+            })(0);
 
             LOG.log("ready");
         }
