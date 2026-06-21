@@ -3,7 +3,7 @@
 // @description     A small always-on counter showing how close you are to your next MCV (the Research_BaseFound level that lets you found another base): time until you can afford the credits, and your research-point progress. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK (original MaelstromTools MCV popup)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.0
+// @version         1.2.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
@@ -135,11 +135,13 @@
             });
             body.add(detailLine);
 
-            // One progress bar's HTML: a dark track with a colored fill to `pct`% + a centered label.
-            function barHtml(pct, fill, label) {
+            // Fill colour by progress: red while low, yellow through the middle, green when nearly there.
+            function barColor(p) { return (p < 15) ? "#cc3b2e" : (p < 85) ? "#c7a91e" : "#3a9d3a"; }
+            // One progress bar's HTML: a dark track with a colour-by-progress fill to `pct`% + centered label.
+            function barHtml(pct, label) {
                 var p = Math.max(0, Math.min(100, pct || 0));
                 return '<div style="position:relative;height:18px;background:#11151a;border:1px solid #3a4750;border-radius:4px;overflow:hidden;">'
-                    + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + p.toFixed(1) + '%;background:' + fill + ';"></div>'
+                    + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + p.toFixed(1) + '%;background:' + barColor(p) + ';"></div>'
                     + '<div style="position:absolute;left:0;right:0;top:0;height:18px;line-height:18px;text-align:center;font:bold 12px sans-serif;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;">' + label + '</div>'
                     + '</div>';
             }
@@ -171,7 +173,7 @@
                     if (!win.isVisible()) return;
                     var d = computeNextMCV();
                     if (!d) {
-                        creditBar.setValue(barHtml(100, "#3a7d3a", "Max bases founded"));
+                        creditBar.setValue(barHtml(100, "Max bases founded"));
                         rpBar.setValue("");
                         detailLine.setValue("no further MCV to research");
                         return;
@@ -179,10 +181,10 @@
                     var C = MM.num.compact;
                     // Credits bar: fill = how close credits are to the cost; label = time-to-afford countdown.
                     var cLabel = (d.creditPct >= 100) ? "Credits  OK!" : (!d.doGrow ? "Credits  NoGrow" : "Credits  " + daysFromHours(d.hoursLeft));
-                    creditBar.setValue(barHtml(d.creditPct, "#d2792a", cLabel));
+                    creditBar.setValue(barHtml(d.creditPct, cLabel));
                     // RP bar: fill = how close RP are to the cost; label = the percent.
                     var rLabel = (d.rpPct >= 100) ? "RP  OK!" : "RP  " + d.rpPct.toFixed(1) + "%";
-                    rpBar.setValue(barHtml(d.rpPct, "#c2af1d", rLabel));
+                    rpBar.setValue(barHtml(d.rpPct, rLabel));
                     // detail line: current / needed for each
                     detailLine.setValue(
                         "<span style='color:#ff8f00;'>$ " + C(d.curCredits) + "</span> / " + C(d.creditsNeeded) +
