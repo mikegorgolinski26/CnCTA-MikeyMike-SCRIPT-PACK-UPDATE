@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.11
+// @version         1.0.12
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -952,6 +952,40 @@
                     }
                 } catch (e) { NS.log.err("base.status failed:", e); }
                 return out;
+            },
+            // Find the Construction Yard / Defense Facility / support-weapon buildings in a base's grid,
+            // keyed by MdbUnitId (faction-spanning: CY 112/151/177, DF 158/131/195, support 200-205).
+            // Returns { cy, df, support }, each { row (8 - CoordY = rows from the front), col, condition
+            // (% health) } or null if absent. Shared scan for MM - Loot Summary (and Base Scanner).
+            keyBuildings: function (ncity) {
+                var out = { cy: null, df: null, support: null };
+                try {
+                    var b = ncity && ncity.get_Buildings(); var d = b && b.d;
+                    for (var k in d) {
+                        var u = d[k];
+                        if (!u || typeof u.get_MdbUnitId !== "function") continue;
+                        var id = u.get_MdbUnitId();
+                        var slot = { row: 8 - u.get_CoordY(), col: u.get_CoordX(), condition: 100 * u.get_HitpointsPercent() };
+                        if (id >= 200 && id <= 205) out.support = slot;
+                        else if (id === 112 || id === 151 || id === 177) out.cy = slot;
+                        else if (id === 158 || id === 131 || id === 195) out.df = slot;
+                    }
+                } catch (e) { NS.log.err("base.keyBuildings failed:", e); }
+                return out;
+            },
+            // Per-hour production for a base: tiberium / crystal / power / credits. (GetResourceGrowPerHour
+            // returns a per-hour rate; credits come via the packed CityCreditsProduction record.)
+            production: function (ncity) {
+                var out = { tiberium: 0, crystal: 0, power: 0, credits: 0 };
+                try {
+                    if (!ncity) return out;
+                    var ER = ClientLib.Base.EResourceType;
+                    out.tiberium = ncity.GetResourceGrowPerHour(ER.Tiberium, true, true);
+                    out.crystal = ncity.GetResourceGrowPerHour(ER.Crystal, true, true);
+                    out.power = ncity.GetResourceGrowPerHour(ER.Power, true, true);
+                    try { out.credits = ClientLib.Base.Resource.GetResourceGrowPerHour(ncity.get_CityCreditsProduction(), true); } catch (e) {}
+                } catch (e) { NS.log.err("base.production failed:", e); }
+                return out;
             }
         };
 
@@ -1109,6 +1143,32 @@
                     timer = window.setInterval(tick, interval);
                     tick();
                     return function stop() { if (timer) { window.clearInterval(timer); timer = null; } };
+                },
+                // The region object the user currently has SELECTED (clicked), or null. Same vis-object
+                // family as visObjectAt - exposes get_VisObjectType()/get_Id()/IsOwnBase()/get_AllianceId()/
+                // get_PlayerName() etc. (first consumer: MM - Loot Summary).
+                selectedObject: function () {
+                    try { return vm().get_SelectedObject() || null; } catch (e) { return null; }
+                },
+                // Fire cb(selectedObjectOrNull) whenever the region selection changes (clicking a base/camp/
+                // POI, or clicking empty map to deselect), and cb(null) when leaving region view. Deferred to
+                // a fresh task + error-swallowed like track(), and given a real context object (the net layer
+                // mishandles a null context). Returns a detach fn.
+                onSelection: function (cb) {
+                    if (!cb) return function () {};
+                    var v = vm(), ctx = { __mmSel: true }, bound = [];
+                    function fire() { window.setTimeout(function () { try { cb(api.inRegionView() ? api.selectedObject() : null); } catch (e) { NS.log.err("map.onSelection cb:", e); } }, 0); }
+                    function on(name, evt) {
+                        if (!evt) return;
+                        try { NS.net.attach(v, name, evt, ctx, fire); bound.push([name, evt]); }
+                        catch (e) { NS.log.err("map.onSelection attach " + name + ":", e); }
+                    }
+                    on("SelectionChange", ClientLib.Vis.SelectionChange);
+                    on("ModeChange", ClientLib.Vis.ModeChange);
+                    return function detach() {
+                        for (var i = 0; i < bound.length; i++) { try { NS.net.detach(v, bound[i][0], bound[i][1], ctx, fire); } catch (e) {} }
+                        bound = [];
+                    };
                 }
             };
             return api;
