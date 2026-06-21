@@ -3,7 +3,7 @@
 // @description     Dockable, color-coded "Member Status" overview of online/away alliance members (with highest offense/defense levels when your access exposes them). MikeyMike rework of InFlames2k's "AllianceMemberOnline", rebuilt on the MM - Common Library.
 // @author          InFlames2k (Patrick Schubert)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.3
+// @version         1.2.4
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
@@ -81,8 +81,11 @@
             headerRow.add(titleLbl, { flex: 1 });
             headerRow.add(pinBtn);
 
-            // content = header + roster; this whole block re-parents between the float panel and the dock panel
-            var content = new qx.ui.container.Composite(new qx.ui.layout.VBox(3));
+            // content = header + roster; this whole block re-parents between the float panel and the dock panel.
+            // It carries its OWN solid dark background so it's opaque in BOTH states (like MM - Loot Summary /
+            // Next MCV, whose body Composite sets backgroundColor) - a frameless window/desktop panel does not
+            // paint a background itself, so the content must.
+            var content = new qx.ui.container.Composite(new qx.ui.layout.VBox(4)).set({ backgroundColor: "#23282b", padding: 8 });
             content.add(headerRow);
             content.add(listBox);
 
@@ -112,10 +115,11 @@
                 try {
                     var app = qx.core.Init.getApplication();
                     if (!app || !app.getDesktop) return null;
-                    sp.panel = new qx.ui.container.Composite(new qx.ui.layout.VBox(2)).set({
-                        width: 160, paddingLeft: 8, paddingRight: 8, paddingTop: 6, paddingBottom: 6,
-                        // opaque dark panel, matching MM - Next MCV / Loot Summary (the region-texture image
-                        // rendered transparent without the game's cap pieces, so use a solid background)
+                    sp.panel = new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({
+                        width: 176,
+                        // opaque dark panel + border, matching MM - Next MCV / Loot Summary (the region-texture
+                        // image rendered transparent without the game's cap pieces, so use a solid background).
+                        // The `content` it holds carries the same #23282b fill, so the whole panel is opaque.
                         decorator: new qx.ui.decoration.Decorator().set({ backgroundColor: "#23282b", width: 1, color: "#3a4750", radius: 5 })
                     });
                     app.getDesktop().add(sp.panel, { right: 124, top: 130 });
