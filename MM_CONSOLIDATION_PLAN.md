@@ -54,16 +54,19 @@ confirm no legacy file was bundled verbatim, and a build-wide grep for `fetch(`/
 
 ---
 
-## 2. SECURITY-QUARANTINE (3) — exclude from the published build
+## 2. SECURITY-QUARANTINE — exclude from the published build
 
-| Script | Why | Salvage |
+> **DONE 2026-06-21 — the two data-exfiltration scripts are REMOVED** (at Mike's request, after confirming
+> what leoStats sends). Both were already `enabled:false` (leoStats also `inactive:true` and **not even
+> deployed** to the extension build), so nothing was ever being sent at runtime; now deleted outright so they
+> can't be toggled on. Files removed from both repos + registry rows gone. The orphaned `jquery-3.7.1.min`
+> lib (leoStats was its only consumer) is now unreferenced — optional file-level cleanup later.
+
+| Script | Why | Status |
 |---|---|---|
-| **TA_leoStats** | Self-described **encrypted** payload, **`@updateURL` auto-updates from `cnc.indyserver.info`** (remote-code channel), remote `@require` jQuery, and **POSTs full account/base/alliance data** to indyserver.info on load + hourly. | None — never lift from obfuscated auto-updating code. Re-implement any wanted view fresh. |
-| **TA_BaseShare** | **POSTs your entire reachable-base dataset + player/alliance identity** to `project-exception.net` on every scan; also cross-script-coupled (`typeof leoStats`/`typeof BaseInfo`). | None (scan already in MMCommon). |
-| **TA_Hotkeys** | Ships a **plaintext email/password table for up to 9 accounts** in source + auto-submits login. | Safe parts only: Alt+I per-base level/coords dump → MM - Base Info via `base.ownCities`+`coords.insertIntoChat`; Alt+Y signature/role-name map. **Drop the credential login entirely** (if account-switch is ever wanted, use the browser password manager, never inline source). Fix the latent undefined-`link` bug. |
-
-> NOTE: removing leoStats/BaseShare must be coordinated — BaseShare's button-stacking reads `typeof leoStats`.
-> Both already slated; just confirm no MM script references those globals (none do).
+| ~~**TA_leoStats**~~ | Self-described **encrypted** payload, `@updateURL` auto-updates from `cnc.indyserver.info`, remote `@require` jQuery, and **POSTs full account/base/alliance + report data** to indyserver.info (+ legacy 000webhostapp.com) on load + hourly. Responses are upload-dedup bookkeeping + a self-whisper link to the external site — **no in-game value comes back**. | ✅ REMOVED 2026-06-21 |
+| ~~**TA_BaseShare**~~ | **POSTs your reachable-base dataset + player/alliance identity** to `project-exception.net` on every scan; cross-script-coupled (`typeof leoStats`/`typeof BaseInfo`). | ✅ REMOVED 2026-06-21 |
+| **TA_Hotkeys** | Ships a **plaintext email/password table for up to 9 accounts** in source + auto-submits login. (Does NOT send data to an external server — it's a local credential-storage risk, not exfiltration.) | ⏳ still in pack (enabled:false); salvage safe parts then drop the credential login. Alt+I per-base dump → MM - Base Info via `base.ownCities`+`coords.insertIntoChat`; Alt+Y signature/role map. Fix the latent undefined-`link` bug. |
 
 ---
 

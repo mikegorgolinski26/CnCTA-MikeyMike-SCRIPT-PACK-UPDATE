@@ -49,7 +49,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | TA_Maelstrom_ADDON_Basescanner_CNCOPTplus | AIO + growth-rate optimizer/layout recommender (4475 lines) | 🔁⚠️ |
 | TA_Maelstrom_ADDON_Basescanner_Infected_Camps | AIO variant focused on infected camps (type 7) | 🔁🗑️ |
 | TA_Shockr_Tools_Basescanner_Mailversion_reMod | Scans for "interesting" layouts, emails results; + base-counter chat tool | ⚠️ |
-| TA_BaseShare | Scans NPC bases, **POSTs to project-exception.net** for alliance sharing | 🔐⚠️ |
+| ~~TA_BaseShare~~ | Scans NPC bases, **POSTs to project-exception.net** for alliance sharing | ❌ RETIRED 2026-06-21 (data exfiltration; was enabled:false; removed from build at Mike's request) |
 | TA_Count_Forgotten_Bases_Range | Context-menu "paste count" of NPC bases in range, by level | ✅ |
 
 ### Info overlays
@@ -135,7 +135,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 ### Stats / external
 | Script | What it does | Status |
 |---|---|---|
-| TA_leoStats | Stats + base scanner + share links; **encrypted payload**, **POSTs to cc.indyserver.info**; "restructuring" | 🔐⚠️ |
+| ~~TA_leoStats~~ | Stats + base scanner + share links; **encrypted payload**, **POSTs to cnc.indyserver.info**; "restructuring" | ❌ RETIRED 2026-06-21 (data exfiltration; was enabled:false/inactive + not even deployed to the build; removed from sources at Mike's request) |
 | TA_POI_ExporterTools | Export POIs to CSV; movable window (clean, modern ES6) | ✅ |
 | TA_Report_Summary | (listed above) | |
 
