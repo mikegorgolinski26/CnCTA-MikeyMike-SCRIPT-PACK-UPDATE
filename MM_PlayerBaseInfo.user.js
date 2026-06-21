@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Draws a live on-map overlay of small bubbles showing Offense / Defense level (stacked) over every visible player base in region view (own / alliance / enemy). Off/def for other players' bases is surveyed in the background; a base's bubble only appears once its values are known. Bubbles track the map as you pan and zoom. A HUD options panel toggles which base types show.
-// @version      1.2.2
+// @version      1.2.3
 // @author       XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -94,6 +94,18 @@
 			pending[id] = true; queue.push(id); pump(ownMap);
 		}
 		function pump(ownMap) {
+			// CRITICAL: never touch the shared current-city pointer while the user is in a base/city
+			// view. fetchDetail hijacks set_CurrentCityId to trigger loads; if the survey fires that
+			// while the game is rendering an open base, it yanks the city out from under the renderer
+			// (emblem-only "loading" view + a nextFrame render crash). The moment we're out of region
+			// view, drop the queue and let the GAME own current-city (it set it when the base opened).
+			// We re-enumerate and re-survey uncached bases when refreshOverlay runs back in region view.
+			if (!MM.map.inRegionView()) {
+				queue.length = 0;
+				for (var pk in pending) delete pending[pk];
+				surveyRestoreId = null;
+				return;
+			}
 			// remember where "current city" was before we start hijacking it to trigger loads
 			if (active === 0 && queue.length && surveyRestoreId === null) {
 				surveyRestoreId = MM.base.currentCityId();
