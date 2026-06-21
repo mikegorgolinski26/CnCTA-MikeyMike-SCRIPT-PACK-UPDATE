@@ -1,22 +1,103 @@
 // ==UserScript==
-// @name           Tiberium Alliances The Movement
-// @version        1.0.8.3
-// @namespace      https://openuserjs.org/users/petui
+// @name           MM - The Movement
+// @namespace      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
+// @include        https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
+// @description    Client-side "what-if" territory planner: right-click any base/NPC on the region map to simulate moving it, ruining it (for any alliance), levelling it up, or removing it - the territory-control colouring updates live, with full Undo / Reset plans. Everything is a LOCAL visualisation; nothing is ever sent to the server.
+// @version        1.0.0
 // @license        GPL version 3 or any later version; http://www.gnu.org/copyleft/gpl.html
-// @author         petui
+// @author         MikeyMike (rework of petui's "The Movement")
+// @contributor    petui
 // @contributor    Xdaast (19.4 FIX)
-// @contributor    Netquik (19.3||19.4||20.3||22.2||22.3 FIX) + !!NOEVIL!! + PlanRuinFor Colors/NotConfirmed
-// @description    Strategical territory simulator
+// @contributor    NetquiK (https://github.com/netquik) (19.3||19.4||20.3||22.2||22.3 FIX + NOEVIL + PlanRuinFor colours/pending)
 // @match          https://*.alliances.commandandconquer.com/*/index.aspx*
-// @updateURL      https://raw.githubusercontent.com/netquik/CnCTA-SoO-SCRIPT-PACK/Testing/TA_TheMovement.user.js
+// @downloadURL    https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TheMovement.user.js
+// @updateURL      https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TheMovement.user.js
 // ==/UserScript==
+
+/*
+ * MM - The Movement
+ * -----------------
+ * WHAT IT DOES
+ *   A strategic territory PLANNER (sandbox simulator). Right-click an object on the region map and the
+ *   game's object menu gains extra actions (only the ones valid for that object):
+ *     - Plan move base      pick up the selected city and drop it anywhere to preview a relocation
+ *     - Plan ruin           turn an enemy base/city into a ruin (its territory influence vanishes)
+ *     - Plan ruin for >>    ruin it AND reassign the spot to a chosen alliance (your relationships,
+ *                           colour-coded by diplomacy; pending relationships shown tagged)
+ *     - Plan level up       bump a base one level (grows its territory radius)
+ *     - Plan remove         delete the selected base/ruin/city from the local map
+ *     - Undo / Reset plans  revert the last change, or wipe ALL simulated changes
+ *   Every change updates the territory-ownership colouring immediately so you can see how borders shift.
+ *
+ *   IMPORTANT: this is a purely CLIENT-SIDE visualisation. It edits the local copy of the world data only;
+ *   nothing is sent to the server. "Reset plans" zeroes the affected sectors' versions so the game
+ *   re-fetches the real data on the next poll, scrubbing every simulated edit.
+ *
+ * WHY IT'S NEEDED
+ *   Planning alliance ops (relocations, who-cracks-what, territory grabs) is far easier when you can mock
+ *   the moves up on the map and watch the borders change before committing anything in-game.
+ *
+ * HOW IT'S BUILT (vs petui / NetquiK's "The Movement")
+ *   The original engine (command pattern: entrypoint + pluggable actions + an undo history, all driving
+ *   direct edits of the game's world-sector internals, plus patched territory/move-validation methods) is
+ *   PRESERVED - it is intricate and battle-tested. The MM rework is robustness + housekeeping:
+ *     - Every de-obfuscation lookup (the many NOEVIL regexes that locate the game's minified member names)
+ *       is routed through reMember()/reMatch(), which throw a CLEAR, NAMED error if the pattern no longer
+ *       matches ("could not locate X - the game may have updated"). When the game patches break a lookup,
+ *       the console now tells you EXACTLY which one to re-patch instead of an opaque "[1] of null".
+ *     - [MM The Movement] gated logging (verbose off by default), menu/click handlers wrapped so one
+ *       failure can't break the game's object menu, and MMCommon.lifecycle wired so toggling the script
+ *       off in the CnC Pack menu tears down its hooks and scrubs any simulated changes without a reload.
+ *
+ * DEPENDENCIES (pack rule: wrapper + Common Library only)
+ *   MMCommon.makeLogger / .lifecycle (optional - degrades gracefully if absent)
+ *   ClientLib / qx / webfrontend (game page context)
+ *
+ * Debug: window.THEMOVEMENT_DEBUG = true (or window.MM_DEBUG = true) for verbose logs. Warnings/errors
+ * are always on.
+ */
 'use strict';
 (function () {
     var main = function () {
         'use strict';
 
+        var OPTIONS_ID = 10209; // MM - The Movement (CnC Pack registry id)
+
+        // ---- logger ----------------------------------------------------------------
+        var LOG = (window.MMCommon && window.MMCommon.makeLogger)
+            ? window.MMCommon.makeLogger("The Movement")
+            : {
+                log: function () {},
+                warn: function () { try { console.warn.apply(console, ["[MM The Movement]"].concat([].slice.call(arguments))); } catch (e) {} },
+                err: function () { try { console.error.apply(console, ["[MM The Movement]"].concat([].slice.call(arguments))); } catch (e) {} }
+            };
+        if (typeof window.THEMOVEMENT_DEBUG === "undefined") {
+            try { window.THEMOVEMENT_DEBUG = (window.localStorage.getItem("THEMOVEMENT_DEBUG") === "1"); } catch (e) { window.THEMOVEMENT_DEBUG = false; }
+        }
+        var wlog = function () { if (!(window.THEMOVEMENT_DEBUG || window.MM_DEBUG)) return; LOG.log.apply(LOG, arguments); };
+        var wwarn = function () { LOG.warn.apply(LOG, arguments); };
+        var werr = function () { LOG.err.apply(LOG, arguments); };
+
+        var MM = window.MMCommon || null;
+        var scriptEnabled = true; // flipped by MMCommon.lifecycle; gates the region-menu actions
+
+        // ---- de-obfuscation helpers ------------------------------------------------
+        // The game ships minified, so member names are 6-letter gibberish that change between client
+        // versions. Each lookup below regexes a known method's source to recover the current name. If a
+        // pattern stops matching (game updated), reMatch throws a NAMED error so the failing lookup is
+        // obvious in the console - far better than a bare "Cannot read [1] of null" three calls deep.
+        function reMatch(source, regex, label) {
+            var m = null;
+            try { m = String(source).match(regex); } catch (e) { m = null; }
+            if (!m) throw new Error("MM - The Movement: could not locate '" + label + "' in the game client (it may have updated; this lookup needs re-patching).");
+            return m;
+        }
+        function reMember(source, regex, label, group) {
+            return reMatch(source, regex, label)[group == null ? 1 : group];
+        }
+
         function createTheMovement() {
-            console.log('TheMovement loaded');
+            wlog('engine classes defined');
             qx.Class.define('TheMovement', {
                 type: 'singleton',
                 extend: Object,
@@ -124,7 +205,7 @@
                 construct: function (history) {
                     TheMovement.Entrypoint.Abstract.call(this, history);
                     // MOD 22.3-6
-                    this.selectedObjectMemberName = webfrontend.gui.region.RegionCityMenu.prototype.onTick.toString().match(/this\.([A-Za-z0-9_]+)!==null\)?{?&?&?this\.[A-Za-z0-9_]+\(\)/)[1];
+                    this.selectedObjectMemberName = reMember(webfrontend.gui.region.RegionCityMenu.prototype.onTick.toString(), /this\.([A-Za-z0-9_]+)!==null\)?{?&?&?this\.[A-Za-z0-9_]+\(\)/, "RegionCityMenu.selectedObject");
                     this.actionButtons = {};
                     this.blankMenu = new qx.ui.container.Composite(new qx.ui.layout.VBox(0)).set({
                         padding: 2
@@ -173,25 +254,36 @@
                         return 'PointerEvent' in window && !qx.bom.client.Event.getMsPointer();
                     },
                     __onRegionCityMenuAppear: function () {
-                        var menu = webfrontend.gui.region.RegionCityMenu.getInstance();
-                        var regionObject = menu[this.selectedObjectMemberName];
-                        if (!menu.hasChildren()) {
-                            menu.add(this.blankMenu);
-                        }
-                        var subMenu = menu.getChildren()[0];
-                        for (var id in this.actions) {
-                            if (this.actions[id].supports(regionObject)) {
-                                subMenu.add(this.actionButtons[id]);
-                                this.actionButtons[id].setLabel(this.__formatActionName(this.actions[id]));
-                            } else if (this.actionButtons[id].getLayoutParent() === subMenu) {
-                                subMenu.remove(this.actionButtons[id]);
+                        try {
+                            var menu = webfrontend.gui.region.RegionCityMenu.getInstance();
+                            // When disabled via the CnC Pack menu, detach our buttons and add nothing.
+                            if (!scriptEnabled) {
+                                for (var rid in this.actions) {
+                                    var rb = this.actionButtons[rid];
+                                    if (rb && rb.getLayoutParent()) { try { rb.getLayoutParent().remove(rb); } catch (e) {} }
+                                }
+                                return;
                             }
-                        }
+                            var regionObject = menu[this.selectedObjectMemberName];
+                            if (!menu.hasChildren()) {
+                                menu.add(this.blankMenu);
+                            }
+                            var subMenu = menu.getChildren()[0];
+                            for (var id in this.actions) {
+                                if (this.actions[id].supports(regionObject)) {
+                                    subMenu.add(this.actionButtons[id]);
+                                    this.actionButtons[id].setLabel(this.__formatActionName(this.actions[id]));
+                                } else if (this.actionButtons[id].getLayoutParent() === subMenu) {
+                                    subMenu.remove(this.actionButtons[id]);
+                                }
+                            }
+                        } catch (e) { werr("region menu build failed:", e); }
                     },
                     /**
                      * @param {qx.event.type.Event} event
                      */
                     __onClickActionButton: function (event) {
+                        try {
                         var manager = qx.theme.manager.Font.getInstance();
                         var id = event.getTarget().getUserData('actionId');
                         var action = this.actions[id];
@@ -223,15 +315,18 @@
                             qx.core.Init.getApplication().getBackgroundArea().closeCityInfo();
                             ClientLib.Data.MainData.GetInstance().get_Cities().set_CurrentCityId(city);
                         }
+                        } catch (e) { werr("action click failed:", e); }
                     },
                     /**
                      * @param {qx.event.type.Event} event
                      */
                     __onClickTwoStepMenuButton: function (event) {
-                        var button = event.getTarget();
-                        var id = button.getUserData('actionId');
-                        var optionData = button.getUserData('optionData');
-                        this.actions[id].onTwoStepOptionSelected(optionData, button.getLabel());
+                        try {
+                            var button = event.getTarget();
+                            var id = button.getUserData('actionId');
+                            var optionData = button.getUserData('optionData');
+                            this.actions[id].onTwoStepOptionSelected(optionData, button.getLabel());
+                        } catch (e) { werr("two-step option failed:", e); }
                     },
                     /**
                      * @param {TheMovement.Action.Interface} action
@@ -312,18 +407,18 @@
                     this.hash = hash;
                     this.dirtySectors = {};
                     //MOD 22.3-4 (multiple)
-                    var matches = ClientLib.Data.WorldSector.prototype.SetDetails.toString().match(/case \$I\.[A-Z]{6}\.City:.+?this\.([A-Z]{6})\.[A-Z]{6}\(\(?\(?[a-z]<<(?:16|0x10)\)?\|[a-z]\)?,[a-z]\).+?[a-z]=this\.([A-Z]{6})\.d\[[a-z]\.[A-Z]{6}\].+?[a-z]=\(?\(?[a-z]\.([A-Z]{6})!=0.+?this\.([A-Z]{6})\.d\[[a-z]\.\3\]\s?:\s?null/);
+                    var matches = reMatch(ClientLib.Data.WorldSector.prototype.SetDetails.toString(), /case \$I\.[A-Z]{6}\.City:.+?this\.([A-Z]{6})\.[A-Z]{6}\(\(?\(?[a-z]<<(?:16|0x10)\)?\|[a-z]\)?,[a-z]\).+?[a-z]=this\.([A-Z]{6})\.d\[[a-z]\.[A-Z]{6}\].+?[a-z]=\(?\(?[a-z]\.([A-Z]{6})!=0.+?this\.([A-Z]{6})\.d\[[a-z]\.\3\]\s?:\s?null/, "WorldSector.SetDetails members");
                     this.worldSectorObjectsMemberName = matches[1];
                     this.worldSectorPlayersMemberName = matches[2];
                     this.playerAllianceDataIndexMemberName = matches[3];
                     this.worldSectorAlliancesMemberName = matches[4];
-                    this.playerIdMemberName = ClientLib.Vis.Region.RegionCity.prototype.get_PlayerId.toString().match(/(?:return |:)[A-Za-z]+\.([A-Z]{6});?}/)[1];
-                    this.playerNameMemberName = ClientLib.Vis.Region.RegionCity.prototype.get_PlayerName.toString().match(/(?:return |:)[A-Za-z]+\.([A-Z]{6});?}/)[1];
-                    this.playerFactionMemberName = ClientLib.Vis.Region.RegionCity.prototype.get_PlayerFaction.toString().match(/(?:return |:)[A-Za-z]+\.([A-Z]{6});?}/)[1];
-                    this.allianceIdMemberName = ClientLib.Vis.Region.RegionCity.prototype.get_AllianceId.toString().match(/(?:return |:)[A-Za-z]+\.([A-Z]{6});?}/)[1];
-                    this.allianceNameMemberName = ClientLib.Vis.Region.RegionCity.prototype.get_AllianceName.toString().match(/(?:return |:)[A-Za-z]+\.([A-Z]{6});?}/)[1];
-                    this.worldSectorVersionMemberName = ClientLib.Data.WorldSector.prototype.get_Version.toString().match(/return this\.([A-Z]{6})/)[1];
-                    this.updateData$ctorMethodName = ClientLib.Vis.MouseTool.CreateUnitTool.prototype.Activate.toString().match(/\$I\.[A-Z]{6}\.[A-Z]{6}\(\)\.[A-Z]{6}\(\)\.[A-Z]{6}\(\)\.[A-Z]{6}\(\(new \$I\.[A-Z]{6}\)\.([A-Z]{6})\(this,this\.[A-Z]{6}\)\);/)[1];
+                    this.playerIdMemberName = reMember(ClientLib.Vis.Region.RegionCity.prototype.get_PlayerId.toString(), /(?:return |:)[A-Za-z]+\.([A-Z]{6});?}/, "RegionCity.playerId");
+                    this.playerNameMemberName = reMember(ClientLib.Vis.Region.RegionCity.prototype.get_PlayerName.toString(), /(?:return |:)[A-Za-z]+\.([A-Z]{6});?}/, "RegionCity.playerName");
+                    this.playerFactionMemberName = reMember(ClientLib.Vis.Region.RegionCity.prototype.get_PlayerFaction.toString(), /(?:return |:)[A-Za-z]+\.([A-Z]{6});?}/, "RegionCity.playerFaction");
+                    this.allianceIdMemberName = reMember(ClientLib.Vis.Region.RegionCity.prototype.get_AllianceId.toString(), /(?:return |:)[A-Za-z]+\.([A-Z]{6});?}/, "RegionCity.allianceId");
+                    this.allianceNameMemberName = reMember(ClientLib.Vis.Region.RegionCity.prototype.get_AllianceName.toString(), /(?:return |:)[A-Za-z]+\.([A-Z]{6});?}/, "RegionCity.allianceName");
+                    this.worldSectorVersionMemberName = reMember(ClientLib.Data.WorldSector.prototype.get_Version.toString(), /return this\.([A-Z]{6})/, "WorldSector.version");
+                    this.updateData$ctorMethodName = reMember(ClientLib.Vis.MouseTool.CreateUnitTool.prototype.Activate.toString(), /\$I\.[A-Z]{6}\.[A-Z]{6}\(\)\.[A-Z]{6}\(\)\.[A-Z]{6}\(\)\.[A-Z]{6}\(\(new \$I\.[A-Z]{6}\)\.([A-Z]{6})\(this,this\.[A-Z]{6}\)\);/, "UpdateData.$ctor");
                 },
                 members: {
                     regionManipulator: null,
@@ -543,15 +638,15 @@
                 construct: function (worldObjectWrapper) {
                     this.worldObjectWrapper = worldObjectWrapper;
                     // MOD 22.3-3 (multiple)
-                    this.worldSetTerritoryOwnershipMethodName = ClientLib.Data.EndGame.HubCenter.prototype.$ctor.toString().match(/[a-z]\.([A-Z]{6})\([a-z],[a-z],\$I\.[A-Z]{6}\.NPC,0,0,100,(?:true|!0)\);/)[1];
-                    this.regionUpdateMethodName = ClientLib.Vis.Region.Region.prototype.SetPosition.toString().match(/this\.([A-Z]{6})\(\)/)[1];
-                    var updateSectorsMethodName = ClientLib.Vis.Region.Region.prototype.SetActive.toString().match(/this\.([A-Z]{6})\(\)/)[1];
-                    var matches = ClientLib.Vis.Region.Region.prototype[updateSectorsMethodName].toString().match(/([a-z])\.\$r=this\.([A-Z]{6})\.([A-Z]{6})\([a-z],\1\),([a-z])=\1\.b,\1\.\$r.+\4=\(new \$I\.([A-Z]{6})\)\.([A-Z]{6})\(this,\s?\(?([a-z])\.[A-Z]{6}\(\)\*(?:32|0x20)\)?,\s?\(?\7\.[A-Z]{6}\(\)\*(?:32|0x20)\)\)?/);
+                    this.worldSetTerritoryOwnershipMethodName = reMember(ClientLib.Data.EndGame.HubCenter.prototype.$ctor.toString(), /[a-z]\.([A-Z]{6})\([a-z],[a-z],\$I\.[A-Z]{6}\.NPC,0,0,100,(?:true|!0)\);/, "World.setTerritoryOwnership");
+                    this.regionUpdateMethodName = reMember(ClientLib.Vis.Region.Region.prototype.SetPosition.toString(), /this\.([A-Z]{6})\(\)/, "Region.update");
+                    var updateSectorsMethodName = reMember(ClientLib.Vis.Region.Region.prototype.SetActive.toString(), /this\.([A-Z]{6})\(\)/, "Region.updateSectors");
+                    var matches = reMatch(ClientLib.Vis.Region.Region.prototype[updateSectorsMethodName].toString(), /([a-z])\.\$r=this\.([A-Z]{6})\.([A-Z]{6})\([a-z],\1\),([a-z])=\1\.b,\1\.\$r.+\4=\(new \$I\.([A-Z]{6})\)\.([A-Z]{6})\(this,\s?\(?([a-z])\.[A-Z]{6}\(\)\*(?:32|0x20)\)?,\s?\(?\7\.[A-Z]{6}\(\)\*(?:32|0x20)\)\)?/, "Region.sectors members");
                     this.regionSectorsMemberName = matches[2];
                     this.regionSectorsTryGetValueMethodName = matches[3];
                     var regionSectorClassName = matches[5];
                     var regionSector$ctorMethodName = matches[6];
-                    this.regionSectorObjectsMemberName = $I[regionSectorClassName].prototype[regionSector$ctorMethodName].toString().match(/this\.([A-Z]{6})=\$I\.[A-Z]{6,12}\.[A-Z]{6}\(\$I\.[A-Z]{6},(?:32|0x20),\s?(?:32|0x20)\)/)[1];
+                    this.regionSectorObjectsMemberName = reMember($I[regionSectorClassName].prototype[regionSector$ctorMethodName].toString(), /this\.([A-Z]{6})=\$I\.[A-Z]{6,12}\.[A-Z]{6}\(\$I\.[A-Z]{6},(?:32|0x20),\s?(?:32|0x20)\)/, "RegionSector.objects");
                 },
                 members: {
                     worldObjectWrapper: null,
@@ -685,19 +780,19 @@
                 construct: function () {
                     this.visObjectTypeNameMap = {};
                     // MOD 22.3-2 (multiple)
-                    this.visObjectTypeNameMap[ClientLib.Vis.VisObject.EObjectType.RegionCityType] = ClientLib.Vis.Region.RegionCity.prototype.get_ConditionDefense.toString().match(/&&\(?this\.([A-Z]{6})\.[A-Z]{6}>=0/)[1];
-                    this.visObjectTypeNameMap[ClientLib.Vis.VisObject.EObjectType.RegionNPCBase] = ClientLib.Vis.Region.RegionNPCBase.prototype.get_BaseLevel.toString().match(/return this\.([A-Z]{6})\.[A-Z]{6}/)[1];
+                    this.visObjectTypeNameMap[ClientLib.Vis.VisObject.EObjectType.RegionCityType] = reMember(ClientLib.Vis.Region.RegionCity.prototype.get_ConditionDefense.toString(), /&&\(?this\.([A-Z]{6})\.[A-Z]{6}>=0/, "RegionCity.dataObject");
+                    this.visObjectTypeNameMap[ClientLib.Vis.VisObject.EObjectType.RegionNPCBase] = reMember(ClientLib.Vis.Region.RegionNPCBase.prototype.get_BaseLevel.toString(), /return this\.([A-Z]{6})\.[A-Z]{6}/, "RegionNPCBase.dataObject");
                     this.territoryRadiusMemberNameMap = {};
-                    this.territoryRadiusMemberNameMap[ClientLib.Data.WorldSector.ObjectType.City] = ClientLib.Data.WorldSector.WorldObjectCity.prototype.$ctor.toString().match(/this\.([A-Z]{6})=\(?\(?[a-z]>>(?:17|0x\d+)\)?&15\)?/)[1];
-                    this.territoryRadiusMemberNameMap[ClientLib.Data.WorldSector.ObjectType.NPCBase] = ClientLib.Data.WorldSector.WorldObjectNPCBase.prototype.$ctor.toString().match(/this\.([A-Z]{6})=\(?\(?[a-z]>>(?:18|0x\d+)\)?&15\)?/)[1];
-                    this.territoryRadiusMemberNameMap[ClientLib.Data.WorldSector.ObjectType.Ruin] = ClientLib.Data.WorldSector.WorldObjectRuin.prototype.$ctor.toString().match(/this\.([A-Z]{6})=\(?\(?[a-z]>>9\)?&15\)?/)[1];
+                    this.territoryRadiusMemberNameMap[ClientLib.Data.WorldSector.ObjectType.City] = reMember(ClientLib.Data.WorldSector.WorldObjectCity.prototype.$ctor.toString(), /this\.([A-Z]{6})=\(?\(?[a-z]>>(?:17|0x\d+)\)?&15\)?/, "WorldObjectCity.territoryRadius");
+                    this.territoryRadiusMemberNameMap[ClientLib.Data.WorldSector.ObjectType.NPCBase] = reMember(ClientLib.Data.WorldSector.WorldObjectNPCBase.prototype.$ctor.toString(), /this\.([A-Z]{6})=\(?\(?[a-z]>>(?:18|0x\d+)\)?&15\)?/, "WorldObjectNPCBase.territoryRadius");
+                    this.territoryRadiusMemberNameMap[ClientLib.Data.WorldSector.ObjectType.Ruin] = reMember(ClientLib.Data.WorldSector.WorldObjectRuin.prototype.$ctor.toString(), /this\.([A-Z]{6})=\(?\(?[a-z]>>9\)?&15\)?/, "WorldObjectRuin.territoryRadius");
                     this.baseLevelMemberNameMap = {};
-                    this.baseLevelMemberNameMap[ClientLib.Data.WorldSector.ObjectType.City] = ClientLib.Vis.Region.RegionCity.prototype.get_BaseLevel.toString().match(/return this\.[A-Z]{6}\.([A-Z]{6})/)[1];
-                    this.baseLevelMemberNameMap[ClientLib.Data.WorldSector.ObjectType.NPCBase] = ClientLib.Vis.Region.RegionNPCBase.prototype.get_BaseLevel.toString().match(/return this\.[A-Z]{6}\.([A-Z]{6})/)[1];
-                    this.baseLevelMemberNameMap[ClientLib.Data.WorldSector.ObjectType.Ruin] = ClientLib.Vis.Region.RegionRuin.prototype.get_BaseLevel.toString().match(/return this\.[A-Z]{6}\.([A-Z]{6})/)[1];
+                    this.baseLevelMemberNameMap[ClientLib.Data.WorldSector.ObjectType.City] = reMember(ClientLib.Vis.Region.RegionCity.prototype.get_BaseLevel.toString(), /return this\.[A-Z]{6}\.([A-Z]{6})/, "WorldObjectCity.baseLevel");
+                    this.baseLevelMemberNameMap[ClientLib.Data.WorldSector.ObjectType.NPCBase] = reMember(ClientLib.Vis.Region.RegionNPCBase.prototype.get_BaseLevel.toString(), /return this\.[A-Z]{6}\.([A-Z]{6})/, "WorldObjectNPCBase.baseLevel");
+                    this.baseLevelMemberNameMap[ClientLib.Data.WorldSector.ObjectType.Ruin] = reMember(ClientLib.Vis.Region.RegionRuin.prototype.get_BaseLevel.toString(), /return this\.[A-Z]{6}\.([A-Z]{6})/, "WorldObjectRuin.baseLevel");
                     this.playerDataIndexMemberNameMap = {};
-                    this.playerDataIndexMemberNameMap[ClientLib.Data.WorldSector.ObjectType.City] = ClientLib.Data.WorldSector.prototype.SetDetails.toString().match(/case \$I\.[A-Z]{6}\.City:.+?([a-z])=this\.[A-Z]{6}\.d\[[a-z]\.([A-Z]{6})\].+?\1==null\)(?:{return false;}|\?!1)/)[2];
-                    this.playerDataIndexMemberNameMap[ClientLib.Data.WorldSector.ObjectType.Ruin] = ClientLib.Data.WorldSector.prototype.SetDetails.toString().match(/case \$I\.[A-Z]{6}\.Ruin:.+?([a-z])=this\.[A-Z]{6}\.d\[[a-z]\.([A-Z]{6})\].+?\1==null\)(?:{return false;}|\?!1)/)[2];
+                    this.playerDataIndexMemberNameMap[ClientLib.Data.WorldSector.ObjectType.City] = reMember(ClientLib.Data.WorldSector.prototype.SetDetails.toString(), /case \$I\.[A-Z]{6}\.City:.+?([a-z])=this\.[A-Z]{6}\.d\[[a-z]\.([A-Z]{6})\].+?\1==null\)(?:{return false;}|\?!1)/, "WorldObjectCity.playerDataIndex", 2);
+                    this.playerDataIndexMemberNameMap[ClientLib.Data.WorldSector.ObjectType.Ruin] = reMember(ClientLib.Data.WorldSector.prototype.SetDetails.toString(), /case \$I\.[A-Z]{6}\.Ruin:.+?([a-z])=this\.[A-Z]{6}\.d\[[a-z]\.([A-Z]{6})\].+?\1==null\)(?:{return false;}|\?!1)/, "WorldObjectRuin.playerDataIndex", 2);
                 },
                 members: {
                     visObjectTypeNameMap: null,
@@ -780,7 +875,7 @@
             qx.Class.define('TheMovement.TerritoryIdentity', {
                 extend: Object,
                 construct: function () { //MOD NOEVIL
-                    this.GetTerritoryTypeByCoordinatesMethodName = ClientLib.Data.World.prototype.CheckFoundBase.toString().match(/switch\s?\(this\.([A-Z]{6})\([a-z],[a-z]\)\)/)[1];
+                    this.GetTerritoryTypeByCoordinatesMethodName = reMember(ClientLib.Data.World.prototype.CheckFoundBase.toString(), /switch\s?\(this\.([A-Z]{6})\([a-z],[a-z]\)\)/, "World.getTerritoryTypeByCoordinates");
                     /*  var rewrittenFunctionBody = ClientLib.Data.World.prototype.GetTerritoryTypeByCoordinates.toString().replace(/^(function\s*\()/, '$1territoryIdentity,').replace(/var ([a-z])=(\$I\.[A-Z]{6}\.[A-Z]{6}\(\)\.[A-Z]{6}\(\))\.[A-Z]{6}\(\);var ([a-z])=\2\.[A-Z]{6}\(\);/, 'var $1=territoryIdentity.playerId;var $3=territoryIdentity.allianceId;');
                      var fnBody = rewrittenFunctionBody.substring(rewrittenFunctionBody.indexOf('{') + 1, rewrittenFunctionBody.lastIndexOf('}'));
                      var args = rewrittenFunctionBody.substring(rewrittenFunctionBody.indexOf("(") + 1, rewrittenFunctionBody.indexOf(")"));
@@ -812,7 +907,7 @@
                         return ClientLib.Data.ETerritoryType.Enemy
                     };
                     // MOD 22.3-5 (multiple)
-                    this.CheckMoveBaseMethodName = ClientLib.Vis.MouseTool.MoveBaseTool.prototype.VisUpdate.toString().match(/[A-Za-z]+=[A-Za-z]+\.([A-Z]{6})\([A-Za-z]+,[A-Za-z]+,this\.[A-Z]{6}\.[A-Z]{6}\(\),this\.[A-Z]{6}\.[A-Z]{6}\(\),this\.[A-Z]{6}\)/)[1];
+                    this.CheckMoveBaseMethodName = reMember(ClientLib.Vis.MouseTool.MoveBaseTool.prototype.VisUpdate.toString(), /[A-Za-z]+=[A-Za-z]+\.([A-Z]{6})\([A-Za-z]+,[A-Za-z]+,this\.[A-Z]{6}\.[A-Z]{6}\(\),this\.[A-Z]{6}\.[A-Z]{6}\(\),this\.[A-Z]{6}\)/, "World.checkMoveBase");
                     // The second replace takes care of landing on a ruin and the third one landing next to a ruin
                     // MOD fixed regex by Netquik
                     /* var rewrittenFunctionBody = ClientLib.Data.World.prototype[this.CheckMoveBaseMethodName].toString().replace(/^(function\s*\()/, '$1territoryIdentity,').replace(/(var ([A-Za-z]+)=([A-Za-z]+)\.[A-Z]{6}\(([A-Za-z]\.[A-Z]{6})\);if\(\(\2!=\$I\.[A-Z]{6}\.[A-Z]{6}\(\)\.[A-Z]{6}\(\)\.[A-Z]{6}\(\)\)&&)\(\$I\.[A-Z]{6}\.[A-Z]{6}\(\)\.[A-Z]{6}\(\)\.[A-Z]{6}\(\2\)==null\)(\)\{[A-Za-z]+\|=\$I\.[A-Z]{6}\.FailFieldOccupied;)/, '$1 $3.GetPlayerAllianceId($4) != territoryIdentity.allianceId$5').replace(/(var ([A-Za-z]+)=([A-Za-z]+)\.[A-Z]{6}\(([A-Za-z]\.[A-Z]{6})\);if\(\(\2!=\$I\.[A-Z]{6}\.[A-Z]{6}\(\)\.[A-Z]{6}\(\)\.[A-Z]{6}\(\)\)&&)\(\$I\.[A-Z]{6}\.[A-Z]{6}\(\)\.[A-Z]{6}\(\)\.[A-Z]{6}\(\2\)==null\)(\)\{[A-Za-z]+\|=\(\$I\.[A-Z]{6}\.FailNeighborRuin)/, '$1 $3.GetPlayerAllianceId($4) != territoryIdentity.allianceId$5');
@@ -820,7 +915,7 @@
                     var args = rewrittenFunctionBody.substring(rewrittenFunctionBody.indexOf("(") + 1, rewrittenFunctionBody.indexOf(")"));
                     this.CheckMoveBasePatched = new Evil(args, fnBody); */
 
-                    var CMBM = ClientLib.Data.World.prototype[this.CheckMoveBaseMethodName].toString().match(/this\.([A-Z]{6})\(.,.,.,.\).+[a-z]\.([A-Z]{6})!=\$I.+&&\(?[a-z]\.([A-Z]{6})>\$I.+[a-z]\.([A-Z]{6})\(.,.\)\)?&?&?[{(][a-z]\|=.+[a-z]=[a-z]\.[A-Z]{6}\([a-z]+\.([A-Z]{6})\).+([A-Z]{6})\[[a-z]\]\[1\].+[a-z]+\.([A-Z]{6})!=.+([A-Z]{6})\.len/);
+                    var CMBM = reMatch(ClientLib.Data.World.prototype[this.CheckMoveBaseMethodName].toString(), /this\.([A-Z]{6})\(.,.,.,.\).+[a-z]\.([A-Z]{6})!=\$I.+&&\(?[a-z]\.([A-Z]{6})>\$I.+[a-z]\.([A-Z]{6})\(.,.\)\)?&?&?[{(][a-z]\|=.+[a-z]=[a-z]\.[A-Z]{6}\([a-z]+\.([A-Z]{6})\).+([A-Z]{6})\[[a-z]\]\[1\].+[a-z]+\.([A-Z]{6})!=.+([A-Z]{6})\.len/, "World.checkMoveBase internals (CMBM)");
                     this.CheckMoveBasePatched = function (territoryIdentity, a, b, c, d, e) {
                         //var $createHelper;
                         var xx = ClientLib.Data.EMoveBaseResult;
@@ -948,11 +1043,11 @@
             qx.Class.define('TheMovement.Hash', {
                 extend: Object,
                 construct: function () {
-                    var matches = ClientLib.Data.AllianceSupportState.prototype.Update.toString().match(/switch\s?\(\$I\.([A-Z]{6})\.([A-Z]{6})\([a-z]\.c\[[a-z]\]\.charCodeAt\(0\)\)\)\{/);
+                    var matches = reMatch(ClientLib.Data.AllianceSupportState.prototype.Update.toString(), /switch\s?\(\$I\.([A-Z]{6})\.([A-Z]{6})\([a-z]\.c\[[a-z]\]\.charCodeAt\(0\)\)\)\{/, "Hash encoder class");
                     var hashEncoderClassname = matches[1];
                     var decodeCharCodeMethodName = matches[2];
                     // MOD 22.3-1
-                    var hashTableMemberName = $I[hashEncoderClassname][decodeCharCodeMethodName].toString().match(/return \$I\.[A-Z]{6}\.([A-Z]{6})\[[a-z]\]/)[1];
+                    var hashTableMemberName = reMember($I[hashEncoderClassname][decodeCharCodeMethodName].toString(), /return \$I\.[A-Z]{6}\.([A-Z]{6})\[[a-z]\]/, "Hash table member");
                     this.hashTable = $I[hashEncoderClassname][hashTableMemberName];
                 },
                 members: {
@@ -1054,8 +1149,9 @@
                     //MOD New way to find moveInfoOnMouseUpMethodName by NetquiK (Patch for 22.2)
                     /* this.moveInfoOnMouseUpMethodName = Function.prototype.toString.call(webfrontend.gui.region.RegionCityMoveInfo.constructor).match(/attachNetEvent\(this\.[A-Za-z0-9_]+,[A-Za-z]+,ClientLib\.Vis\.MouseTool\.OnMouseUp,this,this\.([A-Za-z0-9_]+)\);/)[1]; */
                     this.moveInfoOnMouseUpMethodName = null;
-                    let MoveInfo = webfrontend.gui.region.RegionCityMoveInfo.$$original.toString(); //GameVersion
-                    this.moveInfoOnMouseUpMethodName = MoveInfo.match(/attachNetEvent\(this\.[A-Za-z0-9_]+,[A-Za-z]+,ClientLib\.Vis\.MouseTool\.OnMouseUp,this,this\.([A-Za-z0-9_]+)\);/)[1];
+                    var moveInfoSource = "";
+                    try { moveInfoSource = webfrontend.gui.region.RegionCityMoveInfo.$$original.toString(); } catch (e) {} //GameVersion
+                    this.moveInfoOnMouseUpMethodName = reMember(moveInfoSource, /attachNetEvent\(this\.[A-Za-z0-9_]+,[A-Za-z]+,ClientLib\.Vis\.MouseTool\.OnMouseUp,this,this\.([A-Za-z0-9_]+)\);/, "RegionCityMoveInfo.onMouseUp");
 
                     //Alternative way by NetquiK
                     /* let MoveInfo = webfrontend.gui.region.RegionCityMoveInfo.prototype,
@@ -1652,11 +1748,39 @@
                     instance.registerAction(new TheMovement.Action.PlanRuinFor(worldManipulator, regionManipulator, worldObjectWrapper, hash));
                     instance.registerAction(new TheMovement.Action.PlanLevelUp(worldManipulator, regionManipulator, worldObjectWrapper));
                     instance.registerAction(new TheMovement.Action.PlanRemove(worldManipulator, regionManipulator, worldObjectWrapper));
+
+                    // Live enable/disable from the CnC Pack menu (no reload). On disable we scrub any
+                    // simulated changes and restore the patched game methods so the map returns to reality.
+                    function setEnabled(on) {
+                        scriptEnabled = !!on;
+                        wlog(on ? 'enabled' : 'disabled');
+                        if (on) return;
+                        try { if (territoryIdentity && territoryIdentity.isActive()) territoryIdentity.deactivate(); } catch (e) { werr('teardown deactivate:', e); }
+                        try {
+                            if (worldManipulator && worldManipulator.isDirty()) {
+                                try { while (!history.isEmpty()) history.undo(); } catch (e2) { history.clear(); }
+                                regionManipulator.updateVisuals();
+                                worldManipulator.reset();
+                            }
+                        } catch (e) { werr('teardown reset:', e); }
+                    }
+                    try {
+                        if (MM && MM.lifecycle && typeof MM.lifecycle.watch === 'function') {
+                            MM.lifecycle.watch(OPTIONS_ID, {
+                                onEnable: function () { setEnabled(true); },
+                                onDisable: function () { setEnabled(false); }
+                            });
+                            if (typeof MM.lifecycle.isEnabled === 'function') {
+                                scriptEnabled = (MM.lifecycle.isEnabled(OPTIONS_ID) !== false);
+                            }
+                        }
+                    } catch (e) { werr('lifecycle.watch failed:', e); }
+                    wlog('ready (options id ' + OPTIONS_ID + ')');
                 } else {
                     setTimeout(waitForGame, 1000);
                 }
             } catch (e) {
-                console.log('TheMovement: ', e.toString());
+                werr('init failed:', (e && e.toString) ? e.toString() : e);
             }
         }
         setTimeout(waitForGame, 1000);

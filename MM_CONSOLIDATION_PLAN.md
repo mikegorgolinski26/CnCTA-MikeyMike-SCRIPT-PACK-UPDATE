@@ -154,10 +154,11 @@ Priority order (high → low), with the new MM name and the one-line reason:
   bar with the menu look-and-feel) was rebuilt as the `MMCommon.menubar` module + the MM - Next MCV "Dock in
   game menu bar" option + the MM buttons "menubar" dock mode (build 1.0.49–1.0.51) — Mike confirmed it looks
   good. Its other stickers (resources / 6h-vs-continuous production / repair times) were intentionally dropped
-  (Next MCV + Base Tools + Base Scanner already cover them). NOT salvaged into MMCommon (per Mike's "don't ship
-  unused code" rule): the smooth `interpolateColor`/`formatNumberColor` ratio→colour gradient helper is in the
-  retired file's git history if a future smooth gradient is wanted — we currently use the 3-step
-  `barColor` (red/yellow/green) in Next MCV / Loot Summary.
+  (Next MCV + Base Tools + Base Scanner already cover them). **2026-06-21 (cont.): file + bg row REMOVED**
+  (it had been kept `enabled:false` as a dock-style reference until the menu look was finalised; Mike OK'd
+  removing it now). The smooth `interpolateColor`/`formatNumberColor` ratio→colour gradient helper WAS
+  salvaged into `MMCommon.color` (`interpolate` / `ratioHex` / `valueHex`) before deletion — a smooth
+  green→amber→red gradient, complementing the 3-step `barColor` used by Next MCV / Loot Summary.
 - **TA_Wavy** → **RETIRED 2026-06-21** (file + bg row gone). MM - Move Info already provides the same
   forgotten/NPC-bases-in-range + level breakdown + wave estimate while moving a base, so Wavy was redundant.
   (Historic salvage ideas if ever wanted: move-base-tool per-cell cache overlay; auto-mark forgotten-defense
@@ -204,7 +205,7 @@ Priority order (high → low), with the new MM name and the one-line reason:
 
 | Script | The decision |
 |---|---|
-| **TA_TheMovement** | Unique client-side **territory/base-move simulator** (plan moves/ruins/level-ups, undo). High value, but the **densest de-obf in the pack** (breaks most patches). MM-IFY *and* mine its de-obf recipes + base-0x5b hash for `deobf` and the base-edit move primitive — or shelve? |
+| ~~**TA_TheMovement**~~ | **MM-IFIED 2026-06-21 → MM - The Movement 1.0.0 (id 10209); original retired.** Engine preserved verbatim; the ~15 NOEVIL de-obf lookups now routed through guarded `reMember()/reMatch()` (named errors naming exactly which lookup a game update broke), menu/click handlers wrapped, `MMCommon.lifecycle` wired (disable scrubs simulated changes + restores patched methods, no reload). Its de-obf recipes + base-0x5b hash are still un-mined into `MMCommon.deobf` — future refactor (see §4). |
 | **TA_xTrim_Base_Overlay_DR_4_3** | CTRL-hold in-base **upgrade gain/cost heat-map**. Unique UX, but answers the same question as Base Tools' upgrade-priority. MM-IFY as a Base Tools overlay, or retire? |
 | **TA_MovableMenuOverlay** | Makes **native** Mail/Forum overlays draggable. Niche; **highest blast radius** (globally overrides core app methods). Want native-overlay dragging at all? If no → retire. |
 | **TA_Supplies_Mod** | Shop "disable funds display" convenience + auto-Supplies-tab. No MM overlap. Light MM-IFY or drop? |
@@ -242,7 +243,7 @@ Priority order (high → low), with the new MM name and the one-line reason:
 - `map`: consolidate the world→screen **marker projection** + pan/zoom reposition/resize so Tunnel Info,
   Attack Range, Player Base Info share ONE (currently 3 copies); add region scan→canvas paint helper (TA_Map).
 - `coords.sector` — reconcile with ExporterTools' `getSectorNo/getSectorText`.
-- `num`/`ui`: ratio→color helper (Info_Sticker); generic qx table-augment helpers `addColumn`/
+- `num`/`ui`: ~~ratio→color helper (Info_Sticker)~~ **DONE → `MMCommon.color`**; generic qx table-augment helpers `addColumn`/
   `getLastFocusedRow` (Report_Stats).
 - `deobf`: POI `$ctor` field parse (ExporterTools); map-label `UpdateColor`/`SetCanvasValue` recipe
   (Colorer) → Wrapper; territory/move recipes + base-0x5b hash (TheMovement) → informs the move primitive.
@@ -307,5 +308,5 @@ Auto_Repair, Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
 CityMoveInfoExtend, Map, CD_PvP_Quick_Map, The_Green_Cross_Tools, Report_Summary, Formation_Saver,
 PvP_PvE_Ranking_…, PvP_PvE_Player_Info_Mod, View_Player_Base, CnCTAOpt_Link_Button,
 New_Resource_Trade_Window, Transfer_All_resources.
-KEEP-PENDING-REVIEW: TheMovement, xTrim_Base_Overlay_DR_4_3, MovableMenuOverlay, Supplies_Mod,
-Multissesion_MOD.
+KEEP-PENDING-REVIEW: xTrim_Base_Overlay_DR_4_3, MovableMenuOverlay, Supplies_Mod,
+Multissesion_MOD. (TheMovement → MM-IFIED 2026-06-21, MM - The Movement id 10209.)

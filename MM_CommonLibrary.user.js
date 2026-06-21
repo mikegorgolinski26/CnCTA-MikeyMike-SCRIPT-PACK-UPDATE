@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.18
+// @version         1.0.19
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.18"
+            version: "1.0.19"
         };
 
         // -------------------------------------------------------------------
@@ -165,6 +165,45 @@
                 if (a >= 1e3) return s + (a / 1e3).toFixed(dec) + "k";
                 return s + a.toFixed(0);
             }
+        };
+
+        // -------------------------------------------------------------------
+        // color - rgb interpolation + ratio->hex gradient. Salvaged from the
+        // retired TA_Info_Sticker (interpolateColor / formatNumberColor). This is a
+        // SMOOTH green->amber->red gradient; for the 3-step red/yellow/green bars use
+        // the barColor pattern in Next MCV / Loot Summary instead.
+        // -------------------------------------------------------------------
+        NS.color = {
+            // Linear interpolate two [r,g,b] arrays; s clamped to [0,1] -> [r,g,b].
+            interpolate: function (c1, c2, s) {
+                s = Math.max(0, Math.min(1, s));
+                return [
+                    Math.floor(c1[0] + s * (c2[0] - c1[0])),
+                    Math.floor(c1[1] + s * (c2[1] - c1[1])),
+                    Math.floor(c1[2] + s * (c2[2] - c1[2]))
+                ];
+            },
+            // Map a fill ratio (value/max) to "#rrggbb": green up to 50%, blending to
+            // amber by 75%, to red by 100%. Default palette = the old Info Sticker colours.
+            ratioHex: function (ratio, palette) {
+                if (!isFinite(ratio)) ratio = 0;
+                ratio = Math.max(0, ratio);
+                var p = palette || {};
+                var green = p.green || [40, 150, 40];
+                var middle = p.middle || [181, 151, 0];
+                var red = p.red || [157, 43, 43];
+                var c;
+                if (ratio < 0.5) c = green;
+                else if (ratio < 0.75) c = NS.color.interpolate(green, middle, (ratio - 0.5) / 0.25);
+                else if (ratio < 1) c = NS.color.interpolate(middle, red, (ratio - 0.75) / 0.25);
+                else c = red;
+                try { return qx.util.ColorUtil.rgbToHexString(c); }
+                catch (e) {
+                    return "#" + c.map(function (n) { return (n < 16 ? "0" : "") + n.toString(16); }).join("");
+                }
+            },
+            // Convenience matching the old formatNumberColor(value, max) signature.
+            valueHex: function (value, max, palette) { return NS.color.ratioHex(max ? value / max : 0, palette); }
         };
 
         // -------------------------------------------------------------------
