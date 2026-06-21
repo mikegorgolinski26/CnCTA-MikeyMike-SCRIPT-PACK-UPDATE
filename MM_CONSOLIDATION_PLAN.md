@@ -86,8 +86,10 @@ confirm no legacy file was bundled verbatim, and a build-wide grep for `fetch(`/
 
 Priority order (high → low), with the new MM name and the one-line reason:
 
-1. **TA_Tunnel_Info → MM - Tunnel Info** — cleanest script in the pack (NOEVIL, no hardcoded indices, no
-   creds); unique tunnel-activation overlay. Route its world→screen projection through `MMCommon.map`.
+1. **TA_Tunnel_Info → MM - Tunnel Info** ✅ DONE 2026-06-21 (1.0.0, id 10205) — rebuilt on MMCommon
+   (map/coords/net/ui/buttons), green=activate / red=blocked + the move-panel offense/required readout,
+   `[tir]` range (default 6) + override, HUD button. Original kept disabled for side-by-side verify.
+   **NOT yet live-verified by Mike.**
 2. **TA_CD_PvP_Alert_Status → MM - Attack Alert** — incoming-attack title/favicon/siren alarm; no MM
    equivalent. Most robust legacy script. Event-drive via `net.attach` instead of the 5s poll; `enable_sound`→`settings`.
 3. **TA_Real_POI_Bonus → MM - Real POI Bonus** — rank-corrected POI gain/loss; also yields the
