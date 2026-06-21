@@ -1376,7 +1376,8 @@
                         if (!op || !op.run) return;
                         if (op.id && state.enabled[op.id] === false) return; // only enabled tools
                         any = true;
-                        var b = new qx.ui.menu.Button(op.label || "Open", op.icon || null);
+                        // no icons: we don't have one for every tool, so show none (consistency)
+                        var b = new qx.ui.menu.Button(op.label || "Open");
                         b.addListener("execute", function () { try { op.run(); } catch (e) { NS.log.err("opener:", e); } });
                         m.add(b);
                     })(openers[i]);
