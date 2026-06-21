@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  While you are using the game's "move base" tool, highlights every base that would fall within your attack/tunnel influence range of the spot under the cursor - other players' bases in orange, Forgotten (NPC) bases in green. Markers follow the map as you pan and zoom and clear when you finish moving. A HUD options panel toggles each layer and lets you override the range.
-// @version      1.0.0
+// @version      1.0.1
 // @author       Napali, XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -133,10 +133,21 @@
 			markers = [];
 		}
 
+		// hex -> rgba so the fill can be subtle while the border keeps the tile readable.
+		function hexToRgba(hex, a) {
+			try {
+				var h = String(hex).replace("#", "");
+				if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+				var n = parseInt(h, 16);
+				return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
+			} catch (e) { return hex; }
+		}
 		function makeMarkerEl(color) {
 			var el = document.createElement("div");
 			el.style.cssText = [
-				"position:absolute", "background:" + color, "opacity:0.5",
+				"position:absolute",
+				"background:" + hexToRgba(color, 0.22),
+				"border:1px solid " + hexToRgba(color, 0.5),
 				"border-radius:3px", "pointer-events:none", "box-sizing:border-box"
 			].join(";");
 			layer.appendChild(el);
@@ -144,17 +155,20 @@
 		}
 
 		// Position + size one marker over its tile, sized from the live projection so it scales with zoom.
+		// Anchor on the tile CENTRE (x+0.5, y+0.5) - that's where the base art sits; worldToScreen(x,y)
+		// alone lands on the tile corner (up-left of the base, the same offset the off/def bubbles have).
 		function positionMarker(m) {
 			try {
-				var p = MM.map.worldToScreen(m.x, m.y);
+				var p0 = MM.map.worldToScreen(m.x, m.y);
 				var px = MM.map.worldToScreen(m.x + 1, m.y);
 				var py = MM.map.worldToScreen(m.x, m.y + 1);
-				var w = Math.max(6, Math.abs(px.x - p.x));
-				var h = Math.max(6, Math.abs(py.y - p.y));
+				var c = MM.map.worldToScreen(m.x + 0.5, m.y + 0.5);
+				var w = Math.max(6, Math.abs(px.x - p0.x));
+				var h = Math.max(6, Math.abs(py.y - p0.y));
 				m.el.style.width = Math.round(w) + "px";
 				m.el.style.height = Math.round(h) + "px";
-				m.el.style.left = Math.round(p.x - w / 2) + "px";
-				m.el.style.top = Math.round(p.y - h / 2) + "px";
+				m.el.style.left = Math.round(c.x - w / 2) + "px";
+				m.el.style.top = Math.round(c.y - h / 2) + "px";
 			} catch (e) {}
 		}
 
