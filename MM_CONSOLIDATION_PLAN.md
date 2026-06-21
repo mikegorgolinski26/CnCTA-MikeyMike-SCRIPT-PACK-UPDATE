@@ -97,8 +97,24 @@ Priority order (high → low), with the new MM name and the one-line reason:
    POI math into `MMCommon.poi.*`.
 5. **TA_POI_ExporterTools → MM - POI Exporter** — POI→CSV + sector survey; modern/clean code. Lift CSV +
    sector helpers to MMCommon (§6).
-6. **TA_Report_Stats → MM - Report Stats** — combat-report CP/RT/loot analyzer; **absorb Report_Summary's
-   "scan all reports" mode**. Hardening its many `.toString()` regexes is the main work.
+6. ~~**TA_Report_Stats → MM - Report Stats**~~ — **RETIRED 2026-06-21 (Mike: deferred out of the initial
+   release).** Was: combat-report CP/RT/loot analyzer (a checkbox column on the in-game combat-reports table;
+   tick N reports → combined Command-Point cost + Repair-Time + net Loot). Chose to DOCUMENT the salvageable
+   model here rather than stub inert code into MMCommon, to keep the release lean. **Salvage spec for a future
+   MM - Report Stats (post-release):**
+   - **Combined cost/loot model** (from `onAllReportsLoaded`): per selected `ClientLib.Data.Reports.CombatReport`
+     — RT = Σ `GetAttackerMaxRepairTime()`; CP from server constants × base-to-base distance per report type
+     (`EReportType.Combat` → `PvPCombatCostMinimum + PvPCombatCostPerField*dist`; `NPCRaid` →
+     `CombatCostMinimum + CombatCostPerField{Inside,Outside}*dist`; `NPCPlayerCombat`/Forgotten = free);
+     Loot per resource = `GetAttackerTotalResourceReceived(rt) − GetAttackerRepairCosts(rt)` (defender variants
+     when `EPlayerReportType` ≠ CombatOffense). Server getters: `get_CombatCostMinimum/_PvPCombatCostMinimum/
+     _CombatCostPerField/_CombatCostPerFieldOutsideTerritory/_PvPCombatCostPerField`. Load reports via
+     `reports.RequestReportData(id)` + the `ReportDelivered` net event.
+   - **Generic "add a column to a game qooxdoo table" patch** (the fragile part): the game's
+     `qx.ui.table.model.Abstract` / `qx.ui.table.columnmodel.Basic` have no public `addColumn`, so the original
+     reconstructs one by `.toString()`-regexing their minified member names. If ever rebuilt, this belongs in the
+     **Framework Wrapper** (de-obf registry) as a guarded `table.addColumn` helper, not a per-script regex.
+   - Would also have absorbed **Report_Summary**'s "scan all reports" mode (`reports.scanAll(type)`).
 7. **TA_Warchief_Upgrade_Base_Defense_Army → MM - Upgrade Helper** (or a Base Tools tab) — clean **manual**
    upgrade-to-level-N UI using official `ClientLib.API.*` (no de-obf). Adds per-selection + Defense/Army
    upgrade UX Base Tools lacks.
@@ -274,9 +290,10 @@ Wrapper + Common Library, zero third-party update/exfiltration, ready to publish
 
 RETIRE: Count_Forgotten_Bases_Range, New_Custom_Flunik_Tools.
 QUARANTINE: leoStats, BaseShare, Hotkeys.
-MM-IFY: Tunnel_Info, CD_PvP_Alert_Status, Real_POI_Bonus, POIs_Analyser, POI_ExporterTools, Report_Stats,
+MM-IFY: Tunnel_Info, CD_PvP_Alert_Status, Real_POI_Bonus, POIs_Analyser, POI_ExporterTools,
 Warchief_Upgrade_Base_Defense_Army, Warchief_Sector_HUD, Zoom, ADDON_City_Online_Status_Colorer_SC,
 Repair_Time_Of_Death.
+RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6): Report_Stats.
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Auto_Repair, Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Info_Sticker, Wavy,
 CityMoveInfoExtend, Map, CD_PvP_Quick_Map, The_Green_Cross_Tools, Report_Summary, Formation_Saver,
