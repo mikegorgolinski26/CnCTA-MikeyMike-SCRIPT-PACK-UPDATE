@@ -3,7 +3,7 @@
 // @description     Dockable, color-coded "Member Status" overview of online/away alliance members (with highest offense/defense levels when your access exposes them). MikeyMike rework of InFlames2k's "AllianceMemberOnline", rebuilt on the MM - Common Library.
 // @author          InFlames2k (Patrick Schubert)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.2
+// @version         1.2.3
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
@@ -26,8 +26,8 @@
  (drag by body, position persists, on-screen clamp). A PIN button in its header locks
  it into a menu-styled panel anchored NEXT TO the game's base bar (a separate panel
  BESIDE the bar - the Info Sticker look - not inserted into it; it re-anchors to the
- bar's left edge). Click the pin again to pop back out to the movable panel. The roster
- colours adapt to the light docked / dark floating backgrounds.
+ bar's left edge). Click the pin again to pop back out to the movable panel. Both panels
+ are the dark, opaque #23282b MM style (matching Next MCV / Loot Summary).
 
  Shows "Off" (BestOffenseLvl = highest army level) and "Def" (BestDefenseLvl =
  highest defense level) columns, but only when your alliance access exposes that
@@ -75,10 +75,10 @@
             function updatePin() { try { pinBtn.setIcon(pinIcon(menuOn())); } catch (e) {} }
 
             // header (title + pin) - kept WITH the content so it shows in both the floating and docked states
-            var titleLbl = new qx.ui.basic.Label("Members").set({ font: "bold", rich: true, alignY: "middle" });
-            var headerRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(4).set({ alignY: "middle" }));
-            headerRow.add(titleLbl);
-            headerRow.add(new qx.ui.core.Spacer(), { flex: 1 });
+            var titleLbl = new qx.ui.basic.Label("Members").set({ font: "bold", rich: true, alignY: "middle", textAlign: "center", allowGrowX: true });
+            var headerRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(0).set({ alignY: "middle" }));
+            headerRow.add(new qx.ui.core.Spacer(22, 1)); // balances the pin width so the title sits centered
+            headerRow.add(titleLbl, { flex: 1 });
             headerRow.add(pinBtn);
 
             // content = header + roster; this whole block re-parents between the float panel and the dock panel
@@ -113,11 +113,10 @@
                     var app = qx.core.Init.getApplication();
                     if (!app || !app.getDesktop) return null;
                     sp.panel = new qx.ui.container.Composite(new qx.ui.layout.VBox(2)).set({
-                        width: 160, paddingLeft: 8, paddingRight: 6, paddingTop: 5, paddingBottom: 6,
-                        decorator: new qx.ui.decoration.Decorator().set({
-                            backgroundImage: "webfrontend/ui/common/bgr_region_world_select_scaler.png",
-                            backgroundRepeat: "scale", widthLeft: 1, widthRight: 1, colorLeft: "#7F0707", colorRight: "#7F0707"
-                        })
+                        width: 160, paddingLeft: 8, paddingRight: 8, paddingTop: 6, paddingBottom: 6,
+                        // opaque dark panel, matching MM - Next MCV / Loot Summary (the region-texture image
+                        // rendered transparent without the game's cap pieces, so use a solid background)
+                        decorator: new qx.ui.decoration.Decorator().set({ backgroundColor: "#23282b", width: 1, color: "#3a4750", radius: 5 })
                     });
                     app.getDesktop().add(sp.panel, { right: 124, top: 130 });
                     sp.built = true;
@@ -145,9 +144,8 @@
                     refresh();
                 } catch (e) { LOG.err("setMenuMode:", e); }
             }
-            // colour set per mode: light/dark-readable. Floating = dark MM panel; docked = light mission-bar texture.
+            // both the floating and docked panels are now the dark #23282b MM style, so one colour set.
             function colors() {
-                if (menuOn()) return { title: "#2a3a4a", header: "#2a3a4a", online: "#15691a", away: "#9a4500", level: "#16527a", none: "#556070" };
                 return { title: "#cfe6ff", header: "#ffffff", online: COL_ONLINE, away: COL_AWAY, level: COL_LEVEL, none: "#888888" };
             }
 
