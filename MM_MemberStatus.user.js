@@ -3,7 +3,7 @@
 // @description     Dockable, color-coded "Member Status" overview of online/away alliance members (with highest offense/defense levels when your access exposes them). MikeyMike rework of InFlames2k's "AllianceMemberOnline", rebuilt on the MM - Common Library.
 // @author          InFlames2k (Patrick Schubert)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.0
+// @version         1.2.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
@@ -22,11 +22,12 @@
  MMCommon.buttons.register (CommonButtonHandler) and MMCommon.ui.Window
  (dockable/persistent window) instead of hand-rolled UI.
 
- DISPLAY (1.2.0): an UNPINNED, frameless, movable floating panel like MM - Next MCV
- (drag by body, position persists, on-screen clamp). A PIN button in its header docks
- it INTO the game's base menu bar as a menu-styled "Members" section (the Info Sticker
- "locked" look) via MMCommon.menubar; click the pin again to pop back out to the
- movable panel. The roster colours adapt to the light docked / dark floating backgrounds.
+ DISPLAY (1.2.x): an UNPINNED, frameless, movable floating panel like MM - Next MCV
+ (drag by body, position persists, on-screen clamp). A PIN button in its header locks
+ it into a menu-styled panel anchored NEXT TO the game's base bar (a separate panel
+ BESIDE the bar - the Info Sticker look - not inserted into it; it re-anchors to the
+ bar's left edge). Click the pin again to pop back out to the movable panel. The roster
+ colours adapt to the light docked / dark floating backgrounds.
 
  Shows "Off" (BestOffenseLvl = highest army level) and "Def" (BestDefenseLvl =
  highest defense level) columns, but only when your alliance access exposes that
@@ -98,36 +99,58 @@
             if (!win) { LOG.err("could not create window"); return; }
             win.add(content);
 
-            // --- the docked ("pinned") panel: a menu-styled section inside the game's base bar ---
-            var mb = { panel: null, dock: null, built: false };
-            function buildMenuPanel() {
-                if (mb.built) return mb.panel;
+            // --- the docked ("pinned") panel: a menu-styled panel anchored NEXT TO the base bar (the Info
+            // Sticker look - a separate panel BESIDE the bar, NOT inserted into it). It sits to the LEFT of
+            // the bar and re-anchors via a light poll. Added to the game desktop, like the HUD tray.
+            var sp = { panel: null, built: false, poll: null };
+            function buildSidePanel() {
+                if (sp.built) return sp.panel;
                 try {
                     if (!MM.menubar || !MM.menubar.styledPanel) return null;
-                    mb.panel = MM.menubar.styledPanel({ width: 160, spacing: 2, marginLeft: 5 });
-                    mb.dock = MM.menubar.dock(mb.panel, { pos: null, enabled: function () { return menuOn(); } });
-                    mb.built = true;
-                } catch (e) { LOG.err("buildMenuPanel:", e); mb.panel = null; }
-                return mb.panel;
+                    sp.panel = MM.menubar.styledPanel({ width: 170, spacing: 2, padding: [6, 8, 6, 8] });
+                    var app = qx.core.Init.getApplication();
+                    app.getDesktop().add(sp.panel, { left: 40, top: 130 });
+                    sp.built = true;
+                    startSidePoll();
+                } catch (e) { LOG.err("buildSidePanel:", e); sp.panel = null; }
+                return sp.panel;
             }
-            // move the content into whichever container is active (the in-bar panel or the float panel)
+            // keep the panel glued just to the LEFT of the base navigation bar, top-aligned to it
+            function anchorSide() {
+                try {
+                    if (!menuOn() || !sp.panel) return;
+                    var rect = MM.menubar.barRect && MM.menubar.barRect();
+                    if (!rect) return;
+                    var b = sp.panel.getBounds && sp.panel.getBounds();
+                    var w = (b && b.width) ? b.width : 170;
+                    var left = Math.max(4, Math.round(rect.left - w - 6));
+                    var top = Math.max(4, Math.round(rect.top));
+                    sp.panel.setLayoutProperties({ left: left, top: top, right: null, bottom: null });
+                } catch (e) {}
+            }
+            function startSidePoll() {
+                if (sp.poll) return;
+                try { sp.poll = window.setInterval(function () { if (menuOn() && sp.panel && sp.panel.isVisible && sp.panel.isVisible()) anchorSide(); }, 1000); } catch (e) {}
+                anchorSide();
+            }
+            // move the content into whichever container is active (the side panel or the float panel)
             function placeContent() {
                 try {
-                    var host = menuOn() ? buildMenuPanel() : win;
+                    var host = menuOn() ? buildSidePanel() : win;
                     if (!host) host = win;
                     var cur = content.getLayoutParent && content.getLayoutParent();
                     if (cur !== host) { if (cur && cur.remove) cur.remove(content); host.add(content); }
                 } catch (e) { LOG.err("placeContent:", e); }
             }
             function isShown() {
-                try { return menuOn() ? !!(mb.panel && mb.panel.isVisible && mb.panel.isVisible()) : win.isVisible(); } catch (e) { return false; }
+                try { return menuOn() ? !!(sp.panel && sp.panel.isVisible && sp.panel.isVisible()) : win.isVisible(); } catch (e) { return false; }
             }
             function setMenuMode(on) {
                 try {
                     MM.settings.set("AllianceOverview.MenuBar", on === true);
                     updatePin();
-                    if (on) { buildMenuPanel(); if (mb.dock) mb.dock.refresh(); placeContent(); if (mb.panel) mb.panel.show(); try { win.close(); } catch (e) {} }
-                    else { placeContent(); if (mb.dock) mb.dock.refresh(); try { win.open(); } catch (e) {} }
+                    if (on) { buildSidePanel(); placeContent(); if (sp.panel) sp.panel.show(); anchorSide(); try { win.close(); } catch (e) {} }
+                    else { if (sp.panel) sp.panel.exclude(); placeContent(); try { win.open(); } catch (e) {} }
                     refresh();
                 } catch (e) { LOG.err("setMenuMode:", e); }
             }
@@ -232,8 +255,8 @@
                 onExecute: function () {
                     try {
                         if (menuOn()) {
-                            if (mb.panel && mb.panel.isVisible && mb.panel.isVisible()) mb.panel.exclude();
-                            else { buildMenuPanel(); placeContent(); if (mb.panel) mb.panel.show(); if (mb.dock) mb.dock.refresh(); refresh(); }
+                            if (sp.panel && sp.panel.isVisible && sp.panel.isVisible()) sp.panel.exclude();
+                            else { buildSidePanel(); placeContent(); if (sp.panel) sp.panel.show(); anchorSide(); refresh(); }
                         } else {
                             if (win.isVisible()) win.close(); else { win.open(); refresh(); }
                         }
@@ -249,7 +272,9 @@
                 (function tryMenu() {
                     try {
                         if (!menuOn()) return;
-                        if (buildMenuPanel()) { placeContent(); refresh(); return; }
+                        if (MM.menubar && MM.menubar.barRect && MM.menubar.barRect() && buildSidePanel()) {
+                            placeContent(); if (sp.panel) sp.panel.show(); anchorSide(); refresh(); return;
+                        }
                     } catch (e) {}
                     if (++mTries < 60) window.setTimeout(tryMenu, 500);
                 })();

@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.17
+// @version         1.0.18
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.17"
+            version: "1.0.18"
         };
 
         // -------------------------------------------------------------------
@@ -1637,6 +1637,16 @@
             return {
                 available: available,
                 styledPanel: styledPanel,
+                // Screen rect {left,top,right,bottom,width,height} of the base navigation bar, or null - for
+                // anchoring a panel NEXT TO the bar (vs dock() which inserts INTO it).
+                barRect: function () {
+                    try {
+                        var app = qx.core.Init.getApplication();
+                        var b = app && app.getBaseNavigationBar && app.getBaseNavigationBar();
+                        if (b && b.getContentLocation) { var l = b.getContentLocation(); if (l && (l.left || l.right)) return l; }
+                    } catch (e) {}
+                    return null;
+                },
                 // dock(widget, { pos, enabled }) -> { remove(), refresh() }. pos = index (number|fn|null=append);
                 // enabled = optional fn; when it returns false the widget is pulled out of the bar (kept for re-add).
                 dock: function (widget, o) {
