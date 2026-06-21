@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Draws a live on-map overlay of small bubbles showing Offense / Defense level (stacked) over every visible player base in region view (own / alliance / enemy). Off/def for other players' bases is surveyed in the background; a base's bubble only appears once its values are known. Bubbles track the map as you pan and zoom. A HUD options panel toggles which base types show.
-// @version      1.2.5
+// @version      1.2.6
 // @author       XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -37,6 +37,15 @@
  *   status panel; "Marker Fix" by NetquiK). Rebuilt for the MikeyMike pack into a live
  *   multi-base map overlay. The single-selection panel couldn't do this: you pan by
  *   dragging empty map, which deselects the base and closes its panel.
+ *
+ *   1.2.6: corrected the survey side-effect fix. Direct measurement (2026-06-21, live)
+ *   proved set_CurrentCityId does NOT move the region camera - the earlier "camera nudge
+ *   feedback loop" theory was wrong. The real harmful side-effect is current-city
+ *   EVICTION: the survey's set_CurrentCityId frees the previously-current base's data, and
+ *   if the game's RegionCityInfo/StatusInfo panel is open on a base (it binds the city via
+ *   setObject), evicting that base crashes the game's closeCityInfo (remove_Change on the
+ *   now-null city). Fix: pause the survey whenever a base info/status panel is actually
+ *   on-screen, so we never evict a panel's bound base.
  *
  * DEPENDENCIES (pack rule: wrapper + Common Library only)
  *   All the heavy lifting lives in MM - Common Library:
@@ -82,6 +91,8 @@
 		// (set_CurrentCityId), so surveys have to run one at a time or they thrash each other.
 		var MAX_ACTIVE = 1;
 		var surveyRestoreId = null; // current-city id to restore when the survey queue drains (usually -1)
+		var lastOwnMap = null;      // most recent ownIdMap, so a deferred survey can be resumed
+		var surveyDeferred = false; // true while the survey is paused because a base info panel is open
 
 		function ownToCache(id, ownMap) {
 			var c = ownMap[id];
@@ -94,6 +105,7 @@
 			pending[id] = true; queue.push(id); pump(ownMap);
 		}
 		function pump(ownMap) {
+			lastOwnMap = ownMap;
 			// CRITICAL: never touch the shared current-city pointer while the user is in a base/city
 			// view. fetchDetail hijacks set_CurrentCityId to trigger loads; if the survey fires that
 			// while the game is rendering an open base, it yanks the city out from under the renderer
@@ -104,8 +116,19 @@
 				queue.length = 0;
 				for (var pk in pending) delete pending[pk];
 				surveyRestoreId = null;
+				surveyDeferred = false;
 				return;
 			}
+			// Don't churn the shared current-city pointer while a base info/status panel is actually
+			// on-screen. set_CurrentCityId frees the previously-current base's data, and the game's
+			// RegionCityInfo/StatusInfo panel binds its base via setObject - evicting that base makes
+			// the game's closeCityInfo throw (remove_Change on the now-null city). So we DEFER the
+			// survey (keep the queue, don't fire any more loads) until the panel closes; the 150ms
+			// popup poll + the 8s backstop resume it. (Measured live 2026-06-21: set_CurrentCityId does
+			// NOT move the region camera, so there is nothing to "restore" there - eviction is the only
+			// harmful side-effect, and this is what tames it.)
+			if (surveyBlocked()) { surveyDeferred = true; return; }
+			surveyDeferred = false;
 			// remember where "current city" was before we start hijacking it to trigger loads
 			if (active === 0 && queue.length && surveyRestoreId === null) {
 				surveyRestoreId = MM.base.currentCityId();
@@ -233,35 +256,66 @@
 			b.el.style.left = Math.round(p.x) + "px";
 			b.el.style.top = (Math.round(p.y) - 6) + "px";
 		}
-		// A base's info popup / right-click menu shares the bubbles' z-index (everything in this view,
-		// incl. the map canvas, is z-index:10), so a bubble overlapping a panel paints ON TOP of it and
-		// we can't fix it by stacking (lowering the layer drops it behind the terrain). Instead we hide
-		// just the bubbles whose box overlaps an open region popup/menu, so the panel reads cleanly while
-		// every other bubble stays put. Cheap in the common case: when no popup is open we skip the
-		// (layout-forcing) getBoundingClientRect entirely.
-		var POPUP_WIDGETS = ["RegionCityInfo", "RegionCityStatusInfo", "RegionGhostStatusInfo",
-			"RegionNPCBaseInfo", "RegionNPCCampInfo", "RegionPointOfInterestStatusInfo",
-			"RegionCityMoveInfo", "RegionCityMenu"];
-		function popupRects() {
-			var rects = [];
+		// The game's region base-detail panels bind their base via setObject. Their class NAMES vary by
+		// relationship AND game version - live-sniffed 2026-06-21 the singletons are RegionCityInfo,
+		// RegionCityStatusInfo{Own,Alliance,Enemy}, RegionGhostStatusInfo, RegionRuinStatusInfo,
+		// RegionNPCBaseStatusInfo, RegionNPCCampStatusInfo, RegionPointOfInterestStatusInfo,
+		// RegionNewPlayerSpotStatusInfo, RegionHub*StatusInfo, RegionCityMoveInfo, RegionCityFoundInfo,
+		// RegionCitySupportInfo, plus the RegionCityMenu right-click menu. (An earlier hard-coded list had
+		// stale names like "RegionNPCBaseInfo" that don't exist, so it silently matched nothing.) So we
+		// DISCOVER the panel singletons by name pattern - any webfrontend.gui.region.* whose name marks it
+		// a base-detail panel and that exposes getInstance. Computed once and cached.
+		var _infoNames = null;
+		function infoPanelNames() {
+			if (_infoNames) return _infoNames;
+			var out = [];
 			try {
-				var R = webfrontend.gui.region;
-				for (var i = 0; i < POPUP_WIDGETS.length; i++) {
-					try {
-						var W = R[POPUP_WIDGETS[i]];
-						if (!W || typeof W.getInstance !== "function") continue;
-						var inst = W.getInstance();
-						if (!inst || typeof inst.isVisible !== "function" || !inst.isVisible()) continue;
-						var el = inst.getContentElement && inst.getContentElement().getDomElement();
-						if (!el) continue;
-						var r = el.getBoundingClientRect();
-						if (r.width > 0 && r.height > 0) rects.push(r);
-					} catch (e) {}
+				var R = webfrontend.gui.region, keys = Object.keys(R);
+				for (var i = 0; i < keys.length; i++) {
+					var k = keys[i];
+					if (!/StatusInfo/.test(k) && k !== "RegionCityInfo" && k !== "RegionCityMoveInfo"
+						&& k !== "RegionCityFoundInfo" && k !== "RegionCitySupportInfo") continue;
+					try { if (R[k] && typeof R[k].getInstance === "function") out.push(k); } catch (e) {}
 				}
 			} catch (e) {}
+			_infoNames = out;
+			return out;
+		}
+		// Real on-screen rect of a region panel singleton, or null. isVisible() is a cheap pre-filter
+		// (skips the layout-forcing rect read when false) but it OVER-reports - several panels report
+		// isVisible()===true while off-screen with no DOM element - so confirm with a real DOM rect.
+		function infoRect(name) {
+			try {
+				var W = webfrontend.gui.region[name];
+				if (!W || typeof W.getInstance !== "function") return null;
+				var inst = W.getInstance();
+				if (!inst || typeof inst.isVisible !== "function" || !inst.isVisible()) return null;
+				var el = inst.getContentElement && inst.getContentElement().getDomElement();
+				if (!el) return null;
+				var r = el.getBoundingClientRect();
+				return (r.width > 0 && r.height > 0) ? r : null;
+			} catch (e) { return null; }
+		}
+		// A base's info popup / right-click menu shares the bubbles' z-index (everything in this view,
+		// incl. the map canvas, is z-index:10), so a bubble overlapping a panel paints ON TOP of it and we
+		// can't fix it by stacking (lowering the layer drops it behind the terrain). Instead we hide just
+		// the bubbles whose box overlaps an open region popup/menu, so the panel reads cleanly while every
+		// other bubble stays put. (Includes the right-click menu, which also overlaps bubbles.)
+		function popupRects() {
+			var rects = [], names = infoPanelNames();
+			for (var i = 0; i < names.length; i++) { var r = infoRect(names[i]); if (r) rects.push(r); }
+			var menu = infoRect("RegionCityMenu"); if (menu) rects.push(menu);
 			return rects;
 		}
 		function rectsIntersect(a, b) { return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom); }
+		// Is a base info/status panel actually on screen? If so, surveying (set_CurrentCityId) could evict
+		// its bound base and crash the game's closeCityInfo, so the survey pauses. (The plain RegionCityMenu
+		// right-click menu is intentionally NOT counted - it has no bound base to evict.)
+		function surveyBlocked() {
+			var names = infoPanelNames();
+			for (var i = 0; i < names.length; i++) { if (infoRect(names[i])) return true; }
+			return false;
+		}
 		function updatePopupVisibility() {
 			if (!layer || layer.style.display === "none") return;
 			var rects = popupRects();
@@ -378,14 +432,14 @@
 					MM.map.watch({
 						onChange: function (st) {
 							try {
-								// Reproject only - do NOT re-enumerate here. The off/def survey calls
-								// set_CurrentCityId, which nudges the region camera; the watcher then sees a
-								// "change", and if we enumerated it would kick MORE surveys -> another nudge
-								// -> a tight feedback loop (the "overlay: N visible" console spam + a
-								// set_CurrentCityId thrash that froze the map terrain and crashed the game's
-								// closeCityInfo on a null evicted-city event). New bases scrolling into view
-								// are picked up by the 8s backstop below instead. (Proper fix next session:
-								// enumerate off the bulk public-base fetch, no per-base set_CurrentCityId.)
+								// Reproject only - do NOT re-enumerate here. Re-enumerating would kick the
+								// off/def survey, which churns the shared current-city pointer (each
+								// set_CurrentCityId evicts the prior base's data). Doing that on every camera
+								// tick was wasteful churn (the old "overlay: N visible" console spam) and
+								// raised the eviction-crash odds. New bases scrolling into view are picked up
+								// by the 8s backstop below instead. (Note: the camera moves here come from the
+								// USER panning/zooming - measured 2026-06-21, set_CurrentCityId itself does not
+								// move the camera, so this is not a self-driven feedback loop.)
 								if (st.region) reprojectAll();
 								else clearAll();
 							} catch (e) { werr("watch onChange:", e); }
@@ -397,7 +451,12 @@
 					catch (e) { window.setInterval(function () { if (masterOn() && MM.map.inRegionView()) refreshOverlay(); }, 8000); }
 					// hide bubbles sitting under an open base-info popup / right-click menu - poll, since a
 					// popup opening doesn't move the camera and so wouldn't trigger reprojectAll above.
-					window.setInterval(updatePopupVisibility, 150);
+					// Same poll resumes a survey that was deferred while a base info panel was open (the
+					// pump() eviction guard) the moment that panel closes.
+					window.setInterval(function () {
+						try { updatePopupVisibility(); } catch (e) {}
+						try { if (surveyDeferred && lastOwnMap && !surveyBlocked()) pump(lastOwnMap); } catch (e) {}
+					}, 150);
 					buildOptions();
 					window.MM_PBI_INSTALLED = true;
 					wlog("overlay engine installed.");
