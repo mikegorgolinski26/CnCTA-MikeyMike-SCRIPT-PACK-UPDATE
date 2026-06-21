@@ -3,7 +3,7 @@
 // @description     Dockable, color-coded "Member Status" overview of online/away alliance members (with highest offense/defense levels when your access exposes them). MikeyMike rework of InFlames2k's "AllianceMemberOnline", rebuilt on the MM - Common Library.
 // @author          InFlames2k (Patrick Schubert)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.1
+// @version         1.1.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
@@ -21,6 +21,11 @@
  This is the first script migrated onto the MM - Common Library: it uses
  MMCommon.buttons.register (CommonButtonHandler) and MMCommon.ui.Window
  (dockable/persistent window) instead of hand-rolled UI.
+
+ DISPLAY OPTION (1.1.0): right-click the roster -> "Dock in game menu bar" to show
+ the same list as a menu-styled "Members" section inside the game's right-side base
+ bar (the Info Sticker look), via MMCommon.menubar; "Use floating window" reverts.
+ Default stays the floating window.
 
  Shows "Off" (BestOffenseLvl = highest army level) and "Def" (BestDefenseLvl =
  highest defense level) columns, but only when your alliance access exposes that
@@ -63,6 +68,55 @@
             });
             if (!win) { LOG.err("could not create window"); return; }
             win.add(listBox);
+
+            // ---- optional: dock the roster into the game's base menu bar (the Info Sticker "menu look") ----
+            // Opt-in (default = the floating window); toggled by the right-click menu on the roster. The SAME
+            // listBox grid is re-parented between the window and an in-bar menu-styled panel, so the rendering
+            // is identical. All guarded - if MMCommon.menubar isn't reachable, it stays a floating window.
+            function menuOn() { try { return MM.settings.get("AllianceOverview.MenuBar", false) === true; } catch (e) { return false; } }
+            var mb = { panel: null, dock: null, built: false };
+            function makeDisplayMenu() {
+                var menu = new qx.ui.menu.Menu();
+                var toBar = new qx.ui.menu.Button("Dock in game menu bar");
+                toBar.addListener("execute", function () { setMenuMode(true); });
+                var toFloat = new qx.ui.menu.Button("Use floating window");
+                toFloat.addListener("execute", function () { setMenuMode(false); });
+                menu.add(toBar); menu.add(toFloat);
+                return menu;
+            }
+            function buildMenuPanel() {
+                if (mb.built) return mb.panel;
+                try {
+                    if (!MM.menubar || !MM.menubar.styledPanel) return null;
+                    mb.panel = MM.menubar.styledPanel({ width: 160, spacing: 2, marginLeft: 5 });
+                    mb.panel.add(new qx.ui.basic.Label("Members").set({ font: "bold", textColor: "#595969", textAlign: "center", alignX: "center" }));
+                    try { mb.panel.setContextMenu(makeDisplayMenu()); } catch (e) {}
+                    mb.dock = MM.menubar.dock(mb.panel, { pos: null, enabled: function () { return menuOn(); } });
+                    mb.built = true;
+                } catch (e) { LOG.err("buildMenuPanel:", e); mb.panel = null; }
+                return mb.panel;
+            }
+            // move the roster grid into whichever container is active (the menu panel or the float window)
+            function placeList() {
+                try {
+                    var host = menuOn() ? buildMenuPanel() : win;
+                    if (!host) host = win;
+                    var cur = listBox.getLayoutParent && listBox.getLayoutParent();
+                    if (cur !== host) { if (cur && cur.remove) cur.remove(listBox); host.add(listBox); }
+                } catch (e) { LOG.err("placeList:", e); }
+            }
+            function isShown() {
+                try { return menuOn() ? !!(mb.panel && mb.panel.isVisible && mb.panel.isVisible()) : win.isVisible(); } catch (e) { return false; }
+            }
+            function setMenuMode(on) {
+                try {
+                    MM.settings.set("AllianceOverview.MenuBar", on === true);
+                    if (on) { buildMenuPanel(); if (mb.dock) mb.dock.refresh(); placeList(); if (mb.panel) mb.panel.show(); try { win.close(); } catch (e) {} }
+                    else { placeList(); if (mb.dock) mb.dock.refresh(); try { win.open(); } catch (e) {} }
+                    refresh();
+                } catch (e) { LOG.err("setMenuMode:", e); }
+            }
+            try { listBox.setContextMenu(makeDisplayMenu()); } catch (e) {}
 
             function clearList() {
                 try {
@@ -121,7 +175,7 @@
 
             function refresh() {
                 try {
-                    if (!win.isVisible()) return; // only work while open
+                    if (!isShown()) return; // only work while the active display (window or docked panel) is shown
                     var alliance = ClientLib.Data.MainData.GetInstance().get_Alliance();
                     if (!alliance) return;
                     alliance.RefreshMemberData();
@@ -153,12 +207,31 @@
             MM.buttons.register({
                 id: "member-status",
                 label: "Member Status",
-                tooltip: "Toggle the Member Status window",
+                tooltip: "Toggle the Member Status display",
                 onExecute: function () {
-                    if (win.isVisible()) { win.close(); }
-                    else { win.open(); refresh(); }
+                    try {
+                        if (menuOn()) {
+                            if (mb.panel && mb.panel.isVisible && mb.panel.isVisible()) mb.panel.exclude();
+                            else { buildMenuPanel(); placeList(); if (mb.panel) mb.panel.show(); if (mb.dock) mb.dock.refresh(); refresh(); }
+                        } else {
+                            if (win.isVisible()) win.close(); else { win.open(); refresh(); }
+                        }
+                    } catch (e) { LOG.err("toggle failed:", e); }
                 }
             });
+
+            // if the menu-bar display was chosen previously, build + show it now (instead of the float window).
+            // The base bar can lag a few seconds behind nav-ready, so poll until it's reachable (fast appear).
+            if (menuOn()) {
+                var mTries = 0;
+                (function tryMenu() {
+                    try {
+                        if (!menuOn()) return;
+                        if (buildMenuPanel()) { placeList(); refresh(); return; }
+                    } catch (e) {}
+                    if (++mTries < 60) window.setTimeout(tryMenu, 500);
+                })();
+            }
 
             LOG.log("ready");
         }
