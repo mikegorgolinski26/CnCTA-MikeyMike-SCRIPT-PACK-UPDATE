@@ -1327,21 +1327,45 @@
                 } catch (e) { return null; }
             }
 
-            function makeCheckItem(s) {
-                var cb = new qx.ui.menu.CheckBox(cleanName(s.name));
-                try { cb.setValue(state.enabled[s.id] === true); } catch (e) {}
-                try { cb.setToolTipText("Enable/disable " + (s.name || "") + " (takes effect on next game refresh)"); } catch (e) {}
-                // KEEP THE MENU OPEN: a normal menu item's _onTap calls Manager.hideAll() then execute().
-                // We replace it so a toggle just flips the value + persists, leaving the menu up so several
-                // scripts can be toggled in one visit.
-                cb._onTap = function () {
-                    try {
-                        var nv = !this.getValue();
-                        this.setValue(nv);
-                        setEnabled(s.id, nv);
-                    } catch (err) { NS.log.err("menu toggle:", err); }
-                };
+            // A qx.ui.menu.CheckBox whose tap toggles the value but does NOT close the menu, so several
+            // entries can be flipped in one visit. The close-on-tap lives in AbstractButton._onTap (it
+            // calls execute() then defers Manager.hideAll()). That tap listener is bound to the PROTOTYPE
+            // method at construction, so overriding _onTap on an instance is ignored by real taps - it must
+            // be overridden on a subclass prototype. Here _onTap calls execute() (which toggles the value +
+            // fires "execute") and intentionally skips hideAll().
+            function checkBoxClass() {
+                try {
+                    if (!qx.Class.isDefined("mm.MenuCheckBox")) {
+                        qx.Class.define("mm.MenuCheckBox", {
+                            extend: qx.ui.menu.CheckBox,
+                            members: {
+                                _onTap: function (e) {
+                                    try { if (e && e.isLeftPressed && !e.isLeftPressed()) return; } catch (_) {}
+                                    this.execute(); // toggles value + fires "execute"; deliberately no Manager.hideAll()
+                                }
+                            }
+                        });
+                    }
+                    return qx.Class.getByName("mm.MenuCheckBox") || qx.ui.menu.CheckBox;
+                } catch (e) { NS.log.err("MenuCheckBox define:", e); return qx.ui.menu.CheckBox; }
+            }
+
+            // Build a keep-open checkbox item. onToggle(newValue) runs ONLY on a real user tap (via the
+            // "execute" event), NOT on programmatic setValue - so refreshValues() can sync the displayed
+            // values without re-persisting (avoids a feedback loop).
+            function makeToggle(label, initial, onToggle, tooltip) {
+                var Cls = checkBoxClass();
+                var cb = new Cls(label);
+                try { cb.setValue(initial === true); } catch (e) {}
+                if (tooltip) { try { cb.setToolTipText(tooltip); } catch (e) {} }
+                cb.addListener("execute", function () { try { onToggle(cb.getValue()); } catch (err) { NS.log.err("toggle:", err); } });
                 return cb;
+            }
+
+            function makeCheckItem(s) {
+                return makeToggle(cleanName(s.name), state.enabled[s.id] === true,
+                    function (v) { setEnabled(s.id, v); },
+                    "Enable/disable " + (s.name || "") + " (takes effect on next game refresh)");
             }
 
             function buildOpenSubmenu() {
@@ -1404,12 +1428,9 @@
                     openSubBtn.setMenu(buildOpenSubmenu());
                     menu.add(openSubBtn);
                     menu.addSeparator();
-                    var trayCb = new qx.ui.menu.CheckBox("Show Toolbar Buttons");
-                    try { trayCb.setValue(NS.buttons.isVisible()); } catch (e) {}
-                    trayCb._onTap = function () {
-                        try { var nv = !this.getValue(); this.setValue(nv); NS.buttons.setVisible(nv); }
-                        catch (err) { NS.log.err("tray toggle:", err); }
-                    };
+                    var trayCb = makeToggle("Show Toolbar Buttons", NS.buttons.isVisible(),
+                        function (v) { NS.buttons.setVisible(v); },
+                        "Show or hide the floating MM button bar");
                     menu.add(trayCb);
                     sb.setMenu(menu);
                     built = true;
