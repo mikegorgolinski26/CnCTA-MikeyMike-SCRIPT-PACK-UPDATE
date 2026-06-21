@@ -3,7 +3,7 @@
 // @description     Dockable, color-coded "Member Status" overview of online/away alliance members (with highest offense/defense levels when your access exposes them). MikeyMike rework of InFlames2k's "AllianceMemberOnline", rebuilt on the MM - Common Library.
 // @author          InFlames2k (Patrick Schubert)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.1
+// @version         1.2.2
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
@@ -102,36 +102,27 @@
             // --- the docked ("pinned") panel: a menu-styled panel anchored NEXT TO the base bar (the Info
             // Sticker look - a separate panel BESIDE the bar, NOT inserted into it). It sits to the LEFT of
             // the bar and re-anchors via a light poll. Added to the game desktop, like the HUD tray.
-            var sp = { panel: null, built: false, poll: null };
+            // Built the same way the legacy Info Sticker built its left panel: a panel added to the game
+            // DESKTOP anchored to the RIGHT edge, 124px in (= just LEFT of the base nav bar, the rightmost
+            // ~124px strip), using the game's region-select panel texture + dark-red side borders for the
+            // "system menu" look. No bar-rect math - the {right:124} anchor places it beside the bar by itself.
+            var sp = { panel: null, built: false };
             function buildSidePanel() {
                 if (sp.built) return sp.panel;
                 try {
-                    if (!MM.menubar || !MM.menubar.styledPanel) return null;
-                    sp.panel = MM.menubar.styledPanel({ width: 170, spacing: 2, padding: [6, 8, 6, 8] });
                     var app = qx.core.Init.getApplication();
-                    app.getDesktop().add(sp.panel, { left: 40, top: 130 });
+                    if (!app || !app.getDesktop) return null;
+                    sp.panel = new qx.ui.container.Composite(new qx.ui.layout.VBox(2)).set({
+                        width: 160, paddingLeft: 8, paddingRight: 6, paddingTop: 5, paddingBottom: 6,
+                        decorator: new qx.ui.decoration.Decorator().set({
+                            backgroundImage: "webfrontend/ui/common/bgr_region_world_select_scaler.png",
+                            backgroundRepeat: "scale", widthLeft: 1, widthRight: 1, colorLeft: "#7F0707", colorRight: "#7F0707"
+                        })
+                    });
+                    app.getDesktop().add(sp.panel, { right: 124, top: 130 });
                     sp.built = true;
-                    startSidePoll();
                 } catch (e) { LOG.err("buildSidePanel:", e); sp.panel = null; }
                 return sp.panel;
-            }
-            // keep the panel glued just to the LEFT of the base navigation bar, top-aligned to it
-            function anchorSide() {
-                try {
-                    if (!menuOn() || !sp.panel) return;
-                    var rect = MM.menubar.barRect && MM.menubar.barRect();
-                    if (!rect) return;
-                    var b = sp.panel.getBounds && sp.panel.getBounds();
-                    var w = (b && b.width) ? b.width : 170;
-                    var left = Math.max(4, Math.round(rect.left - w - 6));
-                    var top = Math.max(4, Math.round(rect.top));
-                    sp.panel.setLayoutProperties({ left: left, top: top, right: null, bottom: null });
-                } catch (e) {}
-            }
-            function startSidePoll() {
-                if (sp.poll) return;
-                try { sp.poll = window.setInterval(function () { if (menuOn() && sp.panel && sp.panel.isVisible && sp.panel.isVisible()) anchorSide(); }, 1000); } catch (e) {}
-                anchorSide();
             }
             // move the content into whichever container is active (the side panel or the float panel)
             function placeContent() {
@@ -149,7 +140,7 @@
                 try {
                     MM.settings.set("AllianceOverview.MenuBar", on === true);
                     updatePin();
-                    if (on) { buildSidePanel(); placeContent(); if (sp.panel) sp.panel.show(); anchorSide(); try { win.close(); } catch (e) {} }
+                    if (on) { buildSidePanel(); placeContent(); if (sp.panel) sp.panel.show(); try { win.close(); } catch (e) {} }
                     else { if (sp.panel) sp.panel.exclude(); placeContent(); try { win.open(); } catch (e) {} }
                     refresh();
                 } catch (e) { LOG.err("setMenuMode:", e); }
@@ -256,7 +247,7 @@
                     try {
                         if (menuOn()) {
                             if (sp.panel && sp.panel.isVisible && sp.panel.isVisible()) sp.panel.exclude();
-                            else { buildSidePanel(); placeContent(); if (sp.panel) sp.panel.show(); anchorSide(); refresh(); }
+                            else { buildSidePanel(); placeContent(); if (sp.panel) sp.panel.show(); refresh(); }
                         } else {
                             if (win.isVisible()) win.close(); else { win.open(); refresh(); }
                         }
@@ -272,9 +263,7 @@
                 (function tryMenu() {
                     try {
                         if (!menuOn()) return;
-                        if (MM.menubar && MM.menubar.barRect && MM.menubar.barRect() && buildSidePanel()) {
-                            placeContent(); if (sp.panel) sp.panel.show(); anchorSide(); refresh(); return;
-                        }
+                        if (buildSidePanel()) { placeContent(); if (sp.panel) sp.panel.show(); refresh(); return; }
                     } catch (e) {}
                     if (++mTries < 60) window.setTimeout(tryMenu, 500);
                 })();
