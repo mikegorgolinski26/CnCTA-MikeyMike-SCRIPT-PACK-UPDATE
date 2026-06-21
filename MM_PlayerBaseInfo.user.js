@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         MM - Player Base Info
+// @name         MM - Off/Def Bubbles
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Draws a live on-map overlay of small bubbles showing Offense / Defense level (stacked) over every visible player base in region view (own / alliance / enemy). Off/def for other players' bases is surveyed in the background; a base's bubble only appears once its values are known. Bubbles track the map as you pan and zoom. A HUD options panel toggles which base types show.
-// @version      1.2.6
+// @version      1.2.7
 // @author       XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -12,7 +12,7 @@
 // ==/UserScript==
 
 /*
- * MM - Player Base Info
+ * MM - Off/Def Bubbles
  * ---------------------
  * WHAT IT DOES
  *   In the region (overworld) view it overlays a small bubble over every visible PLAYER
@@ -24,7 +24,7 @@
  *   Offense/Defense for other players' bases isn't known until each base's detail is
  *   surveyed from the server, so the overlay loads them in the background and a base's
  *   bubble only appears once its values are in (no "loading" clutter). Results are cached
- *   so panning back doesn't re-fetch. A HUD-tray "Player Base Info" button opens an
+ *   so panning back doesn't re-fetch. A HUD-tray "Off/Def Bubbles" button opens an
  *   options panel to pick which relationships show, with a master on/off.
  *
  * WHY IT'S NEEDED
@@ -61,11 +61,11 @@
 	var PBI_main = function () {
 		// ---- logger ----------------------------------------------------------------
 		var LOG = (window.MMCommon && window.MMCommon.makeLogger)
-			? window.MMCommon.makeLogger("Player Base Info")
+			? window.MMCommon.makeLogger("Off/Def Bubbles")
 			: {
 				log: function () {},
-				warn: function () { try { console.warn.apply(console, ["[MM Player Base Info]"].concat([].slice.call(arguments))); } catch (e) {} },
-				err: function () { try { console.error.apply(console, ["[MM Player Base Info]"].concat([].slice.call(arguments))); } catch (e) {} }
+				warn: function () { try { console.warn.apply(console, ["[MM Off/Def Bubbles]"].concat([].slice.call(arguments))); } catch (e) {} },
+				err: function () { try { console.error.apply(console, ["[MM Off/Def Bubbles]"].concat([].slice.call(arguments))); } catch (e) {} }
 			};
 		if (typeof window.PLAYERBASEINFO_DEBUG === "undefined") {
 			try { window.PLAYERBASEINFO_DEBUG = (window.localStorage.getItem("PLAYERBASEINFO_DEBUG") === "1"); } catch (e) { window.PLAYERBASEINFO_DEBUG = false; }
@@ -404,13 +404,13 @@
 			body.add(cb("Master: show the overlay at all", "PlayerBaseInfo.bubble", true));
 
 			var win = MM.ui.Window({
-				caption: "Player Base Info", key: "PlayerBaseInfo.Window",
+				caption: "Off/Def Bubbles", key: "PlayerBaseInfo.Window",
 				layout: new qx.ui.layout.VBox(), pos: [260, 140], resizable: false, restoreOpen: true, dock: true
 			});
 			if (!win) { werr("options window creation failed"); return; }
 			win.add(body);
 			MM.buttons.register({
-				id: "mm-player-base-info", label: "Player Base Info",
+				id: "mm-player-base-info", label: "Off/Def Bubbles",
 				tooltip: "On-map off/def bubbles (enemy / alliance / own)",
 				onExecute: function () { try { if (win.isVisible()) win.close(); else win.open(); } catch (e) { werr("toggle failed:", e); } }
 			});
@@ -480,6 +480,6 @@
 			(document.head || document.documentElement).appendChild(el);
 		}
 	} catch (e) {
-		try { console.error("[MM Player Base Info] init error:", e); } catch (_) {}
+		try { console.error("[MM Off/Def Bubbles] init error:", e); } catch (_) {}
 	}
 })();

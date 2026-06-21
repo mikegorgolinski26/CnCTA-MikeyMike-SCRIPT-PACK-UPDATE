@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name           MM - Base Info
-// @version        1.0.0
+// @name           MM - Player Bases
+// @version        1.0.1
 // @author         Dirk Kántor (NurIcke)
 // @contributor    leo7044 (https://github.com/leo7044)
 // @contributor    MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
@@ -15,7 +15,7 @@
 
 (function () {
   var BaseInfoMain = function () {
-    // --- [MM Base Info] debug framework (pack-wide MM convention). wlog is gated behind either
+    // --- [MM Player Bases] debug framework (pack-wide MM convention). wlog is gated behind either
     // window.BASEINFO_DEBUG or the pack-wide window.MM_DEBUG; wwarn/werr always print so genuine
     // problems aren't hidden. Persist either flag via localStorage to survive reloads:
     //   localStorage.BASEINFO_DEBUG = '1'   or   localStorage.MM_DEBUG = '1'
@@ -23,9 +23,9 @@
       try { window.BASEINFO_DEBUG = (window.localStorage.getItem("BASEINFO_DEBUG") === "1"); } catch (e) { window.BASEINFO_DEBUG = false; }
     }
     function _dbg() { return window.BASEINFO_DEBUG || window.MM_DEBUG; }
-    function wlog()  { if (!_dbg()) return; try { console.log.apply(console,  ["[MM Base Info]"].concat([].slice.call(arguments))); } catch (e) {} }
-    function wwarn() {                       try { console.warn.apply(console, ["[MM Base Info]"].concat([].slice.call(arguments))); } catch (e) {} }
-    function werr()  {                       try { console.error.apply(console, ["[MM Base Info]"].concat([].slice.call(arguments))); } catch (e) {} }
+    function wlog()  { if (!_dbg()) return; try { console.log.apply(console,  ["[MM Player Bases]"].concat([].slice.call(arguments))); } catch (e) {} }
+    function wwarn() {                       try { console.warn.apply(console, ["[MM Player Bases]"].concat([].slice.call(arguments))); } catch (e) {} }
+    function werr()  {                       try { console.error.apply(console, ["[MM Player Bases]"].concat([].slice.call(arguments))); } catch (e) {} }
 
     function BaseInfoCreate() {
       // BUTTON DESIGN / POSITION settings removed - BaseInfo now registers into the shared MM HUD
@@ -1919,7 +1919,7 @@
               window.addEventListener("keyup", this.onKey, false);
               window.addEventListener("mouseover", this.onMouseOver, false);
               BIVERSION = "1.0.0";
-              BICLASS = "MM - Base Info";
+              BICLASS = "MM - Player Bases";
               BIUSERLANGUAGE = qx.locale.Manager.getInstance()
                 .getLocale()
                 .split("_")[0];
@@ -2028,7 +2028,7 @@
                   var self = this;
                   window.MMCommon.buttons.register({
                     id: "baseinfo",
-                    label: "Base Info",
+                    label: "Player Bases",
                     icon: BIIMAGESMALL,
                     tooltip: BICLASS + " " + BIVERSION,
                     onExecute: function () {
