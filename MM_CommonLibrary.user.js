@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.15
+// @version         1.0.16
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.15"
+            version: "1.0.16"
         };
 
         // -------------------------------------------------------------------
@@ -1696,7 +1696,7 @@
                     if (!NS.menubar || !NS.menubar.available()) return null;
                     menuPanel = NS.menubar.styledPanel({ width: 124, spacing: 3, marginLeft: 5 });
                     menuPanel.add(new qx.ui.basic.Label("MM Tools").set({ font: "bold", textColor: "#595969", textAlign: "center", alignX: "center" }));
-                    menuDock = NS.menubar.dock(menuPanel, { pos: null, enabled: function () { return showPref(); } });
+                    menuDock = NS.menubar.dock(menuPanel, { pos: null, enabled: function () { return showPref() && dockMode() === "menubar"; } });
                 } catch (e) { NS.log.err("menubar panel:", e); menuPanel = null; }
                 return menuPanel;
             }
@@ -1719,6 +1719,45 @@
             }
             function scheduleFlush() { if (!placeTimer) placeTimer = window.setTimeout(flushMenuButtons, 0); }
 
+            // Move every registered button into `container` (re-parenting from wherever it currently lives).
+            function moveButtonsTo(container) {
+                for (var i = 0; i < slots.length; i++) {
+                    var b = slots[i].btn;
+                    try {
+                        var p = b.getLayoutParent && b.getLayoutParent();
+                        if (p === container) continue;
+                        if (p && p.remove) p.remove(b);
+                        container.add(b);
+                    } catch (e) {}
+                }
+            }
+            // Apply the current dock mode LIVE (no reload): re-parent the buttons between the float tray and the
+            // in-bar "MM Tools" panel, and add/remove that panel from the bar.
+            function applyDockMode() {
+                try {
+                    if (dockMode() === "menubar") {
+                        var mp = ensureMenuPanel();
+                        if (mp) {
+                            pendingMenu = [];               // anything queued is about to be placed directly
+                            moveButtonsTo(mp);
+                            if (menuDock) menuDock.refresh(); // enabled()=true now -> panel inserted into the bar
+                        } else {                            // bar not ready yet - queue for placement
+                            for (var i = 0; i < slots.length; i++) {
+                                var b = slots[i].btn;
+                                try { var p = b.getLayoutParent && b.getLayoutParent(); if (p && p.remove) p.remove(b); } catch (e) {}
+                                pendingMenu.push(b);
+                            }
+                            scheduleFlush();
+                        }
+                    } else {
+                        var t = ensureTray();
+                        if (t) moveButtonsTo(t);
+                        if (menuDock) menuDock.refresh();   // enabled()=false now -> panel pulled out of the bar
+                    }
+                    applyVisible(showPref());
+                } catch (e) { NS.log.err("applyDockMode:", e); }
+            }
+
             // Optional display: the HUD tray can be hidden (the CnC Pack menu provides the same
             // window-openers). The intent is persisted per player+world; default = shown so existing
             // installs are unchanged. The "Show Toolbar Buttons" item in the CnC Pack menu flips it.
@@ -1726,7 +1765,9 @@
                 try { return NS.settings.get(KEY + ".show", true) !== false; } catch (e) { return true; }
             }
             function applyVisible(v) {
-                try { if (tray) { if (v) tray.show(); else tray.exclude(); } } catch (e) {}
+                var menubar = (dockMode() === "menubar");
+                // in menubar mode the float tray is always hidden (it's empty - buttons live in the bar)
+                try { if (tray) { if (v && !menubar) tray.show(); else tray.exclude(); } } catch (e) {}
                 try { if (menuPanel) { if (v) menuPanel.show(); else menuPanel.exclude(); } } catch (e) {}
                 try { if (menuDock) menuDock.refresh(); } catch (e) {}
             }
@@ -1873,7 +1914,11 @@
                 // Display mode for the MM buttons: "float" (draggable tray) or "menubar" (in the game's base
                 // navigation bar). Changing it takes effect on the next game reload.
                 dockMode: function () { return dockMode(); },
-                setDockMode: function (m) { try { window.localStorage.setItem("MM.HUDTray.dock", (m === "menubar") ? "menubar" : "float"); } catch (e) {} return dockMode(); },
+                setDockMode: function (m) {
+                    try { window.localStorage.setItem("MM.HUDTray.dock", (m === "menubar") ? "menubar" : "float"); } catch (e) {}
+                    try { applyDockMode(); } catch (e) {}   // live - no reload needed
+                    return dockMode();
+                },
                 // Optional-display control (used by the CnC Pack menu's "Show Toolbar Buttons" toggle).
                 isVisible: function () { return showPref(); },
                 setVisible: function (v) {
@@ -2119,10 +2164,10 @@
                     // Dock the MM buttons inside the game's base menu bar instead of the floating tray.
                     // Changing it needs a game reload (buttons are placed at register time), so we note that.
                     try {
-                        var dockCb = makeToggle("Dock buttons in game menu (reload)",
+                        var dockCb = makeToggle("Dock buttons in game menu",
                             (NS.buttons.dockMode && NS.buttons.dockMode() === "menubar"),
                             function (v) { try { NS.buttons.setDockMode(v ? "menubar" : "float"); } catch (e) {} },
-                            "Put the MM buttons inside the game's base-navigation bar (applies after you reload the game)");
+                            "Put the MM buttons inside the game's base-navigation bar (applies immediately)");
                         menu.add(dockCb);
                     } catch (e) { NS.log.err("dock toggle:", e); }
                     sb.setMenu(menu);

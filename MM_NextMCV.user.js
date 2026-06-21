@@ -3,7 +3,7 @@
 // @description     A small always-on counter showing how close you are to your next MCV (the Research_BaseFound level that lets you found another base): time until you can afford the credits, and your research-point progress. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK (original MaelstromTools MCV popup)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.3.0
+// @version         1.3.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
@@ -241,8 +241,19 @@
                 }
             });
 
-            // if the menu-bar display was chosen previously, build + show it now (instead of the float panel)
-            try { if (menuOn()) { buildMenuPanel(); refresh(); } } catch (e) {}
+            // if the menu-bar display was chosen previously, build + show it now (instead of the float panel).
+            // The game's base bar can lag a few seconds behind nav-ready, so poll until it's reachable rather
+            // than waiting for the 30s refresh tick (that delay made the docked MCV take ~20s to appear on reload).
+            if (menuOn()) {
+                var mTries = 0;
+                (function tryMenu() {
+                    try {
+                        if (!menuOn()) return;
+                        if (buildMenuPanel()) { refresh(); return; }   // bar ready -> docked + populated
+                    } catch (e) {}
+                    if (++mTries < 60) window.setTimeout(tryMenu, 500);
+                })();
+            }
 
             function refresh() {
                 try {
