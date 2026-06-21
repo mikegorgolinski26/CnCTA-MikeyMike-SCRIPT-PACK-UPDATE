@@ -3,7 +3,7 @@
 // @description     Click any base / camp on the region map and a panel shows its lootable resources, offense/defense/base levels, condition, and where its Defense Facility & Construction Yard sit. Rebuilt on the MM - Common Library (merges the old MHTools "Available Loot Summary + Info" and "PluginsLib mhLoot").
 // @author          MH, netquik (original MHTools / PluginsLib mhLoot)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.0
+// @version         1.1.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_LootSummary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_LootSummary.user.js
@@ -189,8 +189,27 @@
                 } catch (e) { werr("renderCity failed:", e); showHint("Couldn't read that target."); }
             }
 
-            // Render whatever region object is selected (or a hint if none / not in region view).
+            // True once the base's buildings have actually loaded. Loot AND condition both derive from
+            // get_Buildings(), which is empty for a beat after you first select a base (the game loads it
+            // asynchronously). get_Version()>0 alone is NOT enough - it can read true while buildings are
+            // still empty, which is what made the FIRST click show RP/T/C/$ = 0 and 0% condition until you
+            // reselected. Gating on buildings-present fixes that.
+            function cityReady(ncity) {
+                try {
+                    if (!ncity || ncity.get_Version() <= 0) return false;
+                    var b = ncity.get_Buildings();
+                    if (b) { if (b.c > 0) return true; if (b.d) { for (var k in b.d) return true; } }
+                } catch (e) {}
+                return false;
+            }
+            var loadTimer = null;
+            function cancelLoad() { if (loadTimer) { try { clearTimeout(loadTimer); } catch (e) {} loadTimer = null; } }
+
+            // Render whatever region object is selected (or a hint if none / not in region view). A freshly
+            // clicked base loads its buildings a beat later, so we POLL until cityReady() before drawing -
+            // showing "Loading..." meanwhile - and the panel fills in by itself instead of needing a reselect.
             function render(vo) {
+                cancelLoad();
                 try {
                     if (!win.isVisible()) return;
                     if (!vo || !MM.map.inRegionView()) { showHint(); return; }
@@ -205,19 +224,24 @@
                     var id = vo.get_Id();
                     var rel = MM.base.relationshipFromVis(vo);
                     var cities = ClientLib.Data.MainData.GetInstance().get_Cities();
-                    var ncity = null; try { ncity = cities.GetCity(id); } catch (e) {}
-                    if (ncity && ncity.get_Version() > 0) { renderCity(vo, ncity, rel); return; }
-                    // not loaded yet - the game usually loads a base on select, but fall back to a one-shot
-                    // detail load (user-initiated single target, not a background survey).
-                    showHint("Loading...");
-                    MM.base.fetchDetail(id, function (nc) {
-                        try {
-                            if (!win.isVisible()) return;
-                            var still = MM.map.selectedObject();
-                            if (!still || (typeof still.get_Id === "function" && still.get_Id() !== id)) return; // selection moved on
-                            if (nc) renderCity(vo, nc, rel); else showHint("Couldn't load that target.");
-                        } catch (e) { werr("fetchDetail cb:", e); }
-                    }, { intervalMs: 150, tries: 30 });
+                    var triggered = false, tries = 0;
+                    (function attempt() {
+                        loadTimer = null;
+                        if (!win.isVisible()) return;
+                        if (!MM.map.inRegionView()) { showHint(); return; }
+                        var still = MM.map.selectedObject();
+                        if (!still || (typeof still.get_Id === "function" && still.get_Id() !== id)) return; // selection moved on
+                        var ncity = null; try { ncity = cities.GetCity(id); } catch (e) {}
+                        if (cityReady(ncity)) { renderCity(vo, ncity, rel); return; }
+                        // not fully loaded yet: nudge the load once (the game also loads on select - and
+                        // fetchDetail's set_CurrentCityId targets THIS selected base, so no cross-base eviction),
+                        // keep the "Loading..." hint, and poll.
+                        if (!triggered) { triggered = true; try { MM.base.fetchDetail(id, function () {}, { intervalMs: 150, tries: 1 }); } catch (e) {} }
+                        showHint("Loading...");
+                        if (++tries <= 20) { loadTimer = setTimeout(attempt, 200); return; }    // ~4s ceiling
+                        if (ncity && ncity.get_Version() > 0) renderCity(vo, ncity, rel);        // give up: show what we have
+                        else showHint("Couldn't load that target.");
+                    })();
                 } catch (e) { werr("render failed:", e); }
             }
 
@@ -227,7 +251,7 @@
             // safety: clear to the hint when leaving region view (ClientLib.Vis.ModeChange doesn't exist on
             // this client, so onSelection can't catch it - the safe camera poll does). Cheap: only acts on
             // the region<->base flip, and only while the panel is open.
-            try { MM.map.watch({ onChange: function (st) { if (win.isVisible() && !st.region) showHint(); } }); } catch (e) {}
+            try { MM.map.watch({ onChange: function (st) { if (win.isVisible() && !st.region) { cancelLoad(); showHint(); } } }); } catch (e) {}
 
             wlog("ready");
         }
