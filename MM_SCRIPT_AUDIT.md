@@ -124,7 +124,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | TA_Chat_Helper_Enhanced_Mod | BBCode insert, auto-tag coords/urls, contact list (~2014) | ✅ |
 | TA_Coords_Button_All | Context-menu "paste coords" into chat | ✅🔁 |
 | TA_Coord_Box_Shortcut | Floating "navigate to X,Y" box (dead test fns) | ✅🔁 |
-| TA_Crucial_CNC_Map_Link | Scripts-menu button → cnc-map.com for this world | ✅ |
+| ~~TA_Crucial_CNC_Map_Link~~ | Scripts-menu button → cnc-map.com for this world | ❌ RETIRED 2026-06-20 (external link to third-party site; native Scripts menu now our CnC Pack) |
 
 ### Stats / external
 | Script | What it does | Status |
