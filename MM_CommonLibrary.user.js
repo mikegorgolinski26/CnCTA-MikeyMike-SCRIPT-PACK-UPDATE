@@ -1327,13 +1327,6 @@
                 } catch (e) { return null; }
             }
 
-            function header(text) {
-                var h = new qx.ui.menu.Button(text);
-                try { h.setEnabled(false); } catch (e) {}
-                try { h.setTextColor("#ffcf66"); } catch (e) {}
-                return h;
-            }
-
             function makeCheckItem(s) {
                 var cb = new qx.ui.menu.CheckBox(cleanName(s.name));
                 try { cb.setValue(state.enabled[s.id] === true); } catch (e) {}
@@ -1394,13 +1387,17 @@
                         var cat = CATS[c][0], title = CATS[c][1];
                         var items = state.scripts.filter(function (s) { return isPackScript(s) && (s.cat || "") === cat; });
                         if (!items.length) continue;
-                        menu.add(header(title));
                         items.sort(function (a, b) { return cleanName(a.name).localeCompare(cleanName(b.name)); });
+                        // each grouping is its own submenu; its scripts (checkboxes) nest inside it
+                        var sub = new qx.ui.menu.Menu();
                         for (var i = 0; i < items.length; i++) {
                             var cb = makeCheckItem(items[i]);
                             itemsById[items[i].id] = cb;
-                            menu.add(cb);
+                            sub.add(cb);
                         }
+                        var groupBtn = new qx.ui.menu.Button(title);
+                        groupBtn.setMenu(sub);
+                        menu.add(groupBtn);
                     }
                     menu.addSeparator();
                     openSubBtn = new qx.ui.menu.Button("Open Window");
