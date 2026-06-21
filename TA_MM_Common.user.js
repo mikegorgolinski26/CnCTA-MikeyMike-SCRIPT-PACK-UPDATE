@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.2
+// @version         1.0.3
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_Common.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_Common.user.js
@@ -69,7 +69,7 @@
         }
 
         var NS = {
-            version: "1.0.2"
+            version: "1.0.3"
         };
 
         // -------------------------------------------------------------------
@@ -212,10 +212,39 @@
                     return true;
                 } catch (e) { return false; }
             },
-            // Pan the region map to a grid coordinate.
+            // Pan the region map to a grid coordinate (assumes you're already in region view).
             center: function (x, y) {
                 try { ClientLib.Vis.VisMain.GetInstance().get_Region().CenterGridPosition(x, y); return true; }
                 catch (e) { return false; }
+            },
+            // Leave any open base view and return to the region/area map. IMPORTANT: the in-base screen
+            // is a GUI OVERLAY, not a VisMain mode - calling VisMain.set_Mode(Region) alone flips the
+            // internal mode but leaves the base overlay on screen. The game's own "close base" button
+            // ultimately calls Application.showMainOverlay() (sniffed from its _onClose handler), which
+            // tears down the base overlay AND sets region mode. We do the same, then re-assert the mode
+            // as a belt-and-braces fallback for clients where showMainOverlay isn't present.
+            exitToRegion: function () {
+                var ok = false;
+                try {
+                    var app = qx.core.Init.getApplication();
+                    if (app && typeof app.showMainOverlay === "function") { app.showMainOverlay(); ok = true; }
+                } catch (e) { NS.log.warn("showMainOverlay failed:", e); }
+                try { ClientLib.Vis.VisMain.GetInstance().set_Mode(ClientLib.Vis.Mode.Region); } catch (e) {}
+                return ok;
+            },
+            // Go look at a coordinate: close any open base, switch to the region/area map AND center there.
+            // The complete "jump to this base" helper (bare center() only pans, and only in region view).
+            // NOTE: this does not natively SELECT/highlight the base - the Vis object the game's
+            // set_SelectedObject() needs isn't reachable by any readable API (obfuscated, like the
+            // base-edit move primitive); centering puts the base dead-centre, which is the reliable part.
+            goTo: function (x, y) {
+                try {
+                    NS.coords.exitToRegion();
+                    // center after the overlay/mode switch settles (a same-tick center can be lost)
+                    try { ClientLib.Vis.VisMain.GetInstance().get_Region().CenterGridPosition(x, y); } catch (e) {}
+                    window.setTimeout(function () { try { ClientLib.Vis.VisMain.GetInstance().get_Region().CenterGridPosition(x, y); } catch (e) {} }, 300);
+                    return true;
+                } catch (e) { NS.log.err("coords.goTo failed:", e); return false; }
             },
             // 8-way sector label of (x,y) relative to a center (cx,cy). Y grows downward.
             sector: function (x, y, cx, cy) {
@@ -279,10 +308,103 @@
         // Canonical source to port from: TA_CnCTAOpt_Link_Button.user.js (keymaps + 20x9 grid encoder).
         NS.cnctaopt = { encode: todo("cnctaopt.encode") };
 
-        // scan: iterate world objects within attack range of a city.
-        // Canonical source to port from: TA_Maelstrom_ADDON_Basescanner_AIO.user.js (FJ/FG loop).
-        // intended signature: inRange(ownCity, {maxDistance, types}) -> [worldObjects]
-        NS.scan = { inRange: todo("scan.inRange") };
+        // scan: iterate attackable world objects within range of an origin base.
+        // Ported from TA_Maelstrom_ADDON_Basescanner_AIO's FJ enumeration (the sync phase).
+        // This is phase 1 only: it returns lightweight candidate descriptors. Per-base DETAIL
+        // (loot, fields, condition) is async - the consumer loads each city by id and waits for
+        // get_Version()>0 (GetCity returns version:-1/name:null until the server round-trip lands),
+        // then calls MMCommon.loot.ofCity etc. (this is the AIO FG pattern).
+        NS.scan = {
+            // opts: { origin (city; default current own city), maxDistance (default server max),
+            //   types ([1,2,3]: 1=player, 2=NPC base, 3=camp/outpost), cpLimit (default Infinity),
+            //   minLevel (default 0), playerCP (bool, default true: pass the player-CP flags to
+            //   CalculateAttackCommandPointCostToCoord for type-1 targets, matching AIO),
+            //   excludeOwn (default true: skip your own bases by id), excludeIds (array or id->true map),
+            //   attackableOnly (default true: drop targets the origin can't actually attack - out of
+            //   range or beyond its command-point capacity - via the game's own CheckAttackBase) }
+            // Returns [{ id, type, x, y, baseLevel, campType, cp }] (campType null for non-camps,
+            // cp null if the cost call threw). Ally exclusion is left to the detail phase, where the
+            // alliance relationship is authoritative (same as AIO's FG re-check).
+            inRange: function (opts) {
+                opts = opts || {};
+                var out = [];
+                try {
+                    var md = ClientLib.Data.MainData.GetInstance();
+                    var world = md.get_World();
+                    var cities = md.get_Cities();
+                    var origin = opts.origin || cities.get_CurrentOwnCity();
+                    if (!origin) return out;
+                    var px = origin.get_PosX(), py = origin.get_PosY();
+                    var maxD = (opts.maxDistance != null) ? opts.maxDistance : md.get_Server().get_MaxAttackDistance();
+                    var types = opts.types || [1, 2, 3];
+                    var cpLimit = (opts.cpLimit != null) ? opts.cpLimit : Infinity;
+                    var minLevel = opts.minLevel || 0;
+                    var playerCP = (opts.playerCP !== false);
+                    // attackableOnly (default true): use the game's own CheckAttackBase to drop targets
+                    // that can't actually be attacked from this origin - out of range (FailDistance) or
+                    // costing more command points than the base can field (FailInsufficientCommandPoints).
+                    // Other failure reasons (no army staged, ally, ghost, protection) are deliberately
+                    // IGNORED here, so a scan works without a loaded army and leaves ally/ghost handling
+                    // to the caller's detail phase. This is the real "you can only attack so far / so
+                    // expensively" guardrail - the geometric maxDistance below is a fast pre-filter; this
+                    // is the authoritative one.
+                    var attackableOnly = (opts.attackableOnly !== false);
+                    var FAIL_MASK = 0;
+                    if (attackableOnly) {
+                        try {
+                            var EA = ClientLib.Data.EAttackBaseResult;
+                            var fDist = (EA && EA.FailDistance != null) ? EA.FailDistance : 1;
+                            var fCp = (EA && EA.FailInsufficientCommandPoints != null) ? EA.FailInsufficientCommandPoints : 16;
+                            FAIL_MASK = fDist | fCp;
+                        } catch (e) { FAIL_MASK = 1 | 16; }
+                        if (typeof world.CheckAttackBase !== "function") attackableOnly = false; // not available -> skip the gate
+                    }
+                    var ownIds = {};
+                    if (opts.excludeOwn !== false) {
+                        try {
+                            var ac = cities.get_AllCities && cities.get_AllCities();
+                            var dd = ac && ac.d;
+                            for (var k in dd) { if (dd[k] && dd[k].get_Id) ownIds[dd[k].get_Id()] = true; }
+                        } catch (e) {}
+                    }
+                    var exIds = {};
+                    if (opts.excludeIds) {
+                        if (opts.excludeIds.length != null) { for (var j = 0; j < opts.excludeIds.length; j++) exIds[opts.excludeIds[j]] = true; }
+                        else exIds = opts.excludeIds;
+                    }
+                    var step = Math.floor(maxD + 1);
+                    for (var sy = py - step; sy <= py + step; sy++) {
+                        for (var sx = px - step; sx <= px + step; sx++) {
+                            var ddx = px - sx, ddy = py - sy;
+                            if (Math.sqrt(ddx * ddx + ddy * ddy) > maxD) continue;
+                            var obj = world.GetObjectFromPosition(sx, sy);
+                            if (!obj || types.indexOf(obj.Type) === -1) continue;
+                            if (typeof obj.getID !== "function" || typeof obj.get_BaseLevel !== "function") continue;
+                            var id = obj.getID();
+                            if (ownIds[id] || exIds[id]) continue;
+                            if (parseInt(obj.get_BaseLevel(), 10) < minLevel) continue;
+                            var cp;
+                            try {
+                                cp = (obj.Type === 1 && playerCP)
+                                    ? origin.CalculateAttackCommandPointCostToCoord(sx, sy, true, true)
+                                    : origin.CalculateAttackCommandPointCostToCoord(sx, sy);
+                            } catch (e) { cp = null; }
+                            if (cp != null && cp > cpLimit) continue;
+                            if (attackableOnly) {
+                                var car; try { car = world.CheckAttackBase(sx, sy); } catch (e) { car = 0; }
+                                if (car & FAIL_MASK) continue; // out of range / not enough command points
+                            }
+                            out.push({
+                                id: id, type: obj.Type, x: sx, y: sy, baseLevel: obj.get_BaseLevel(),
+                                campType: (typeof obj.get_CampType === "function") ? obj.get_CampType() : null,
+                                cp: cp
+                            });
+                        }
+                    }
+                } catch (e) { NS.log.err("scan.inRange failed:", e); }
+                return out;
+            }
+        };
 
         // repair: repair-time / repair-cost helpers (port from battle sim + TA_Auto_Repair).
         NS.repair = {
@@ -290,8 +412,174 @@
             entityFullCost: todo("repair.entityFullCost")
         };
 
-        // loot: loot / lootable-resource summary for a base (port from mhLoot / MHTools getLoots).
-        NS.loot = { ofCity: todo("loot.ofCity") };
+        // loot: loot / lootable-resource summary for a base.
+        // Ported from the AIO scanner's getResourcesPart: the lootable value of an entity is its
+        // UnitLevelRepairRequirements (the resource cost to repair it), scaled by current hitpoints%
+        // so damaged bases show reduced loot. Sums buildings + defense units.
+        NS.loot = {
+            // ofCity(ncity, opts) -> array indexed by ClientLib.Base.EResourceType
+            //   (Tiberium=1, Crystal=2, Gold=3, ResearchPoints=6). opts: { buildings (default true),
+            //   units (default true) }. Returns all-zeros on any failure (never throws).
+            ofCity: function (ncity, opts) {
+                opts = opts || {};
+                var loot = [0, 0, 0, 0, 0, 0, 0, 0];
+                try {
+                    if (!ncity) return loot;
+                    function add(entities) {
+                        if (!entities) return;
+                        for (var i in entities) {
+                            var e = entities[i];
+                            if (!e || typeof e.get_UnitLevelRepairRequirements !== "function") continue;
+                            var req = e.get_UnitLevelRepairRequirements();
+                            if (!req) continue;
+                            var hp = (typeof e.get_HitpointsPercent === "function") ? e.get_HitpointsPercent() : 1;
+                            for (var x = 0; x < req.length; x++) {
+                                if (loot[req[x].Type] == null) loot[req[x].Type] = 0;
+                                loot[req[x].Type] += req[x].Count * hp;
+                            }
+                        }
+                    }
+                    if (opts.buildings !== false) {
+                        try { var b = ncity.get_Buildings(); add(b && b.d); } catch (e) {}
+                    }
+                    if (opts.units !== false) {
+                        try {
+                            var cu = ncity.get_CityUnitsData();
+                            var du = cu && cu.get_DefenseUnits && cu.get_DefenseUnits();
+                            add(du && du.d);
+                        } catch (e) {}
+                    }
+                } catch (e) { NS.log.err("loot.ofCity failed:", e); }
+                return loot;
+            }
+        };
+
+        // base: per-city data summaries salvaged from MaelstromTools Dev (Army Overview / Base
+        // Resources / Base Status). Data-only (no UI) - each takes a city object and returns a plain
+        // object, so any script can build its own view. (Originals iterated all cities into a cache;
+        // these are per-city + an ownCities() helper, which composes better.) PerforceChangelist
+        // version branches dropped - modern client only.
+        NS.base = {
+            // All of the player's own bases (city objects).
+            ownCities: function () {
+                var out = [];
+                try {
+                    var arr = ClientLib.Data.MainData.GetInstance().get_Cities().get_AllCities();
+                    var d = arr && arr.d;
+                    for (var k in d) { var c = d[k]; try { if (c && c.IsOwnBase && c.IsOwnBase()) out.push(c); } catch (e) {} }
+                } catch (e) { NS.log.err("base.ownCities failed:", e); }
+                return out;
+            },
+            // Army Overview data: repair times per unit group, repair charges, possible/max attacks
+            // (PossibleAttacks gets a trailing "*" when offense isn't 100% healthy), and base/offense/
+            // defense level + head-count + health. From MaelstromTools.RepairTime.updateCache.
+            army: function (ncity) {
+                var out = { repairTime: {}, repaircharge: {}, base: {}, offense: {}, defense: {} };
+                try {
+                    if (!ncity) return out;
+                    var EU = ClientLib.Data.EUnitGroup, ER = ClientLib.Base.EResourceType;
+                    var ud = ncity.get_CityUnitsData();
+                    var rt = out.repairTime, rc = out.repaircharge;
+                    rt.Infantry = ud.GetRepairTimeFromEUnitGroup(EU.Infantry, false);
+                    rt.Vehicle = ud.GetRepairTimeFromEUnitGroup(EU.Vehicle, false);
+                    rt.Aircraft = ud.GetRepairTimeFromEUnitGroup(EU.Aircraft, false);
+                    rt.Maximum = ncity.GetResourceMaxStorage(ER.RepairChargeInf);
+                    rc.Infantry = ncity.GetResourceCount(ER.RepairChargeInf);
+                    rc.Vehicle = ncity.GetResourceCount(ER.RepairChargeVeh);
+                    rc.Aircraft = ncity.GetResourceCount(ER.RepairChargeAir);
+                    rc.Smallest = Math.min(rc.Infantry, rc.Vehicle, rc.Aircraft);
+                    var largest = 0, repLargest = "";
+                    ["Infantry", "Vehicle", "Aircraft"].forEach(function (g) { if (rt[g] > largest) { largest = rt[g]; repLargest = g; } });
+                    rt.Largest = largest;
+                    var offHealth = ncity.GetOffenseConditionInPercent();
+                    if (repLargest !== "") {
+                        rt.LargestDiv = rt[repLargest];
+                        var i = Math.ceil(rc.Smallest / rt.LargestDiv);
+                        if (offHealth !== 100) { i--; i += "*"; } // unhealthy units: one fewer attack, flagged with *
+                        rt.PossibleAttacks = i;
+                        rt.MaxAttacks = Math.ceil(rt.Maximum / rt.LargestDiv);
+                    } else { rt.LargestDiv = 0; rt.PossibleAttacks = 0; rt.MaxAttacks = 0; }
+                    var b = out.base;
+                    b.Level = (Math.floor(ncity.get_LvlBase() * 100) / 100).toFixed(2);
+                    b.UnitLimit = ncity.GetBuildingSlotLimit();
+                    b.TotalHeadCount = ncity.GetBuildingSlotCount();
+                    b.FreeHeadCount = b.UnitLimit - b.TotalHeadCount;
+                    b.HealthInPercent = ncity.GetBuildingsConditionInPercent();
+                    var o = out.offense;
+                    o.Level = (Math.floor(ncity.get_LvlOffense() * 100) / 100).toFixed(2);
+                    o.UnitLimit = ud.get_UnitLimitOffense();
+                    o.TotalHeadCount = ud.get_TotalOffenseHeadCount();
+                    o.FreeHeadCount = ud.get_FreeOffenseHeadCount();
+                    o.HealthInPercent = offHealth > 0 ? offHealth : 0;
+                    var df = out.defense;
+                    df.Level = (Math.floor(ncity.get_LvlDefense() * 100) / 100).toFixed(2);
+                    df.UnitLimit = ud.get_UnitLimitDefense();
+                    df.TotalHeadCount = ud.get_TotalDefenseHeadCount();
+                    df.FreeHeadCount = ud.get_FreeDefenseHeadCount();
+                    var dHealth = ncity.GetDefenseConditionInPercent();
+                    df.HealthInPercent = dHealth > 0 ? dHealth : 0;
+                } catch (e) { NS.log.err("base.army failed:", e); }
+                return out;
+            },
+            // Base Resources data: count / max-storage / step+time-until-full for Tiberium, Crystal,
+            // Power. From MaelstromTools.ResourceOverview.updateCache.
+            resources: function (ncity) {
+                var out = {};
+                try {
+                    if (!ncity) return out;
+                    var ER = ClientLib.Base.EResourceType;
+                    var t = ClientLib.Data.MainData.GetInstance().get_Time();
+                    function res(type) {
+                        var fullStep = ncity.GetResourceStorageFullStep(type);
+                        return {
+                            count: ncity.GetResourceCount(type),
+                            max: ncity.GetResourceMaxStorage(type),
+                            fullStep: fullStep,
+                            fullTime: t.GetJSStepTime(fullStep)
+                        };
+                    }
+                    out.tiberium = res(ER.Tiberium);
+                    out.crystal = res(ER.Crystal);
+                    out.power = res(ER.Power);
+                } catch (e) { NS.log.err("base.resources failed:", e); }
+                return out;
+            },
+            // Base Status data: movement cooldown / lockdown, protection, alert state, and dedicated
+            // support-weapon details (name/level/range + the supported base id/name/coords, decoded from
+            // the 32-bit packed coord). From MaelstromTools.BaseStatus.updateCache.
+            status: function (ncity) {
+                var out = { support: { has: false } };
+                try {
+                    if (!ncity) return out;
+                    out.hasCooldown = ncity.get_hasCooldown();
+                    out.cooldownEnd = Math.max(ncity.get_MoveCooldownEndStep(), ncity.get_MoveRestictionEndStep());
+                    out.moveCooldownEnd = ncity.get_MoveCooldownEndStep();
+                    out.moveLockdownEnd = ncity.get_MoveRestictionEndStep();
+                    out.isProtected = ncity.get_isProtected();
+                    out.protectionEnd = ncity.get_ProtectionEndStep();
+                    out.isAlerted = ncity.get_isAlerted();
+                    var sd = ncity.get_SupportData();
+                    if (sd) {
+                        var s = out.support; s.has = true;
+                        if (ncity.get_SupportDedicatedBaseId() > 0) {
+                            s.dedicatedBaseId = ncity.get_SupportDedicatedBaseId();
+                            s.dedicatedBaseName = ncity.get_SupportDedicatedBaseName();
+                            var coordId = ncity.get_SupportDedicatedBaseCoordId();
+                            s.dedicatedBaseX = (coordId & 0xffff);            // 32-bit packed coord: low word = X
+                            s.dedicatedBaseY = ((coordId >> 0x10) & 0xffff);  // high word = Y
+                        }
+                        try { s.range = ncity.get_SupportWeapon().r; } catch (e) {}
+                        try {
+                            var player = ClientLib.Data.MainData.GetInstance().get_Player();
+                            var techName = ClientLib.Base.Tech.GetTechNameFromTechId(sd.get_Type(), player.get_Faction());
+                            s.name = ClientLib.Base.Tech.GetProductionBuildingNameFromFaction(techName, player.get_Faction());
+                        } catch (e) {}
+                        s.level = sd.get_Level();
+                    }
+                } catch (e) { NS.log.err("base.status failed:", e); }
+                return out;
+            }
+        };
 
         // ui: consistent, movable, position-persistent MMCommon window factory.
         NS.ui = {
