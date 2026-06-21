@@ -2,8 +2,8 @@
 // @name            C&C: TA Hotkeys
 // @namespace       https://greasyfork.org/users/12491
 // @icon            https://cncapp05.alliances.commandandconquer.com/339/favicon.ico
-// @description     Hotkey script for inserting your player data into multiple areas and Login/Logout for up to 9 accounts.
-// @version         2.2.4
+// @description     Hotkey script for inserting your player data into messages/chat/forum. (MikeyMike: the multi-account login/logout feature and its plaintext password table were removed for security.)
+// @version         2.2.5
 // @author          Gryphon - Based on MrHIDEn's code. Modified.
 // @license         MIT License
 // @grant           none
@@ -14,48 +14,20 @@
 
 /*
                     Based on MrHIDEn's CnC: Tiberium Alliances Shortcuts. Original at http://userscripts.org/scripts/show/135806
-				    Script has been stripped down to Login, Logout and player info.
+				    MikeyMike: the Login/Logout (multi-account) feature was removed for security - see note below.
 
-			        Alt+1 - Login to accounts 1-9. (Alt+1, Alt+2, ... Alt+9)
-				    Alt+0 - Logout
 				    Alt+Y - Message/Forum Signature
 				    Alt+I - Insert to message/chat/post all your bases/cities info
 */
 
-var Logins = [ //"email","password" table
-	"email1", "password1",
-	"email2", "password2",
-	"email3", "password3",
-	"email4", "password4",
-	"email5", "password5",
-	"email6", "password6",
-	"email7", "password7",
-	"email8", "password8",
-	"email9", "password9"
-];
-var lang = "en";
+// MikeyMike (2026-06-21): REMOVED the plaintext multi-account email/password table and the
+// auto-login feature (Alt+1-9 to fill+submit the login form, Alt+0 to log out). Storing account
+// credentials in a userscript is a security risk and has no place in the published pack. The safe
+// hotkeys remain: Alt+Y (forum/message signature) and Alt+I (insert all your bases' info). Those
+// are slated to move into MM - Base Info (via MMCommon.base / MMCommon.coords).
 
 function Ini() {
 	console.log("CnC: TA Shortcuts has been loaded.");
-};
-
-function Login(id) {
-	if (Logins.length == 0) return;
-	if ((id * 2) > Logins.length) return;
-	if (window.location.pathname != ("/login/auth")) {
-		window.location.assign("https://alliances.commandandconquer.com/" + lang + "/game/world");
-		return;
-	}
-	var em = Logins[2 * id - 2];
-	var pw = Logins[2 * id - 1];
-	//localStorage.Logins = Logins;
-	document.getElementById("username").value = em;
-	document.getElementById("password").value = pw;
-	var inputs = document.getElementsByTagName("INPUT");
-	for (var i = 0; i < inputs.length; i++) {
-		if (inputs[i].type != "submit") continue;
-		inputs[i].click();
-	}
 };
 
 
@@ -65,20 +37,6 @@ function Key(e) {
 	if (e.altKey && !e.altGraphKey && !e.ctrlKey && !e.shiftKey) {
 		//console.log("Alt+"+s);	
 		switch (s) {
-			case "1":
-			case "2":
-			case "3":
-			case "4":
-			case "5":
-			case "6":
-			case "7":
-			case "8":
-			case "9":
-				Login(s);
-				break;
-			case "0":
-				window.location.assign("https://alliances.commandandconquer.com/logout");
-				break;
 			case "Y":
 				// Signature Line
 				var inputField = document.querySelector('input:focus, textarea:focus');
@@ -125,8 +83,6 @@ function Key(e) {
 							txt += "Support  lvl: " + sl + " - " + sn + "\r\n";
 							txt += "Distance to center: " + Math.round(ClientLib.Base.Util.CalculateDistance(ClientLib.Data.MainData.GetInstance().get_Server().get_ContinentWidth() / 2, ClientLib.Data.MainData.GetInstance().get_Server().get_ContinentHeight() / 2, c.get_PosX(), c.get_PosY())) + "\r\n";
 							txt += "[coords]" + c.get_PosX() + ":" + c.get_PosY() + "[/coords]\r\n";
-							link += "playername=" + PlayerName;
-							link += "&alliancename=" + Alliance;
 						} catch (e) {
 							console.warn("MHTools.Shortcuts.INFO exception: ", e);
 						}

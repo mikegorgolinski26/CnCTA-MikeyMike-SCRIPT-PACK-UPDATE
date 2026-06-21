@@ -50,7 +50,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | TA_Maelstrom_ADDON_Basescanner_Infected_Camps | AIO variant focused on infected camps (type 7) | 🔁🗑️ |
 | TA_Shockr_Tools_Basescanner_Mailversion_reMod | Scans for "interesting" layouts, emails results; + base-counter chat tool | ⚠️ |
 | ~~TA_BaseShare~~ | Scans NPC bases, **POSTs to project-exception.net** for alliance sharing | ❌ RETIRED 2026-06-21 (data exfiltration; was enabled:false; removed from build at Mike's request) |
-| TA_Count_Forgotten_Bases_Range | Context-menu "paste count" of NPC bases in range, by level | ✅ |
+| ~~TA_Count_Forgotten_Bases_Range~~ | Context-menu "paste count" of NPC bases in range, by level | ❌ RETIRED 2026-06-21 (pure dup of Shockr BaseCounter + MMCommon scan.inRange/coords) |
 
 ### Info overlays
 | Script | What it does | Status |
@@ -97,7 +97,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | Script | What it does | Status |
 |---|---|---|
 | TA_Autopilot | Auto-upgrade buildings/def/off + collector economy modes (German vars) | ⚠️ |
-| TA_New_Custom_Flunik_Tools | Health-per-cost upgrade prioritizer (single-letter state vars) | ⚠️🔁 |
+| ~~TA_New_Custom_Flunik_Tools~~ | Health-per-cost upgrade prioritizer (single-letter state vars) | ❌ RETIRED 2026-06-21 (orphan source, no registry row; strict subset of Autopilot + MM - Base Tools) |
 | TA_Flunik_Tools_reloaded | Upgrade tracker + POI scanner (huge, 7× duplicated tab handlers) | ⚠️🔁 |
 | TA_Upgrade_Top_ModButtonPos | Upgrade highest-level building per type on interval (logging bug) | ⚠️🔁 |
 | TA_Warchief_Upgrade_Base_Defense_Army | Bulk upgrade all buildings/def/army to target level + cost/time | ✅ |

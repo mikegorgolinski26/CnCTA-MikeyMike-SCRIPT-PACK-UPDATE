@@ -69,16 +69,16 @@ confirm no legacy file was bundled verbatim, and a build-wide grep for `fetch(`/
 |---|---|---|
 | ~~**TA_leoStats**~~ | Self-described **encrypted** payload, `@updateURL` auto-updates from `cnc.indyserver.info`, remote `@require` jQuery, and **POSTs full account/base/alliance + report data** to indyserver.info (+ legacy 000webhostapp.com) on load + hourly. Responses are upload-dedup bookkeeping + a self-whisper link to the external site — **no in-game value comes back**. | ✅ REMOVED 2026-06-21 |
 | ~~**TA_BaseShare**~~ | **POSTs your reachable-base dataset + player/alliance identity** to `project-exception.net` on every scan; cross-script-coupled (`typeof leoStats`/`typeof BaseInfo`). | ✅ REMOVED 2026-06-21 |
-| **TA_Hotkeys** | Ships a **plaintext email/password table for up to 9 accounts** in source + auto-submits login. (Does NOT send data to an external server — it's a local credential-storage risk, not exfiltration.) | ⏳ still in pack (enabled:false); salvage safe parts then drop the credential login. Alt+I per-base dump → MM - Base Info via `base.ownCities`+`coords.insertIntoChat`; Alt+Y signature/role map. Fix the latent undefined-`link` bug. |
+| **TA_Hotkeys** | Shipped a **plaintext email/password table for up to 9 accounts** + auto-submit login. (Local credential-storage risk, NOT exfiltration.) | ✅ CREDENTIAL CODE STRIPPED 2026-06-21 (→2.2.5): removed the `Logins` table, `Login()`, and the Alt+1-9/Alt+0 login/logout handlers + fixed the dead-`link` bug. Kept Alt+Y (signature) + Alt+I (per-base dump) for later salvage → MM - Base Info via `base.ownCities`+`coords.insertIntoChat`. Still `enabled:false`; the file retires once Alt+I/Alt+Y are salvaged. |
 
 ---
 
-## 3. RETIRE outright (2) — pure duplicates
+## 3. RETIRE outright (2) — pure duplicates  ✅ DONE 2026-06-21
 
 | Script | Superseded by |
 |---|---|
-| **TA_Count_Forgotten_Bases_Range** | Exact subset of Shockr's BaseCounter **and** of `scan.inRange`+`coords.insertIntoChat`. Nothing unique. |
-| **TA_New_Custom_Flunik_Tools** | Strict subset of TA_Autopilot's upgrade engine **and** of MM - Base Tools. (`getMissingTechIndexesFromTechLevelRequirement` is the only nugget — capture once in MMCommon from the keeper, see §6.) |
+| ~~**TA_Count_Forgotten_Bases_Range**~~ | ✅ RETIRED — exact subset of Shockr's BaseCounter **and** of `scan.inRange`+`coords.insertIntoChat`. |
+| ~~**TA_New_Custom_Flunik_Tools**~~ | ✅ RETIRED — orphan source (no registry row); strict subset of TA_Autopilot's upgrade engine **and** of MM - Base Tools. (`getMissingTechIndexesFromTechLevelRequirement` nugget still to capture in MMCommon from the keeper, §6.) |
 
 ---
 
