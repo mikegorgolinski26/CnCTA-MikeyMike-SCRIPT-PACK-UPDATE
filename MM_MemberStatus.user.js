@@ -3,7 +3,7 @@
 // @description     Dockable, color-coded "Member Status" overview of online/away alliance members (with highest offense/defense levels when your access exposes them). MikeyMike rework of InFlames2k's "AllianceMemberOnline", rebuilt on the MM - Common Library.
 // @author          InFlames2k (Patrick Schubert)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.4
+// @version         1.2.6
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
@@ -23,11 +23,13 @@
  (dockable/persistent window) instead of hand-rolled UI.
 
  DISPLAY (1.2.x): an UNPINNED, frameless, movable floating panel like MM - Next MCV
- (drag by body, position persists, on-screen clamp). A PIN button in its header locks
- it into a menu-styled panel anchored NEXT TO the game's base bar (a separate panel
- BESIDE the bar - the Info Sticker look - not inserted into it; it re-anchors to the
- bar's left edge). Click the pin again to pop back out to the movable panel. Both panels
- are the dark, opaque #23282b MM style (matching Next MCV / Loot Summary).
+ (drag by body, dark opaque #23282b like Loot Summary, position persists, clamp). A PIN
+ button in its header locks it into a solid menu-styled panel anchored on the DESKTOP
+ just LEFT of the game's base bar ({right:128}) - the same solid button-missionbar panel
+ the in-bar MM Tools / MCV sections use (MMCommon.menubar.styledPanel), placed beside the
+ bar rather than inside it. Click the pin again to pop back to the movable panel.
+ KNOWN ISSUE (2026-06-21): the docked panel's styling is verified live, but it does not
+ yet auto-appear on reload while pinned - the startup/placeContent flow needs finishing.
 
  Shows "Off" (BestOffenseLvl = highest army level) and "Def" (BestDefenseLvl =
  highest defense level) columns, but only when your alliance access exposes that
@@ -85,7 +87,9 @@
             // It carries its OWN solid dark background so it's opaque in BOTH states (like MM - Loot Summary /
             // Next MCV, whose body Composite sets backgroundColor) - a frameless window/desktop panel does not
             // paint a background itself, so the content must.
-            var content = new qx.ui.container.Composite(new qx.ui.layout.VBox(4)).set({ backgroundColor: "#23282b", padding: 8 });
+            // bg + padding are set per mode in placeContent(): a solid dark fill when floating (Loot Summary
+            // look), transparent when docked so the menu texture shows through.
+            var content = new qx.ui.container.Composite(new qx.ui.layout.VBox(4));
             content.add(headerRow);
             content.add(listBox);
 
@@ -101,6 +105,9 @@
             });
             if (!win) { LOG.err("could not create window"); return; }
             win.add(content);
+            // If we're PINNED, suppress the float window's restoreOpen NOW (before its async poll reads the
+            // flag) so it never reopens the float and fights the docked side panel.
+            try { if (menuOn()) MM.settings.set("AllianceOverview.Window.open", false); } catch (e) {}
 
             // --- the docked ("pinned") panel: a menu-styled panel anchored NEXT TO the base bar (the Info
             // Sticker look - a separate panel BESIDE the bar, NOT inserted into it). It sits to the LEFT of
@@ -109,20 +116,18 @@
             // DESKTOP anchored to the RIGHT edge, 124px in (= just LEFT of the base nav bar, the rightmost
             // ~124px strip), using the game's region-select panel texture + dark-red side borders for the
             // "system menu" look. No bar-rect math - the {right:124} anchor places it beside the bar by itself.
-            var sp = { panel: null, built: false };
+            var sp = { panel: null, body: null, built: false };
             function buildSidePanel() {
                 if (sp.built) return sp.panel;
                 try {
                     var app = qx.core.Init.getApplication();
-                    if (!app || !app.getDesktop) return null;
-                    sp.panel = new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({
-                        width: 176,
-                        // opaque dark panel + border, matching MM - Next MCV / Loot Summary (the region-texture
-                        // image rendered transparent without the game's cap pieces, so use a solid background).
-                        // The `content` it holds carries the same #23282b fill, so the whole panel is opaque.
-                        decorator: new qx.ui.decoration.Decorator().set({ backgroundColor: "#23282b", width: 1, color: "#3a4750", radius: 5 })
-                    });
-                    app.getDesktop().add(sp.panel, { right: 124, top: 130 });
+                    if (!app || !app.getDesktop || !MM.menubar || !MM.menubar.styledPanel) return null;
+                    // Use the SAME solid menu-styled panel the in-bar MM Tools / MCV sections use (the
+                    // button-missionbar texture - solid, which Mike approved), just placed on the game DESKTOP
+                    // just LEFT of the base bar ({right:128}) instead of inserted INTO it.
+                    sp.panel = MM.menubar.styledPanel({ width: 170, spacing: 2, padding: [6, 8, 6, 8] });
+                    sp.body = sp.panel;
+                    app.getDesktop().add(sp.panel, { right: 128, top: 130 });
                     sp.built = true;
                 } catch (e) { LOG.err("buildSidePanel:", e); sp.panel = null; }
                 return sp.panel;
@@ -130,8 +135,12 @@
             // move the content into whichever container is active (the side panel or the float panel)
             function placeContent() {
                 try {
-                    var host = menuOn() ? buildSidePanel() : win;
-                    if (!host) host = win;
+                    var docked = menuOn();
+                    var host = win;
+                    if (docked) { buildSidePanel(); host = sp.body || win; }
+                    // dark solid fill when floating (Loot Summary look); transparent when docked so the
+                    // game menu texture shows through.
+                    try { content.setBackgroundColor(docked ? null : "#23282b"); content.setPadding(docked ? 0 : 8); } catch (e) {}
                     var cur = content.getLayoutParent && content.getLayoutParent();
                     if (cur !== host) { if (cur && cur.remove) cur.remove(content); host.add(content); }
                 } catch (e) { LOG.err("placeContent:", e); }
@@ -148,9 +157,10 @@
                     refresh();
                 } catch (e) { LOG.err("setMenuMode:", e); }
             }
-            // both the floating and docked panels are now the dark #23282b MM style, so one colour set.
+            // one light/saturated set - readable on BOTH the dark floating panel and the solid blue
+            // button-missionbar docked panel.
             function colors() {
-                return { title: "#cfe6ff", header: "#ffffff", online: COL_ONLINE, away: COL_AWAY, level: COL_LEVEL, none: "#888888" };
+                return { title: "#cfe6ff", header: "#ffffff", online: COL_ONLINE, away: COL_AWAY, level: COL_LEVEL, none: "#cfe0ea" };
             }
 
             function clearList() {
@@ -232,8 +242,13 @@
                 } catch (e) { LOG.err("refresh failed:", e); }
             }
 
-            // refresh immediately whenever the window appears (covers auto-reopen after a refresh)
-            win.addListener("appear", refresh);
+            // refresh when the float window appears - but if we're PINNED (docked), the float window must
+            // never stay open (its restoreOpen would otherwise reopen it on reload and fight the side panel),
+            // so close it immediately and let the side panel be the display.
+            win.addListener("appear", function () {
+                try { if (menuOn()) { win.close(); return; } } catch (e) {}
+                refresh();
+            });
 
             // refresh timer (only does work while the window is open)
             try {
