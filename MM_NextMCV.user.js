@@ -3,7 +3,7 @@
 // @description     A small always-on counter showing how close you are to your next MCV (the Research_BaseFound level that lets you found another base): time until you can afford the credits, and your research-point progress. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK (original MaelstromTools MCV popup)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.0
+// @version         1.1.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
@@ -19,19 +19,20 @@
  costs Credits + Research Points. This little popup reads that next-level cost
  and shows, at a glance:
 
-   T$ <Nd.HH:MM>   - time until your credits reach the amount needed, based on
-                     your current credit production (or "NoGrow" if you have no
-                     credit income, "OK" once you can afford it)
-   RP @ <pct>%     - your research-point progress toward the amount needed
-                     ("OK" once met)
+   Credits <Nd.HH:MM>        - time until your credits reach the amount needed,
+                               based on your current credit production (or
+                               "NoGrow" if you have no credit income, "OK" once
+                               you can afford it)
+   Research Points @ <pct>%  - your research-point progress toward the amount
+                               needed ("OK" once met)
 
  plus a compact detail line (current / needed for each). When both read OK you
  can found your next base.
 
- UX: a draggable popup (position persists), opened by a "Next MCV" HUD-tray
- button (toggle), open-state remembered across refreshes. Refreshes itself every
- 30s. Once Research_BaseFound is maxed (no further base to found) it shows a
- "max bases" note.
+ UX: a frameless, draggable floating panel (no title bar - drag it by its body;
+ position persists), opened by a "Next MCV" HUD-tray button (toggle), open-state
+ remembered across refreshes. Refreshes itself every 30s. Once Research_BaseFound
+ is maxed (no further base to found) it shows a "max bases" note.
 
  Credit: the original MCV popup + cost calc were by the MaelstromTools authors
  (see @author). This is a MikeyMike rebuild on MMCommon - plain functions, no
@@ -132,7 +133,8 @@
                 pos: [220, 120],
                 resizable: false,
                 restoreOpen: true,
-                dock: true
+                dock: true,
+                frameless: true   // clean floating panel, dragged by its body; toggled by the HUD button
             });
             if (!win) { werr("window creation failed"); return; }
             win.add(body);
@@ -159,17 +161,17 @@
                     var C = MM.num.compact;
                     // credits line
                     if (d.creditPct >= 100) {
-                        creditLine.setValue("<span style='color:#92ff7f;'>C$ : OK!</span>");
+                        creditLine.setValue("<span style='color:#92ff7f;'>Credits : OK!</span>");
                     } else if (!d.doGrow) {
-                        creditLine.setValue("<span style='color:#ff8a7f;'>T$ : NoGrow!</span>");
+                        creditLine.setValue("<span style='color:#ff8a7f;'>Credits : NoGrow!</span>");
                     } else {
-                        creditLine.setValue("<span style='color:#ff8a7f;'>T$ : " + daysFromHours(d.hoursLeft) + "</span>");
+                        creditLine.setValue("<span style='color:#ff8a7f;'>Credits : " + daysFromHours(d.hoursLeft) + "</span>");
                     }
-                    // rp line
+                    // research-points line
                     if (d.rpPct >= 100) {
-                        rpLine.setValue("<span style='color:#92ff7f;'>RP : OK!</span>");
+                        rpLine.setValue("<span style='color:#92ff7f;'>Research Points : OK!</span>");
                     } else {
-                        rpLine.setValue("RP @ " + d.rpPct.toFixed(1) + "%");
+                        rpLine.setValue("Research Points @ " + d.rpPct.toFixed(1) + "%");
                     }
                     // detail line: current / needed for each
                     detailLine.setValue(

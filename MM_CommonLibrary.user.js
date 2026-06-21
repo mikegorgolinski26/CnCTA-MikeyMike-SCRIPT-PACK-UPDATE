@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.8
+// @version         1.0.9
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -1141,6 +1141,32 @@
                         contentPadding: (opts.contentPadding != null ? opts.contentPadding : 4)
                     });
 
+                    // frameless: a clean "floating panel" with no title bar / window chrome, dragged by
+                    // its whole body (e.g. the Next MCV counter). It's still a real qx.ui.window.Window, so
+                    // geometry persistence, on-screen clamping and docking all still apply - we just hide the
+                    // captionbar + decorator and drive moves ourselves (qx normally drags via the captionbar,
+                    // which we've removed). Caller should keep frameless windows simple (no buttons/inputs),
+                    // since a mousedown ANYWHERE in the body starts a drag. The HUD-tray toggle opens/closes
+                    // it (there's no X). Uses the same mouse-capture drag idiom as the HUD tray.
+                    if (opts.frameless) {
+                        try { var cb = win.getChildControl("captionbar"); if (cb) cb.exclude(); } catch (e) {}
+                        try { win.setDecorator(null); } catch (e) {}
+                        try { win.setContentPadding(opts.contentPadding != null ? opts.contentPadding : 0); } catch (e) {}
+                        (function () {
+                            var fDrag = false, fox = 0, foy = 0;
+                            win.addListener("mousedown", function (e) {
+                                try { var b = win.getBounds(); if (!b || b.left == null) return; fox = e.getDocumentLeft() - b.left; foy = e.getDocumentTop() - b.top; fDrag = true; win.capture(true); e.stop(); } catch (er) {}
+                            });
+                            win.addListener("mousemove", function (e) {
+                                if (!fDrag) return;
+                                try { win.moveTo(Math.max(0, e.getDocumentLeft() - fox), Math.max(0, e.getDocumentTop() - foy)); } catch (er) {}
+                            });
+                            function fEnd() { if (!fDrag) return; fDrag = false; try { win.releaseCapture(); } catch (er) {} savePos(); }
+                            win.addListener("mouseup", fEnd);
+                            win.addListener("losecapture", fEnd);
+                        })();
+                    }
+
                     var lastSaved = null, pollId = null;
 
                     // Save current bounds (only when actually changed). Polled while visible so this works
@@ -1250,6 +1276,24 @@
                             if (left !== b.left || top !== b.top) win.moveTo(left, top);
                         } catch (e) {}
                     }
+                    // Pull the window fully back on-screen if it's hanging off an edge - e.g. after the
+                    // browser is un-maximised/restored and the viewport shrinks, a window parked near the
+                    // right (or bottom) edge can end up partly/fully off-screen and unreachable. Moves it
+                    // just enough left/up (never past 0,0) so its whole frame is inside the game viewport.
+                    // Docking takes precedence (reanchorDock owns placement when a window is docked).
+                    function clampIntoView() {
+                        try {
+                            if (DOCK_WIRED && dockEnabled()) return;
+                            var b = win.getBounds(); if (!b || b.left == null || !b.width) return;
+                            var root = qx.core.Init.getApplication().getRoot().getBounds();
+                            var vw = (root && root.width) || window.innerWidth || 1280;
+                            var vh = (root && root.height) || window.innerHeight || 720;
+                            var maxLeft = Math.max(0, vw - b.width), maxTop = Math.max(0, vh - b.height);
+                            var left = Math.min(Math.max(0, b.left), maxLeft);
+                            var top = Math.min(Math.max(0, b.top), maxTop);
+                            if (left !== b.left || top !== b.top) { win.moveTo(left, top); savePos(); NS.log.log("window", key, "clamped on-screen", [left, top]); }
+                        } catch (e) {}
+                    }
                     // After a drag settles, snap into the closest margin if the window's inner-facing edge
                     // is within DOCK_T of the play-area boundary. Debounced off "move" so it never fights
                     // an in-progress drag.
@@ -1288,13 +1332,17 @@
                         try { if (snapTimer) window.clearTimeout(snapTimer); } catch (e) {}
                         try { snapTimer = window.setTimeout(maybeDock, 220); } catch (e) {}
                     }
+                    // Keep every window usable when the game viewport changes size (e.g. the browser is
+                    // restored from maximised, which shrinks the viewport): a docked window re-hugs its
+                    // edge; any other window now hanging off an edge is pulled fully back on-screen.
+                    try {
+                        qx.core.Init.getApplication().getRoot().addListener("resize", function () {
+                            if (!win.isVisible()) return;
+                            if (DOCK_WIRED && dockEnabled()) reanchorDock();
+                            else clampIntoView();
+                        });
+                    } catch (e) {}
                     if (DOCK_WIRED) {
-                        try {
-                            // keep a docked window glued to its edge when the game viewport changes size
-                            qx.core.Init.getApplication().getRoot().addListener("resize", function () {
-                                if (win.isVisible()) reanchorDock();
-                            });
-                        } catch (e) {}
                         // and when the window's own content grows/shrinks (e.g. a shrink-wrapped list)
                         win.addListener("resize", function () { if (win.isVisible()) reanchorDock(); });
                     }
@@ -1303,6 +1351,9 @@
                     win.addListener("appear", function () {
                         restoreGeometry();
                         if (DOCK_WIRED) reanchorDock();
+                        // pull on-screen if a saved position is now off-screen (e.g. opened at a smaller
+                        // resolution than it was saved at); defer so persistSize width/height have settled.
+                        else window.setTimeout(function () { if (win.isVisible()) clampIntoView(); }, 350);
                         try { NS.settings.set(key + ".open", true); } catch (e) {}
                         try { if (pollId == null) pollId = window.setInterval(savePos, 1500); } catch (e) {}
                     });
