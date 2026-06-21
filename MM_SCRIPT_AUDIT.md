@@ -80,7 +80,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 ### CNCTAOpt / cncopt link buttons (big overlap)
 | Script | What it does | Status |
 |---|---|---|
-| TA_CnCTAOpt_Link_Button | Right-click→share base to **cnctaopt.com** (current site), modern syntax | ✅ (keep as the one) |
+| ~~TA_CnCTAOpt_Link_Button~~ → **MM - CnCTAOpt Link** | Right-click→share base to **cnctaopt.com** (current site) | ✅ MM-ified 2026-06-21 + verified; encoder lifted to MMCommon.cnctaopt, button = MM - CnCTAOpt Link (id 10204). Original RETIRED. |
 | TA_CNCOpt_Link_Button | Same idea → **cncopt.com** (old site), ~12yr old | 🔁🗑️ |
 | TA_CNCOpt_Link_Button_SC | "SC" variant of the cncopt button | 🔁🗑️ |
 | TA_CNCOptPLUS_Link_Button | "Plus" variant of the cncopt button | 🔁🗑️ |
@@ -117,7 +117,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 |---|---|---|
 | TA_Formation_Saver | Save/load attack formations per city-pair (sim has its own too) | ✅🔁 |
 | TA_Attack_Range → **MM - Attack Range** | Highlights bases in range while moving a base | ✅ MM-ified 2026-06-20 (1.0.0; on MMCommon map/coords/base; dead offense-panel dropped; options + HUD button) |
-| TA_Tunnel_Info → **MM - Tunnel Info** | Tunnel block/activate overlays + required offense level | ✅ MM-ified 2026-06-21 (1.0.0, id 10205; on MMCommon map/coords/net/ui/buttons; green=activate/red=blocked + move-panel offense/required readout; original kept disabled for verify) |
+| ~~TA_Tunnel_Info~~ → **MM - Tunnel Info** | Tunnel block/activate overlays + required offense level | ✅ MM-ified 2026-06-21 + verified (1.0.0, id 10205; on MMCommon map/coords/net/ui/buttons; green=activate/red=blocked + move-panel offense/required readout). Original RETIRED. |
 | TA_PvP_PvE_Ranking_POI_Holding_Split_Base_Kill_Score | Alliance PvP/PvE + POI holdings tabs in player info | ✅ |
 
 ### Alliance / social / chat

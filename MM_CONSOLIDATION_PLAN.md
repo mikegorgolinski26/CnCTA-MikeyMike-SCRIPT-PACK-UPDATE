@@ -86,10 +86,9 @@ confirm no legacy file was bundled verbatim, and a build-wide grep for `fetch(`/
 
 Priority order (high → low), with the new MM name and the one-line reason:
 
-1. **TA_Tunnel_Info → MM - Tunnel Info** ✅ DONE 2026-06-21 (1.0.0, id 10205) — rebuilt on MMCommon
-   (map/coords/net/ui/buttons), green=activate / red=blocked + the move-panel offense/required readout,
-   `[tir]` range (default 6) + override, HUD button. Original kept disabled for side-by-side verify.
-   **NOT yet live-verified by Mike.**
+1. **TA_Tunnel_Info → MM - Tunnel Info** ✅ DONE + VERIFIED 2026-06-21 (1.0.0, id 10205) — rebuilt on
+   MMCommon (map/coords/net/ui/buttons), green=activate / red=blocked + the move-panel offense/required
+   readout, `[tir]` range (default 6) + override, HUD button. **Original TA_Tunnel_Info RETIRED.**
 2. **TA_CD_PvP_Alert_Status → MM - Attack Alert** — incoming-attack title/favicon/siren alarm; no MM
    equivalent. Most robust legacy script. Event-drive via `net.attach` instead of the 5s poll; `enable_sound`→`settings`.
 3. **TA_Real_POI_Bonus → MM - Real POI Bonus** — rank-corrected POI gain/loss; also yields the
@@ -166,8 +165,8 @@ Priority order (high → low), with the new MM name and the one-line reason:
 - **TA_PvP_PvE_Player_Info_Mod** (subset) → salvage only the 2-tile POI-on-base predicate; else superseded.
 - **TA_View_Player_Base** → target site **cncopt.com is dead**; encoder superseded by the cnctaopt one (do
   NOT mix keymaps). Salvage only the alliance-`get_POI*Bonus()` getters → base/layout bonus model.
-- **TA_CnCTAOpt_Link_Button** → **the SOURCE for `MMCommon.cnctaopt.encode`** (§1.2). After the lib exists,
-  reissue as a thin MM menu button that calls it, then retire the original.
+- ~~**TA_CnCTAOpt_Link_Button**~~ → ✅ DONE + VERIFIED 2026-06-21: encoder lifted into `MMCommon.cnctaopt`
+  (1.0.8), reissued as **MM - CnCTAOpt Link** (id 10204), original RETIRED. (View_Player_Base also retired.)
 
 **Economy**
 - **TA_New_Resource_Trade_Window** → salvage `SelfTrade` send primitive + per-base cost math
