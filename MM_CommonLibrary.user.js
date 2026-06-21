@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.9
+// @version         1.0.10
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -1152,6 +1152,19 @@
                         try { var cb = win.getChildControl("captionbar"); if (cb) cb.exclude(); } catch (e) {}
                         try { win.setDecorator(null); } catch (e) {}
                         try { win.setContentPadding(opts.contentPadding != null ? opts.contentPadding : 0); } catch (e) {}
+                        // The inner "pane" child control still carries the theme's "window" decorator, which
+                        // borders the sides + bottom but NOT the top (the top normally meets the captionbar we
+                        // removed) - the lop-sided "3-sided border" look. Drop it and paint our own uniform thin
+                        // border + radius on the window's content element so all four edges match.
+                        try { var fp = win.getChildControl("pane"); if (fp) fp.setDecorator(null); } catch (e) {}
+                        function styleFrame() {
+                            try {
+                                var de = win.getContentElement().getDomElement();
+                                if (de) { de.style.border = "1px solid rgba(150,170,190,0.55)"; de.style.borderRadius = "6px"; de.style.boxShadow = "0 2px 10px rgba(0,0,0,0.55)"; de.style.boxSizing = "border-box"; de.style.overflow = "hidden"; }
+                            } catch (e) {}
+                        }
+                        win.addListener("appear", styleFrame);
+                        styleFrame();
                         (function () {
                             var fDrag = false, fox = 0, foy = 0;
                             win.addListener("mousedown", function (e) {
@@ -1168,6 +1181,14 @@
                     }
 
                     var lastSaved = null, pollId = null;
+                    // Position model for on-screen clamping: `desired` is where the USER parked the window;
+                    // the window is shown at `clamp(desired)` for the current viewport. So when the viewport
+                    // shrinks the window slides in only as far as needed, and when it grows back the window
+                    // returns to `desired` (instead of staying jammed where the shrink left it). `clamping`
+                    // guards programmatic clamp moves so they aren't mistaken for a user drag; `clampedNow`
+                    // marks that the current display is a pulled-in version of `desired` (so savePos won't
+                    // overwrite the parked spot with the temporary clamped one).
+                    var desired = null, clamping = false, clampedNow = false;
 
                     // Save current bounds (only when actually changed). Polled while visible so this works
                     // even if this qooxdoo build doesn't fire a "move"/"resize" event on drag. When
@@ -1178,10 +1199,16 @@
                         try {
                             var b = win.getBounds();
                             if (!b || b.left == null) return;
-                            var v = b.left + "," + b.top + (opts.persistSize ? ("," + b.width + "x" + b.height) : "");
+                            if (clamping) return; // a programmatic clamp move isn't a user placement
+                            // If the window is sitting fully where it fits (not pulled in), its current spot
+                            // IS the user's desired spot. While it's clamped-in (viewport too small) we keep
+                            // the saved `desired` untouched so a grow-back can restore it.
+                            if (!clampedNow) desired = { left: b.left, top: b.top };
+                            var dp = desired || { left: b.left, top: b.top };
+                            var v = dp.left + "," + dp.top + (opts.persistSize ? ("," + b.width + "x" + b.height) : "");
                             if (v === lastSaved) return;
                             lastSaved = v;
-                            NS.settings.set(key + ".pos", [b.left, b.top]);
+                            NS.settings.set(key + ".pos", [dp.left, dp.top]);
                             if (opts.persistSize) {
                                 if (b.width) NS.settings.set(key + ".w", b.width);
                                 if (b.height) NS.settings.set(key + ".h", b.height);
@@ -1200,7 +1227,11 @@
                             try { pid = ClientLib.Data.MainData.GetInstance().get_Player().get_Id(); } catch (e) {}
                             if (!pid) return false;
                             var p = NS.settings.get(key + ".pos", defPos);
-                            if (p && p.length === 2) { win.moveTo(p[0], p[1]); lastSaved = p[0] + "," + p[1]; }
+                            if (p && p.length === 2) {
+                                desired = { left: p[0], top: p[1] };   // remember the parked spot
+                                clamping = true; try { win.moveTo(p[0], p[1]); } finally { clamping = false; }
+                                lastSaved = p[0] + "," + p[1];
+                            }
                             if (opts.persistSize) {
                                 var sw = NS.settings.get(key + ".w", opts.width || null);
                                 var sh = NS.settings.get(key + ".h", opts.height || null);
@@ -1276,22 +1307,30 @@
                             if (left !== b.left || top !== b.top) win.moveTo(left, top);
                         } catch (e) {}
                     }
-                    // Pull the window fully back on-screen if it's hanging off an edge - e.g. after the
-                    // browser is un-maximised/restored and the viewport shrinks, a window parked near the
-                    // right (or bottom) edge can end up partly/fully off-screen and unreachable. Moves it
-                    // just enough left/up (never past 0,0) so its whole frame is inside the game viewport.
-                    // Docking takes precedence (reanchorDock owns placement when a window is docked).
+                    // Keep the window on-screen as the viewport changes, WITHOUT forgetting where the user
+                    // parked it. Display position = `desired` pulled in only as far as needed to fit the
+                    // current viewport. So: shrink the viewport and a window parked near the right/bottom
+                    // edge slides in just enough to stay fully visible; grow it back and the window returns
+                    // to `desired` (its parked spot) instead of staying jammed where the shrink left it -
+                    // which is what was blocking the view on restore. The clamp move is flagged (`clamping`)
+                    // so it isn't mistaken for a user drag, and `clampedNow` tells savePos not to overwrite
+                    // the parked spot while we're pulled in. Docking takes precedence when enabled.
                     function clampIntoView() {
                         try {
                             if (DOCK_WIRED && dockEnabled()) return;
                             var b = win.getBounds(); if (!b || b.left == null || !b.width) return;
+                            if (!desired) desired = { left: b.left, top: b.top };
                             var root = qx.core.Init.getApplication().getRoot().getBounds();
                             var vw = (root && root.width) || window.innerWidth || 1280;
                             var vh = (root && root.height) || window.innerHeight || 720;
                             var maxLeft = Math.max(0, vw - b.width), maxTop = Math.max(0, vh - b.height);
-                            var left = Math.min(Math.max(0, b.left), maxLeft);
-                            var top = Math.min(Math.max(0, b.top), maxTop);
-                            if (left !== b.left || top !== b.top) { win.moveTo(left, top); savePos(); NS.log.log("window", key, "clamped on-screen", [left, top]); }
+                            var left = Math.min(Math.max(0, desired.left), maxLeft);
+                            var top = Math.min(Math.max(0, desired.top), maxTop);
+                            clampedNow = (left !== desired.left || top !== desired.top);
+                            if (left !== b.left || top !== b.top) {
+                                clamping = true; try { win.moveTo(left, top); } finally { clamping = false; }
+                                NS.log.log("window", key, "clamp display", [left, top], "desired", [desired.left, desired.top], "clampedNow", clampedNow);
+                            }
                         } catch (e) {}
                     }
                     // After a drag settles, snap into the closest margin if the window's inner-facing edge
@@ -1374,7 +1413,10 @@
                         if (unloading) return; // a page refresh/teardown is not a user close
                         try { NS.settings.set(key + ".open", false); } catch (e) {}
                     });
-                    win.addListener("move", function () { savePos(); scheduleSnap(); }); // save + (if enabled) edge-snap after the drag settles
+                    // save + (if enabled) edge-snap after the drag settles. A move that ISN'T our own clamp
+                    // (clamping=false) is a user drag, so clear clampedNow - wherever they drop it becomes the
+                    // new parked spot (savePos then records it as `desired`).
+                    win.addListener("move", function () { if (!clamping) clampedNow = false; savePos(); scheduleSnap(); });
                     if (opts.persistSize) {
                         // Persist both dimensions on resize (getBounds is the real on-screen size; getWidth
                         // can read null when the size came from a layout rather than an explicit set).
