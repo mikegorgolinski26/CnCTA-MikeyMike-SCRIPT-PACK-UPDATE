@@ -3,7 +3,7 @@
 // @description     A small always-on counter showing how close you are to your next MCV (the Research_BaseFound level that lets you found another base): time until you can afford the credits, and your research-point progress. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK (original MaelstromTools MCV popup)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.0
+// @version         1.2.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
@@ -19,12 +19,13 @@
  costs Credits + Research Points. This little popup reads that next-level cost
  and shows, at a glance:
 
-   Credits <Nd.HH:MM>        - time until your credits reach the amount needed,
-                               based on your current credit production (or
-                               "NoGrow" if you have no credit income, "OK" once
-                               you can afford it)
-   Research Points @ <pct>%  - your research-point progress toward the amount
-                               needed ("OK" once met)
+   A centered "Next MCV" title, then two aligned 0-100 progress bars:
+     Credits bar - FILL = how close your credits are to the cost; the label is
+                   the time-to-afford countdown <Nd.HH:MM> ("NoGrow" with no
+                   credit income, "OK" once affordable).
+     RP bar      - FILL = how close your research points are to the cost; the
+                   label is the percent ("OK" once met).
+   Both bars share a 0-100 scale so you can compare progress at a glance.
 
  plus a compact detail line (current / needed for each). When both read OK you
  can found your next base.
@@ -107,24 +108,41 @@
             wlog("building UI");
             var TXT = "#e8e8e8";
 
-            var body = new qx.ui.container.Composite(new qx.ui.layout.VBox(2))
-                .set({ padding: 4, backgroundColor: "#23282b" });
+            var body = new qx.ui.container.Composite(new qx.ui.layout.VBox(4))
+                .set({ padding: 6, backgroundColor: "#23282b", width: 212 });
 
-            function line(color) {
-                return new qx.ui.basic.Label("").set({
-                    rich: true, textAlign: "center", allowGrowX: true, textColor: color,
-                    font: new qx.bom.Font(14, ["sans-serif"]).set({ bold: true })
-                });
+            // centered title (the frameless panel has no caption bar, so draw our own)
+            body.add(new qx.ui.basic.Label("Next MCV").set({
+                rich: true, textAlign: "center", allowGrowX: true, textColor: "#cfe6ff",
+                font: new qx.bom.Font(13, ["sans-serif"]).set({ bold: true })
+            }));
+
+            // Two aligned 0-100 progress bars (rich labels rendering a self-contained HTML bar). The FILL
+            // shows how close each resource is to the next-MCV cost (credits %, RP %), so you can compare
+            // them at a glance; the centered text is the credit time-to-afford countdown and the RP percent.
+            function progressBar() {
+                return new qx.ui.basic.Label("").set({ rich: true, allowGrowX: true, height: 20 });
             }
-            var creditLine = line("cyan");
-            var rpLine = line("#ffe14d");
+            var creditBar = progressBar();
+            var rpBar = progressBar();
+            body.add(creditBar);
+            body.add(rpBar);
+
+            // bottom detail line: current / needed for each (kept - Mike likes it)
             var detailLine = new qx.ui.basic.Label("").set({
                 rich: true, textAlign: "center", allowGrowX: true, textColor: "#b9c2c7",
                 font: new qx.bom.Font(11, ["sans-serif"])
             });
-            body.add(creditLine);
-            body.add(rpLine);
             body.add(detailLine);
+
+            // One progress bar's HTML: a dark track with a colored fill to `pct`% + a centered label.
+            function barHtml(pct, fill, label) {
+                var p = Math.max(0, Math.min(100, pct || 0));
+                return '<div style="position:relative;height:18px;background:#11151a;border:1px solid #3a4750;border-radius:4px;overflow:hidden;">'
+                    + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + p.toFixed(1) + '%;background:' + fill + ';"></div>'
+                    + '<div style="position:absolute;left:0;right:0;top:0;height:18px;line-height:18px;text-align:center;font:bold 12px sans-serif;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;">' + label + '</div>'
+                    + '</div>';
+            }
 
             var win = MM.ui.Window({
                 caption: "Next MCV",
@@ -153,26 +171,18 @@
                     if (!win.isVisible()) return;
                     var d = computeNextMCV();
                     if (!d) {
-                        creditLine.setValue("<span style='color:#92ff7f;'>Max bases founded</span>");
-                        rpLine.setValue("");
+                        creditBar.setValue(barHtml(100, "#3a7d3a", "Max bases founded"));
+                        rpBar.setValue("");
                         detailLine.setValue("no further MCV to research");
                         return;
                     }
                     var C = MM.num.compact;
-                    // credits line
-                    if (d.creditPct >= 100) {
-                        creditLine.setValue("<span style='color:#92ff7f;'>Credits : OK!</span>");
-                    } else if (!d.doGrow) {
-                        creditLine.setValue("<span style='color:#ff8a7f;'>Credits : NoGrow!</span>");
-                    } else {
-                        creditLine.setValue("<span style='color:#ff8a7f;'>Credits : " + daysFromHours(d.hoursLeft) + "</span>");
-                    }
-                    // research-points line
-                    if (d.rpPct >= 100) {
-                        rpLine.setValue("<span style='color:#92ff7f;'>Research Points : OK!</span>");
-                    } else {
-                        rpLine.setValue("Research Points @ " + d.rpPct.toFixed(1) + "%");
-                    }
+                    // Credits bar: fill = how close credits are to the cost; label = time-to-afford countdown.
+                    var cLabel = (d.creditPct >= 100) ? "Credits  OK!" : (!d.doGrow ? "Credits  NoGrow" : "Credits  " + daysFromHours(d.hoursLeft));
+                    creditBar.setValue(barHtml(d.creditPct, "#d2792a", cLabel));
+                    // RP bar: fill = how close RP are to the cost; label = the percent.
+                    var rLabel = (d.rpPct >= 100) ? "RP  OK!" : "RP  " + d.rpPct.toFixed(1) + "%";
+                    rpBar.setValue(barHtml(d.rpPct, "#c2af1d", rLabel));
                     // detail line: current / needed for each
                     detailLine.setValue(
                         "<span style='color:#ff8f00;'>$ " + C(d.curCredits) + "</span> / " + C(d.creditsNeeded) +

@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.10
+// @version         1.0.11
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -1182,13 +1182,23 @@
 
                     var lastSaved = null, pollId = null;
                     // Position model for on-screen clamping: `desired` is where the USER parked the window;
-                    // the window is shown at `clamp(desired)` for the current viewport. So when the viewport
-                    // shrinks the window slides in only as far as needed, and when it grows back the window
-                    // returns to `desired` (instead of staying jammed where the shrink left it). `clamping`
-                    // guards programmatic clamp moves so they aren't mistaken for a user drag; `clampedNow`
-                    // marks that the current display is a pulled-in version of `desired` (so savePos won't
-                    // overwrite the parked spot with the temporary clamped one).
-                    var desired = null, clamping = false, clampedNow = false;
+                    // the window is DISPLAYED at clampToView(desired) for the current viewport. So when the
+                    // viewport shrinks the window slides in only as far as needed, and when it grows back the
+                    // window returns to `desired` (instead of staying jammed where the shrink left it).
+                    // We don't use a "is this our move or the user's" flag (qooxdoo fires the move event
+                    // asynchronously, so a flag set around moveTo is already cleared by the time it fires).
+                    // Instead savePos COMPARES the live position to clampToView(desired): if they match it's
+                    // our clamp (leave `desired` alone); if they differ the user dragged it (adopt the new
+                    // spot). Position comparison is immune to event timing.
+                    var desired = null;
+                    function clampToView(pos) {
+                        var b = win.getBounds() || {};
+                        var root = qx.core.Init.getApplication().getRoot().getBounds();
+                        var vw = (root && root.width) || window.innerWidth || 1280;
+                        var vh = (root && root.height) || window.innerHeight || 720;
+                        var maxLeft = Math.max(0, vw - (b.width || 0)), maxTop = Math.max(0, vh - (b.height || 0));
+                        return { left: Math.min(Math.max(0, pos.left), maxLeft), top: Math.min(Math.max(0, pos.top), maxTop) };
+                    }
 
                     // Save current bounds (only when actually changed). Polled while visible so this works
                     // even if this qooxdoo build doesn't fire a "move"/"resize" event on drag. When
@@ -1199,21 +1209,25 @@
                         try {
                             var b = win.getBounds();
                             if (!b || b.left == null) return;
-                            if (clamping) return; // a programmatic clamp move isn't a user placement
-                            // If the window is sitting fully where it fits (not pulled in), its current spot
-                            // IS the user's desired spot. While it's clamped-in (viewport too small) we keep
-                            // the saved `desired` untouched so a grow-back can restore it.
-                            if (!clampedNow) desired = { left: b.left, top: b.top };
-                            var dp = desired || { left: b.left, top: b.top };
-                            var v = dp.left + "," + dp.top + (opts.persistSize ? ("," + b.width + "x" + b.height) : "");
+                            if (!desired) desired = { left: b.left, top: b.top };
+                            // Is the live position a USER placement, or just where our on-screen clamp put it?
+                            // clampToView(desired) is where WE would have placed it. If the live position
+                            // differs, the user dragged it -> adopt the new spot as `desired`. If it matches,
+                            // leave `desired` alone, so a temporary clamp (viewport too small) never overwrites
+                            // the parked spot and a grow-back restores it.
+                            var exp = clampToView(desired);
+                            if (Math.abs(b.left - exp.left) > 1 || Math.abs(b.top - exp.top) > 1) {
+                                desired = { left: b.left, top: b.top };
+                            }
+                            var v = desired.left + "," + desired.top + (opts.persistSize ? ("," + b.width + "x" + b.height) : "");
                             if (v === lastSaved) return;
                             lastSaved = v;
-                            NS.settings.set(key + ".pos", [dp.left, dp.top]);
+                            NS.settings.set(key + ".pos", [desired.left, desired.top]);
                             if (opts.persistSize) {
                                 if (b.width) NS.settings.set(key + ".w", b.width);
                                 if (b.height) NS.settings.set(key + ".h", b.height);
                             }
-                            NS.log.log("window", key, "saved", v);
+                            NS.log.log("window", key, "saved desired", v);
                         } catch (e) {}
                     }
                     // Apply saved position/size. CRITICAL: this must NOT run before the player id is loaded.
@@ -1229,7 +1243,7 @@
                             var p = NS.settings.get(key + ".pos", defPos);
                             if (p && p.length === 2) {
                                 desired = { left: p[0], top: p[1] };   // remember the parked spot
-                                clamping = true; try { win.moveTo(p[0], p[1]); } finally { clamping = false; }
+                                win.moveTo(p[0], p[1]);
                                 lastSaved = p[0] + "," + p[1];
                             }
                             if (opts.persistSize) {
@@ -1312,24 +1326,17 @@
                     // current viewport. So: shrink the viewport and a window parked near the right/bottom
                     // edge slides in just enough to stay fully visible; grow it back and the window returns
                     // to `desired` (its parked spot) instead of staying jammed where the shrink left it -
-                    // which is what was blocking the view on restore. The clamp move is flagged (`clamping`)
-                    // so it isn't mistaken for a user drag, and `clampedNow` tells savePos not to overwrite
-                    // the parked spot while we're pulled in. Docking takes precedence when enabled.
+                    // which is what was blocking the view on restore. savePos tells our clamp moves from real
+                    // user drags by comparing positions (see clampToView/savePos). Docking takes precedence.
                     function clampIntoView() {
                         try {
                             if (DOCK_WIRED && dockEnabled()) return;
                             var b = win.getBounds(); if (!b || b.left == null || !b.width) return;
                             if (!desired) desired = { left: b.left, top: b.top };
-                            var root = qx.core.Init.getApplication().getRoot().getBounds();
-                            var vw = (root && root.width) || window.innerWidth || 1280;
-                            var vh = (root && root.height) || window.innerHeight || 720;
-                            var maxLeft = Math.max(0, vw - b.width), maxTop = Math.max(0, vh - b.height);
-                            var left = Math.min(Math.max(0, desired.left), maxLeft);
-                            var top = Math.min(Math.max(0, desired.top), maxTop);
-                            clampedNow = (left !== desired.left || top !== desired.top);
-                            if (left !== b.left || top !== b.top) {
-                                clamping = true; try { win.moveTo(left, top); } finally { clamping = false; }
-                                NS.log.log("window", key, "clamp display", [left, top], "desired", [desired.left, desired.top], "clampedNow", clampedNow);
+                            var d = clampToView(desired);
+                            if (d.left !== b.left || d.top !== b.top) {
+                                win.moveTo(d.left, d.top);
+                                NS.log.log("window", key, "clamp display", [d.left, d.top], "desired", [desired.left, desired.top]);
                             }
                         } catch (e) {}
                     }
@@ -1413,10 +1420,8 @@
                         if (unloading) return; // a page refresh/teardown is not a user close
                         try { NS.settings.set(key + ".open", false); } catch (e) {}
                     });
-                    // save + (if enabled) edge-snap after the drag settles. A move that ISN'T our own clamp
-                    // (clamping=false) is a user drag, so clear clampedNow - wherever they drop it becomes the
-                    // new parked spot (savePos then records it as `desired`).
-                    win.addListener("move", function () { if (!clamping) clampedNow = false; savePos(); scheduleSnap(); });
+                    // save (savePos decides user-drag vs our-clamp by comparing positions) + edge-snap.
+                    win.addListener("move", function () { savePos(); scheduleSnap(); });
                     if (opts.persistSize) {
                         // Persist both dimensions on resize (getBounds is the real on-screen size; getWidth
                         // can read null when the size came from a layout rather than an explicit set).
