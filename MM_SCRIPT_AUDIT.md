@@ -1,3 +1,9 @@
+> **⚠️ SUPERSEDED for go-forward planning (2026-06-21):** the remaining 42 legacy scripts were re-read in
+> full and given accurate, current dispositions in **`MM_CONSOLIDATION_PLAN.md`** — use that as the source of
+> truth for what each leftover script does and whether it's RETIRE / SALVAGE-THEN-RETIRE / MM-IFY / QUARANTINE
+> / PENDING. This file is kept for the original audit history + the §4 MMCommon design and §9 Member Status
+> pilot notes.
+
 # MM Script Pack — Full Library Audit & Consolidation Plan
 
 _Generated for Mike's review. Covers all 67 userscripts in `CnCTA-MikeyMike-SCRIPT-PACK/`.
