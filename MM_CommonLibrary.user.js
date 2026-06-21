@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.12
+// @version         1.0.13
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.8"
+            version: "1.0.13"
         };
 
         // -------------------------------------------------------------------
@@ -1729,6 +1729,57 @@
                     applyVisible(v);
                     return v;
                 }
+            };
+        })();
+
+        // -------------------------------------------------------------------
+        // lifecycle: let a RUNNING script react when it's enabled/disabled from
+        // the CnC Pack menu (or the options page) WITHOUT a game refresh. The
+        // menu writes CNCTA_ENABLED via the content.js bridge, which re-broadcasts
+        // the full {kind:"state"} map; we listen to that same broadcast and fire a
+        // per-script onDisable/onEnable when its bit flips. A script registers with
+        // its registry id and a teardown/resume pair - e.g. Off/Def Bubbles stops
+        // its survey + clears its overlay on disable instead of churning on until a
+        // refresh. (Enabling a script that was OFF at PAGE LOAD still needs a
+        // refresh - it was never injected - but toggling within a session is live.)
+        // -------------------------------------------------------------------
+        NS.lifecycle = (function () {
+            var MARK = "__cncpack";
+            var enabled = {};   // id -> last-known bool
+            var subs = [];      // { id, onEnable, onDisable }
+
+            function post(msg) { try { msg[MARK] = 1; window.postMessage(msg, "*"); } catch (e) {} }
+            function onMsg(ev) {
+                try {
+                    if (ev.source !== window) return;
+                    var d = ev.data;
+                    if (!d || d[MARK] !== 1 || d.kind !== "state") return;
+                    var em = d.enabled || {};
+                    for (var i = 0; i < subs.length; i++) {
+                        var s = subs[i];
+                        var now = em[s.id] === true;
+                        var was = enabled[s.id];
+                        enabled[s.id] = now;
+                        if (was === undefined) continue;          // first read = baseline, don't fire
+                        if (now === was) continue;
+                        try {
+                            if (now) { if (s.onEnable) s.onEnable(); }
+                            else { if (s.onDisable) s.onDisable(); }
+                        } catch (e) { NS.log.err("lifecycle cb (id " + s.id + "):", e); }
+                    }
+                } catch (e) {}
+            }
+            try { window.addEventListener("message", onMsg); } catch (e) {}
+
+            return {
+                // watch(id, { onEnable, onDisable }) - callbacks fire on a real transition only.
+                watch: function (id, opts) {
+                    if (!id || !opts) return;
+                    subs.push({ id: id, onEnable: opts.onEnable, onDisable: opts.onDisable });
+                    post({ req: "get" });   // ensure a state broadcast arrives to baseline this id
+                },
+                // current known state (undefined until the first broadcast lands)
+                isEnabled: function (id) { return enabled[id]; }
             };
         })();
 

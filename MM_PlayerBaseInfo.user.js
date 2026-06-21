@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Draws a live on-map overlay of small bubbles showing Offense / Defense level (stacked) over every visible player base in region view (own / alliance / enemy). Off/def for other players' bases is surveyed in the background; a base's bubble only appears once its values are known. Bubbles track the map as you pan and zoom. A HUD options panel toggles which base types show.
-// @version      1.2.7
+// @version      1.2.8
 // @author       XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -93,6 +93,7 @@
 		var surveyRestoreId = null; // current-city id to restore when the survey queue drains (usually -1)
 		var lastOwnMap = null;      // most recent ownIdMap, so a deferred survey can be resumed
 		var surveyDeferred = false; // true while the survey is paused because a base info panel is open
+		var scriptEnabled = true;   // CnC Pack / options-page enable bit (CNCTA_ENABLED). false = live-disabled: no survey, no overlay, no refresh needed
 
 		function ownToCache(id, ownMap) {
 			var c = ownMap[id];
@@ -106,6 +107,15 @@
 		}
 		function pump(ownMap) {
 			lastOwnMap = ownMap;
+			// Live-disabled from the CnC Pack menu / options page: drop the queue, release any base we're
+			// holding as "current", and stop. No survey churn until re-enabled (no game refresh required).
+			if (!scriptEnabled) {
+				queue.length = 0;
+				for (var dk in pending) delete pending[dk];
+				if (surveyRestoreId !== null) { try { MM.base.setCurrentCityId(surveyRestoreId); } catch (e) {} surveyRestoreId = null; }
+				surveyDeferred = false;
+				return;
+			}
 			// CRITICAL: never touch the shared current-city pointer while the user is in a base/city
 			// view. fetchDetail hijacks set_CurrentCityId to trigger loads; if the survey fires that
 			// while the game is rendering an open base, it yanks the city out from under the renderer
@@ -337,7 +347,7 @@
 
 		// ---- enumerate visible player bases (via MMCommon.map) ---------------------
 		function refreshOverlay() {
-			if (!masterOn()) { clearAll(); return; }
+			if (!scriptEnabled || !masterOn()) { clearAll(); return; }
 			if (!MM.map.inRegionView()) { if (layer) layer.style.display = "none"; return; }
 			// self-heal: if qx ever rebuilt the container and dropped our layer, re-create + rebuild
 			if (!layer || !layer.isConnected) { ensureLayer(); bubbles = {}; }
@@ -457,6 +467,28 @@
 						try { updatePopupVisibility(); } catch (e) {}
 						try { if (surveyDeferred && lastOwnMap && !surveyBlocked()) pump(lastOwnMap); } catch (e) {}
 					}, 150);
+					// React to being toggled in the CnC Pack menu / options page WITHOUT a refresh: on
+					// disable, tear down the survey + overlay; on re-enable (same session), resume.
+					try {
+						if (MM.lifecycle && MM.lifecycle.watch) {
+							MM.lifecycle.watch(10076, {
+								onDisable: function () {
+									wlog("disabled via CnC Pack menu - stopping survey + clearing overlay");
+									scriptEnabled = false;
+									queue.length = 0;
+									for (var dk in pending) delete pending[dk];
+									if (surveyRestoreId !== null) { try { MM.base.setCurrentCityId(surveyRestoreId); } catch (e) {} surveyRestoreId = null; }
+									surveyDeferred = false;
+									clearAll();
+								},
+								onEnable: function () {
+									wlog("re-enabled via CnC Pack menu - resuming overlay");
+									scriptEnabled = true;
+									refreshOverlay();
+								}
+							});
+						}
+					} catch (e) { werr("lifecycle watch:", e); }
 					buildOptions();
 					window.MM_PBI_INSTALLED = true;
 					wlog("overlay engine installed.");
