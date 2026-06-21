@@ -3,7 +3,7 @@
 // @description     Scan every attackable base/camp/outpost within range of one of your bases and rank them for farming and capture: loot (Tib/Cry/Credits/Research), command-point cost, loot-per-CP efficiency, resource-field counts, perfect-layout flags, Construction-Yard / Defense-Facility row, and building/defense condition. Rebuilt on the MM - Common Library (no MaelstromTools dependency).
 // @author          BlinDManX, chertosha, Netquik, kad (original Maelstrom ADDON Basescanner AIO)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.0
+// @version         1.0.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
@@ -655,6 +655,11 @@
                 var app = (typeof qx != "undefined" && qx.core && qx.core.Init) ? qx.core.Init.getApplication() : null;
                 var navReady = app && app.getUIItem && app.getUIItem(ClientLib.Data.Missions.PATH.BAR_NAVIGATION) && app.getUIItem(ClientLib.Data.Missions.PATH.BAR_NAVIGATION).isVisible();
                 if (navReady && window.MMCommon && window.MMCommon.ui && window.MMCommon.buttons && window.MMCommon.scan && window.MMCommon.loot) {
+                    // Refresh the MM alias: the top-level `var MM = window.MMCommon` runs at script load,
+                    // which can be BEFORE the Common Library defines window.MMCommon (injection order isn't
+                    // guaranteed). waitReady waited for it to exist, so bind it now - else build()/scan use a
+                    // stale undefined MM and every MM.* throws (the old "column setup ... settings" spam loop).
+                    MM = window.MMCommon;
                     build();
                 } else {
                     tries++;
