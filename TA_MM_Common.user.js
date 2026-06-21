@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.4
+// @version         1.0.5
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_Common.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_Common.user.js
@@ -25,9 +25,10 @@
  It must load before the scripts that use it (place it right after the wrapper).
 
  STATUS OF EACH MODULE
-   Implemented & ready:  log, net, settings, num, time, coords
-   Scaffold (TODO, ported as each consumer script is migrated): cnctaopt, scan,
-   repair, loot, ui (dockable window), buttons (CommonButtonHandler)
+   Implemented & ready:  log, net, settings, num, time, coords, deobf, scan, loot,
+   base, map, ui (dockable window), buttons (CommonButtonHandler, now optionally
+   shown), menu (the in-game "CnC Pack" top menu)
+   Scaffold (TODO, ported as each consumer script is migrated): cnctaopt, repair
 
  DEBUG: set  window.MM_DEBUG = true  in the game console for verbose [MM ...] logs.
 ================================================================================
@@ -69,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.4"
+            version: "1.0.5"
         };
 
         // -------------------------------------------------------------------
@@ -1100,6 +1101,16 @@
             var DEFAULTS = { bottom: 40, right: 220 }; // initial parking spot, clear of game UI
             var KEY = "HUDTray";
 
+            // Optional display: the HUD tray can be hidden (the CnC Pack menu provides the same
+            // window-openers). The intent is persisted per player+world; default = shown so existing
+            // installs are unchanged. The "Show Toolbar Buttons" item in the CnC Pack menu flips it.
+            function showPref() {
+                try { return NS.settings.get(KEY + ".show", true) !== false; } catch (e) { return true; }
+            }
+            function applyVisible(v) {
+                try { if (tray) { if (v) tray.show(); else tray.exclude(); } } catch (e) {}
+            }
+
             // Apply absolute {left,top} layout properties to the tray, replacing whatever placement
             // (default bottom/right anchors or a prior left/top) is currently in effect. Canvas layouts
             // ignore unset hints, so we explicitly null the others when switching to absolute mode.
@@ -1128,6 +1139,7 @@
                     });
                     tray.add(handle);
                     app.getDesktop().add(tray, DEFAULTS);
+                    applyVisible(showPref()); // honor the hidden/shown intent (re-checked once the player id loads)
 
                     // --- drag handling -------------------------------------------------------------
                     // The qooxdoo "mousemove" only fires on a widget when the cursor is inside its
@@ -1181,6 +1193,7 @@
                                 placeAbsolute(saved.left, saved.top);
                                 NS.log.log("HUDTray restored pos", saved);
                             }
+                            applyVisible(showPref()); // re-apply from the correct per-player bucket
                         } catch (_) {}
                     }, 300);
 
@@ -1189,6 +1202,17 @@
                     NS.log.err("HUDTray creation failed:", e);
                     return null;
                 }
+            }
+
+            // Mirror a registered button into the CnC Pack menu's "Open Window" submenu, so a tool's
+            // window can be opened from the top menu even when the tray is hidden. Safe if NS.menu
+            // isn't ready yet (it polls/rebuilds from its own side).
+            function feedMenu(opts) {
+                try {
+                    if (opts && opts.onExecute && NS.menu && NS.menu.registerWindow) {
+                        NS.menu.registerWindow({ id: opts.id, label: opts.label, icon: opts.icon, run: opts.onExecute });
+                    }
+                } catch (e) {}
             }
 
             return {
@@ -1200,7 +1224,7 @@
                         // de-dupe: if a script registers twice (e.g. on reload), return the existing button
                         if (opts.id) {
                             for (var i = 0; i < slots.length; i++) {
-                                if (slots[i].id === opts.id) return slots[i].btn;
+                                if (slots[i].id === opts.id) { feedMenu(opts); return slots[i].btn; }
                             }
                         }
                         var btn = new qx.ui.form.Button(opts.label || "", opts.icon || null).set({
@@ -1211,17 +1235,228 @@
                         if (opts.onExecute) btn.addListener("execute", opts.onExecute);
                         t.add(btn);
                         slots.push({ id: opts.id, btn: btn });
+                        feedMenu(opts);
                         return btn;
                     } catch (e) {
                         NS.log.err("buttons.register failed:", e);
                         return null;
                     }
+                },
+                // Optional-display control (used by the CnC Pack menu's "Show Toolbar Buttons" toggle).
+                isVisible: function () { return showPref(); },
+                setVisible: function (v) {
+                    v = (v !== false);
+                    try { NS.settings.set(KEY + ".show", v); } catch (e) {}
+                    applyVisible(v);
+                    return v;
+                }
+            };
+        })();
+
+        // -------------------------------------------------------------------
+        // menu: the in-game "CnC Pack" top menu - one control center for the
+        // reworked MM scripts. It RENAMES the game's native "Scripts" top-bar
+        // button to "CnC Pack" and fills it with:
+        //   * the MM scripts grouped exactly like the options page (SIMULATOR /
+        //     GET INFO HELPER / TOOL AND TOOL-PACK / GUI ENHANCER), each a
+        //     Windows-style checkbox = enabled-state. Clicking toggles enable/
+        //     disable and the menu STAYS OPEN (multi-toggle) - we override the
+        //     menu item's _onTap so it doesn't hideAll() like a normal item.
+        //   * an "Open Window" submenu listing every tool that registered a HUD
+        //     button (so windows open from the menu even when the tray is hidden).
+        //   * a "Show Toolbar Buttons" toggle (the HUD tray is now optional).
+        // The enabled-state is the extension's CNCTA_ENABLED map, mirrored to the
+        // options page. The page can't read chrome.storage, so this talks to the
+        // bridge in content.js via window.postMessage. The Framework Wrapper and
+        // Common Library are intentionally NOT listed (always on, not toggleable).
+        // -------------------------------------------------------------------
+        NS.menu = (function () {
+            var MARK = "__cncpack";
+            var state = { scripts: [], enabled: {}, ready: false };
+            var openers = [];          // {id,label,icon,run} window-openers (fed by buttons.register / registerWindow)
+            var itemsById = {};        // script id -> its CheckBox (for in-place value refresh)
+            var built = false, packBtn = null, openSubBtn = null, ensureTimer = null;
+
+            // category key -> options-page header, in options-page order. Wrapper category excluded.
+            var CATS = [
+                ["simulator", "SIMULATOR"],
+                ["infotool", "GET INFO HELPER"],
+                ["tool", "TOOL AND TOOL-PACK"],
+                ["gui", "GUI ENHANCER"]
+            ];
+            var LOCKED = { 10001: true, 10200: true }; // wrapper + common library: never listed/toggled
+
+            function cleanName(name) { return String(name || "").replace(/^MM\s*-\s*/, ""); }
+            function isPackScript(s) {
+                if (!s || LOCKED[s.id]) return false;
+                if (s.cat === "wrapper") return false;
+                return /^MM\s*-/.test(s.name || "");
+            }
+
+            // --- bridge to content.js -----------------------------------------------------------
+            function post(msg) { try { msg[MARK] = 1; window.postMessage(msg, "*"); } catch (e) {} }
+            function requestState() { post({ req: "get" }); }
+            function setEnabled(id, on) {
+                if (LOCKED[id]) return;
+                state.enabled[id] = on;            // optimistic; content.js echoes the authoritative state back
+                post({ req: "set", id: id, enabled: on });
+            }
+            function onMsg(ev) {
+                try {
+                    if (ev.source !== window) return;
+                    var d = ev.data;
+                    if (!d || d[MARK] !== 1 || d.kind !== "state") return;
+                    state.scripts = d.scripts || [];
+                    state.enabled = d.enabled || {};
+                    state.ready = true;
+                    onStateUpdated();
+                } catch (e) {}
+            }
+
+            // --- the menu -----------------------------------------------------------------------
+            function packButton() {
+                try {
+                    var app = qx.core.Init.getApplication();
+                    var mb = app.getMenuBar ? app.getMenuBar() : null;
+                    var sb = (mb && mb.getScriptsButton) ? mb.getScriptsButton() : null;
+                    if (!sb) {
+                        var item = app.getUIItem(ClientLib.Data.Missions.PATH.BAR_MENU);
+                        sb = (item && item.getScriptsButton) ? item.getScriptsButton() : null;
+                    }
+                    return sb || null;
+                } catch (e) { return null; }
+            }
+
+            function header(text) {
+                var h = new qx.ui.menu.Button(text);
+                try { h.setEnabled(false); } catch (e) {}
+                try { h.setTextColor("#ffcf66"); } catch (e) {}
+                return h;
+            }
+
+            function makeCheckItem(s) {
+                var cb = new qx.ui.menu.CheckBox(cleanName(s.name));
+                try { cb.setValue(state.enabled[s.id] === true); } catch (e) {}
+                try { cb.setToolTipText("Enable/disable " + (s.name || "") + " (takes effect on next game refresh)"); } catch (e) {}
+                // KEEP THE MENU OPEN: a normal menu item's _onTap calls Manager.hideAll() then execute().
+                // We replace it so a toggle just flips the value + persists, leaving the menu up so several
+                // scripts can be toggled in one visit.
+                cb._onTap = function () {
+                    try {
+                        var nv = !this.getValue();
+                        this.setValue(nv);
+                        setEnabled(s.id, nv);
+                    } catch (err) { NS.log.err("menu toggle:", err); }
+                };
+                return cb;
+            }
+
+            function buildOpenSubmenu() {
+                var m = new qx.ui.menu.Menu();
+                var any = false;
+                for (var i = 0; i < openers.length; i++) {
+                    (function (op) {
+                        if (!op || !op.run) return;
+                        if (op.id && state.enabled[op.id] === false) return; // only enabled tools
+                        any = true;
+                        var b = new qx.ui.menu.Button(op.label || "Open", op.icon || null);
+                        b.addListener("execute", function () { try { op.run(); } catch (e) { NS.log.err("opener:", e); } });
+                        m.add(b);
+                    })(openers[i]);
+                }
+                if (!any) {
+                    var none = new qx.ui.menu.Button("(enable a tool first)");
+                    try { none.setEnabled(false); } catch (e) {}
+                    m.add(none);
+                }
+                return m;
+            }
+
+            function build() {
+                var sb = packButton();
+                if (!sb || !state.ready) return false;
+                try {
+                    packBtn = sb;
+                    sb.setLabel("CnC Pack");
+                    var menu = new qx.ui.menu.Menu();
+                    itemsById = {};
+                    for (var c = 0; c < CATS.length; c++) {
+                        var cat = CATS[c][0], title = CATS[c][1];
+                        var items = state.scripts.filter(function (s) { return isPackScript(s) && (s.cat || "") === cat; });
+                        if (!items.length) continue;
+                        menu.add(header(title));
+                        items.sort(function (a, b) { return cleanName(a.name).localeCompare(cleanName(b.name)); });
+                        for (var i = 0; i < items.length; i++) {
+                            var cb = makeCheckItem(items[i]);
+                            itemsById[items[i].id] = cb;
+                            menu.add(cb);
+                        }
+                    }
+                    menu.addSeparator();
+                    openSubBtn = new qx.ui.menu.Button("Open Window");
+                    openSubBtn.setMenu(buildOpenSubmenu());
+                    menu.add(openSubBtn);
+                    menu.addSeparator();
+                    var trayCb = new qx.ui.menu.CheckBox("Show Toolbar Buttons");
+                    try { trayCb.setValue(NS.buttons.isVisible()); } catch (e) {}
+                    trayCb._onTap = function () {
+                        try { var nv = !this.getValue(); this.setValue(nv); NS.buttons.setVisible(nv); }
+                        catch (err) { NS.log.err("tray toggle:", err); }
+                    };
+                    menu.add(trayCb);
+                    sb.setMenu(menu);
+                    built = true;
+                    NS.log.log("CnC Pack menu built");
+                    return true;
+                } catch (e) { NS.log.err("menu.build:", e); return false; }
+            }
+
+            // Update item values + the Open submenu in place, WITHOUT rebuilding the menu (a rebuild would
+            // collapse the menu mid-use). Falls back to build() if we haven't built yet.
+            function onStateUpdated() {
+                if (!built) { if (!build()) scheduleEnsure(); return; }
+                try {
+                    for (var id in itemsById) { try { itemsById[id].setValue(state.enabled[id] === true); } catch (e) {} }
+                    if (openSubBtn) openSubBtn.setMenu(buildOpenSubmenu());
+                } catch (e) { NS.log.err("menu.refresh:", e); }
+            }
+
+            function scheduleEnsure() {
+                try { if (ensureTimer) window.clearTimeout(ensureTimer); } catch (e) {}
+                ensureTimer = window.setTimeout(function () { if (!built) { if (!build()) scheduleEnsure(); } }, 400);
+            }
+
+            function init() {
+                try { window.addEventListener("message", onMsg); } catch (e) {}
+                // wait for the game menu bar, then ask the bridge for state and build
+                var tries = 0, id = window.setInterval(function () {
+                    if (packButton()) { window.clearInterval(id); requestState(); }
+                    else if (++tries > 160) window.clearInterval(id);
+                }, 250);
+                window.setTimeout(requestState, 1500); // belt-and-braces re-request
+            }
+
+            return {
+                init: init,
+                refresh: requestState,
+                packButton: packButton,
+                // A loaded script can register a window-opener directly (e.g. the battle sim, which has no
+                // HUD tray button). buttons.register() also calls this automatically.
+                registerWindow: function (opts) {
+                    opts = opts || {};
+                    if (!opts.run) return;
+                    for (var i = 0; i < openers.length; i++) {
+                        if (openers[i].id && openers[i].id === opts.id) { openers[i] = opts; if (built && openSubBtn) try { openSubBtn.setMenu(buildOpenSubmenu()); } catch (e) {} return; }
+                    }
+                    openers.push(opts);
+                    if (built && openSubBtn) { try { openSubBtn.setMenu(buildOpenSubmenu()); } catch (e) {} }
                 }
             };
         })();
 
         window.MMCommon = NS;
         window.MMCommon_IsInstalled = true;
+        try { NS.menu.init(); } catch (e) { NS.log.err("menu.init:", e); }
         log.log("MMCommon " + NS.version + " ready");
     };
 

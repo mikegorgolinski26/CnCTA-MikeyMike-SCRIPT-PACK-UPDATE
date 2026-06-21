@@ -1415,9 +1415,37 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                     include: [qx.locale.MTranslation],
                     construct: function () {
                         this.base(arguments);
-                        var ScriptsButton = qx.core.Init.getApplication().getMenuBar().getScriptsButton();
                         this.Menu = new qx.ui.menu.Menu();
-                        ScriptsButton.Add("Battle Simulator V2", TABS.RES.IMG.Menu, this.Menu);
+                        // MikeyMike: register with the MM - Common Library "CnC Pack" top menu (the renamed
+                        // Scripts button) so the simulator's settings/info open from there - keeping every MM
+                        // tool in one grouped menu. Falls back to the native Scripts button if MMCommon's menu
+                        // module isn't available.
+                        try {
+                            var selfMenu = this.Menu;
+                            if (window.MMCommon && MMCommon.menu && MMCommon.menu.registerWindow) {
+                                MMCommon.menu.registerWindow({
+                                    id: 10028,
+                                    label: "Battle Simulator 2026",
+                                    icon: TABS.RES.IMG.Menu,
+                                    run: function () {
+                                        try {
+                                            var anchor = (MMCommon.menu.packButton && MMCommon.menu.packButton()) ||
+                                                qx.core.Init.getApplication().getMenuBar().getScriptsButton();
+                                            selfMenu.placeToWidget(anchor);
+                                            selfMenu.show();
+                                        } catch (e) {}
+                                    }
+                                });
+                            } else {
+                                qx.core.Init.getApplication().getMenuBar().getScriptsButton()
+                                    .Add("Battle Simulator V2", TABS.RES.IMG.Menu, this.Menu);
+                            }
+                        } catch (e) {
+                            try {
+                                qx.core.Init.getApplication().getMenuBar().getScriptsButton()
+                                    .Add("Battle Simulator V2", TABS.RES.IMG.Menu, this.Menu);
+                            } catch (e2) {}
+                        }
                         //SETTINGS
                         var settingsMenu = new qx.ui.menu.Menu(),
                             settingsLoad = new qx.ui.menu.Button(this.tr("load"), null, null),
