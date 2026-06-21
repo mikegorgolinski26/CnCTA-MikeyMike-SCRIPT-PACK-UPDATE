@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.5
+// @version         1.0.6
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -254,6 +254,21 @@
                 var ang = Math.atan2(-dy, dx) * 180 / Math.PI;
                 if (ang < 0) ang += 360;
                 return ["E", "NE", "N", "NW", "W", "SW", "S", "SE"][Math.round(ang / 45) % 8];
+            },
+            // Straight-line distance between two grid coords. Prefers the game's own
+            // ClientLib.Base.Util.CalculateDistance (matches the in-game distance readout),
+            // falling back to Euclidean. Always returns a finite Number. Salvaged from the
+            // retired compass scripts (CD Compass / mhNavigator / Compass-ALT).
+            distance: function (x1, y1, x2, y2) {
+                try {
+                    var U = ClientLib.Base.Util;
+                    if (U && typeof U.CalculateDistance === "function") {
+                        var d = U.CalculateDistance(x1, y1, x2, y2);
+                        if (typeof d === "number" && !isNaN(d)) return d;
+                    }
+                } catch (e) {}
+                var dx = x2 - x1, dy = y2 - y1;
+                return Math.sqrt(dx * dx + dy * dy);
             }
         };
 
@@ -689,6 +704,14 @@
                 screenToWorld: function (sx, sy) {
                     var v = vm();
                     return { x: v.WorldPosFromScreenPosX(sx) / gw(), y: v.WorldPosFromScreenPosY(sy) / gh() };
+                },
+                // fractional grid coord currently at the CENTRE of the view {x,y}. ("Where am I
+                // looking?" - the value the retired compass scripts derived by hand from region
+                // pos/zoom/grid.) Uses the game canvas size, like visibleBounds().
+                viewCenter: function () {
+                    var cv = document.querySelector("canvas");
+                    var r = cv ? cv.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
+                    return api.screenToWorld(r.width / 2, r.height / 2);
                 },
                 // visible grid rect (padded 1 tile). Defaults to the game canvas size.
                 visibleBounds: function (w, h) {

@@ -66,9 +66,9 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 |---|---|---|
 | TA_Map | Canvas world minimap: POIs, territory, alliances; zoom | ⚠️ (dead/incomplete code) |
 | TA_CD_PvP_Quick_Map | Interactive canvas alliance/enemy map; per-alliance colors | ✅ |
-| TA_CD_Compass | Canvas compass to selected/locked target (fork of mhNavigator) | 🔁 |
-| TA_PluginsLib_mhNavigator | Compass **library** (defines qx Canvas widgets); CD_Compass is ~90% this | 🔁 (library) |
-| TA_Compass_ALT | Third compass: rotating-needle canvas to selected base | 🔁 |
+| ~~TA_CD_Compass~~ | Canvas compass to selected/locked target (fork of mhNavigator) | ❌ RETIRED 2026-06-20 (compass ×3 dedup; distance + view-center primitives salvaged into MMCommon coords/map) |
+| ~~TA_PluginsLib_mhNavigator~~ | Compass **library** (defines qx Canvas widgets); CD_Compass is ~90% this | ❌ RETIRED 2026-06-20 (sibling of CD_Compass; nothing else consumes it) |
+| ~~TA_Compass_ALT~~ | Third compass: rotating-needle canvas to selected base | ❌ RETIRED 2026-06-20 (minimal ancestor of CD_Compass) |
 | TA_Zoom | Extends map zoom range (NOEVIL regex on zoom getters) | ⚠️ |
 
 ### CNCTAOpt / cncopt link buttons (big overlap)
