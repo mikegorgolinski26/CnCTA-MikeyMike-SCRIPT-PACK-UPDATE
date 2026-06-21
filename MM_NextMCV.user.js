@@ -3,7 +3,7 @@
 // @description     A small always-on counter showing how close you are to your next MCV (the Research_BaseFound level that lets you found another base): time until you can afford the credits, and your research-point progress. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK (original MaelstromTools MCV popup)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.2
+// @version         1.3.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
@@ -34,6 +34,12 @@
  position persists), opened by a "Next MCV" HUD-tray button (toggle), open-state
  remembered across refreshes. Refreshes itself every 30s. Once Research_BaseFound
  is maxed (no further base to found) it shows a "max bases" note.
+
+ DISPLAY OPTION (1.3.0): right-click the panel to "Dock in game menu bar" - the same
+ readout (MCV cost, colour-coded countdown + RP%, credit/day) shows as a compact
+ section inside the game's right-side base-navigation bar (the Info Sticker look),
+ via MMCommon.menubar. Right-click again -> "Use floating panel" to switch back.
+ Default stays the floating panel.
 
  Credit: the original MCV popup + cost calc were by the MaelstromTools authors
  (see @author). This is a MikeyMike rebuild on MMCommon - plain functions, no
@@ -146,6 +152,64 @@
                     + '</div>';
             }
 
+            // ---- optional: dock the MCV readout into the game's base menu bar ----------
+            // Same data, shown as a compact colour-coded section inside the game's right-side base bar
+            // (the look Mike liked from Info Sticker). Opt-in (default = the floating panel); toggled by the
+            // right-click menu on either panel. All guarded - if MMCommon.menubar isn't there, stays floating.
+            function menuOn() { try { return MM.settings.get("NextMCV.MenuBar", false) === true; } catch (e) { return false; } }
+            var mb = { panel: null, dock: null, info: null, time: null, rp: null, rate: null, built: false };
+            function mbLabel(color) {
+                return new qx.ui.basic.Label("").set({ rich: true, font: "bold", textAlign: "center", alignX: "center", textColor: color || "#282828" });
+            }
+            function buildMenuPanel() {
+                if (mb.built) return mb.panel;
+                try {
+                    if (!MM.menubar || !MM.menubar.styledPanel) return null;
+                    mb.panel = MM.menubar.styledPanel({ width: 124, spacing: 2, marginLeft: 5 });
+                    mb.info = mbLabel("#595969");
+                    mb.time = mbLabel("#282828");
+                    mb.rp = mbLabel("#282828");
+                    mb.rate = mbLabel("#595969");
+                    mb.panel.add(mb.info); mb.panel.add(mb.time); mb.panel.add(mb.rp); mb.panel.add(mb.rate);
+                    try { mb.panel.setContextMenu(makeDisplayMenu()); } catch (e) {}
+                    mb.dock = MM.menubar.dock(mb.panel, { pos: null, enabled: function () { return menuOn(); } });
+                    mb.built = true;
+                } catch (e) { werr("buildMenuPanel:", e); mb.panel = null; }
+                return mb.panel;
+            }
+            function renderMenuPanel(d, C) {
+                if (!menuOn()) return;
+                if (!mb.built && !buildMenuPanel()) return;
+                if (!mb.panel) return;
+                try {
+                    if (!d) { mb.info.setValue("MCV"); mb.time.setValue("Max bases"); mb.rp.setValue(""); mb.rate.setValue(""); return; }
+                    mb.info.setValue("MCV ($ " + C(d.creditsNeeded) + ")");
+                    var t = (d.creditPct >= 100) ? "OK!" : (!d.doGrow ? "NoGrow" : daysFromHours(d.hoursLeft));
+                    mb.time.setValue("<span style='color:" + barColor(d.creditPct) + "'>" + t + "</span>");
+                    var r = (d.rpPct >= 100) ? "RP OK!" : "RP: " + d.rpPct.toFixed(1) + "%";
+                    mb.rp.setValue("<span style='color:" + barColor(d.rpPct) + "'>" + r + "</span>");
+                    mb.rate.setValue(d.doGrow ? ("at " + C(d.growthPerHour * 24) + "/1d") : "no income");
+                } catch (e) { werr("renderMenuPanel:", e); }
+            }
+            // right-click menu (on either panel) to switch between the floating panel and the menu bar.
+            function makeDisplayMenu() {
+                var menu = new qx.ui.menu.Menu();
+                var toBar = new qx.ui.menu.Button("Dock in game menu bar");
+                toBar.addListener("execute", function () { setMenuMode(true); });
+                var toFloat = new qx.ui.menu.Button("Use floating panel");
+                toFloat.addListener("execute", function () { setMenuMode(false); });
+                menu.add(toBar); menu.add(toFloat);
+                return menu;
+            }
+            function setMenuMode(on) {
+                try {
+                    MM.settings.set("NextMCV.MenuBar", on === true);
+                    if (on) { buildMenuPanel(); if (mb.panel) mb.panel.show(); if (mb.dock) mb.dock.refresh(); try { win.close(); } catch (e) {} }
+                    else { if (mb.dock) mb.dock.refresh(); try { win.open(); } catch (e) {} }
+                    refresh();
+                } catch (e) { werr("setMenuMode:", e); }
+            }
+
             var win = MM.ui.Window({
                 caption: "Next MCV",
                 key: "NextMCV.Window",
@@ -158,39 +222,55 @@
             });
             if (!win) { werr("window creation failed"); return; }
             win.add(body);
+            try { body.setContextMenu(makeDisplayMenu()); } catch (e) {}
 
             MM.buttons.register({
                 id: "mm-next-mcv",
                 label: "Next MCV",
                 tooltip: "Time/resources until your next base (MCV)",
                 onExecute: function () {
-                    try { if (win.isVisible()) win.close(); else { win.open(); refresh(); } } catch (e) { werr("toggle failed:", e); }
+                    try {
+                        if (menuOn()) {
+                            // toggle the docked panel's visibility
+                            if (mb.panel && mb.panel.isVisible && mb.panel.isVisible()) mb.panel.exclude();
+                            else { buildMenuPanel(); if (mb.panel) mb.panel.show(); if (mb.dock) mb.dock.refresh(); refresh(); }
+                        } else {
+                            if (win.isVisible()) win.close(); else { win.open(); refresh(); }
+                        }
+                    } catch (e) { werr("toggle failed:", e); }
                 }
             });
 
+            // if the menu-bar display was chosen previously, build + show it now (instead of the float panel)
+            try { if (menuOn()) { buildMenuPanel(); refresh(); } } catch (e) {}
+
             function refresh() {
                 try {
-                    if (!win.isVisible()) return;
                     var d = computeNextMCV();
-                    if (!d) {
-                        creditBar.setValue(barHtml(100, "Max bases founded"));
-                        rpBar.setValue("");
-                        detailLine.setValue("no further MCV to research");
-                        return;
-                    }
                     var C = MM.num.compact;
-                    // Credits bar: fill = how close credits are to the cost; label = time-to-afford countdown.
-                    var cLabel = (d.creditPct >= 100) ? "Credits  OK!" : (!d.doGrow ? "Credits  NoGrow" : "Credits  " + daysFromHours(d.hoursLeft));
-                    creditBar.setValue(barHtml(d.creditPct, cLabel));
-                    // RP bar: fill = how close RP are to the cost; label = the percent.
-                    var rLabel = (d.rpPct >= 100) ? "RP  OK!" : "RP  " + d.rpPct.toFixed(1) + "%";
-                    rpBar.setValue(barHtml(d.rpPct, rLabel));
-                    // detail line: current / needed for each. The current-amount colour tracks the same
-                    // red->yellow->green progress as the bars above (the "/ needed" stays muted grey).
-                    detailLine.setValue(
-                        "<span style='color:" + barColor(d.creditPct) + ";'>$ " + C(d.curCredits) + "</span><span style='color:#8a96a0;'> / " + C(d.creditsNeeded) + "</span>" +
-                        "  ·  <span style='color:" + barColor(d.rpPct) + ";'>RP " + C(d.curRP) + "</span><span style='color:#8a96a0;'> / " + C(d.rpNeeded) + "</span>"
-                    );
+                    // floating panel (only worth updating while it's on screen)
+                    if (win.isVisible()) {
+                        if (!d) {
+                            creditBar.setValue(barHtml(100, "Max bases founded"));
+                            rpBar.setValue("");
+                            detailLine.setValue("no further MCV to research");
+                        } else {
+                            // Credits bar: fill = how close credits are to the cost; label = time-to-afford countdown.
+                            var cLabel = (d.creditPct >= 100) ? "Credits  OK!" : (!d.doGrow ? "Credits  NoGrow" : "Credits  " + daysFromHours(d.hoursLeft));
+                            creditBar.setValue(barHtml(d.creditPct, cLabel));
+                            // RP bar: fill = how close RP are to the cost; label = the percent.
+                            var rLabel = (d.rpPct >= 100) ? "RP  OK!" : "RP  " + d.rpPct.toFixed(1) + "%";
+                            rpBar.setValue(barHtml(d.rpPct, rLabel));
+                            // detail line: current / needed for each. The current-amount colour tracks the same
+                            // red->yellow->green progress as the bars above (the "/ needed" stays muted grey).
+                            detailLine.setValue(
+                                "<span style='color:" + barColor(d.creditPct) + ";'>$ " + C(d.curCredits) + "</span><span style='color:#8a96a0;'> / " + C(d.creditsNeeded) + "</span>" +
+                                "  ·  <span style='color:" + barColor(d.rpPct) + ";'>RP " + C(d.curRP) + "</span><span style='color:#8a96a0;'> / " + C(d.rpNeeded) + "</span>"
+                            );
+                        }
+                    }
+                    // menu-bar panel (only when the option is on)
+                    renderMenuPanel(d, C);
                 } catch (e) { werr("refresh failed:", e); }
             }
 
@@ -200,7 +280,7 @@
             // user's open/close choice persists via restoreOpen, so we only auto-open when there's
             // no saved state yet.
             try {
-                if (MM.settings.get("NextMCV.Window.open", null) === null) {
+                if (!menuOn() && MM.settings.get("NextMCV.Window.open", null) === null) {
                     window.setTimeout(function () { try { win.open(); refresh(); } catch (e) {} }, 600);
                 }
             } catch (e) {}

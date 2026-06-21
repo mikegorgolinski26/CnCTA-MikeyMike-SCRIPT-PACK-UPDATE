@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.13
+// @version         1.0.14
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.13"
+            version: "1.0.14"
         };
 
         // -------------------------------------------------------------------
@@ -1560,6 +1560,106 @@
             try { return NS.settings.get(key + ".dockEnabled", false) === true; } catch (e) { return false; }
         };
 
+        // -------------------------------------------------------------------
+        // menubar: dock a widget INTO the game's right-side base-navigation bar
+        // (the vertical strip listing your bases + "reset sort order" / "found
+        // base" etc.), styled to match the bar so it reads like a native item.
+        // This is the capability behind "lock the MCV / the MM buttons into the
+        // game menu" (the look Info Sticker had). The insertion target is the
+        // proven path Info Sticker uses: getBaseNavigationBar().getChildren()[0]
+        // .getChildren()[0] = the list container that exposes addAt/indexOf/
+        // remove/getChildren. We do NOT hook the game's reorder method (fragile
+        // regex); instead a light shared timer re-inserts our items if the game
+        // rebuilds the bar after a base add/remove/reorder. All guarded - if the
+        // bar isn't reachable, dock() is a safe no-op and callers fall back.
+        // -------------------------------------------------------------------
+        NS.menubar = (function () {
+            var items = [];   // { widget, getPos(), enabled() , last }
+            var timer = null;
+
+            // The qx list-container inside the base navigation bar (or null if not reachable).
+            function getBar() {
+                try {
+                    var app = qx.core.Init.getApplication();
+                    var b = app && app.getBaseNavigationBar && app.getBaseNavigationBar();
+                    if (!b || !b.getChildren) return null;
+                    var c0 = b.getChildren(); if (!c0 || !c0.length || !c0[0].getChildren) return null;
+                    var c1 = c0[0].getChildren(); if (!c1 || !c1.length) return null;
+                    var list = c1[0];
+                    return (list && typeof list.addAt === "function" && typeof list.indexOf === "function") ? list : null;
+                } catch (e) { return null; }
+            }
+            function available() { return !!getBar(); }
+
+            // A container styled like the game's mission-bar buttons (same texture Info Sticker used).
+            function styledPanel(opt) {
+                opt = opt || {};
+                var c = new qx.ui.container.Composite(new qx.ui.layout.VBox(opt.spacing != null ? opt.spacing : 2)).set({
+                    padding: opt.padding || [4, 5, 4, 6],
+                    width: opt.width || 124,
+                    alignX: "right"
+                });
+                try {
+                    c.setDecorator(new qx.ui.decoration.Decorator().set({
+                        backgroundImage: "decoration2/button-missionbar/button-missionbar.png",
+                        backgroundRepeat: "scale"
+                    }));
+                } catch (e) {}
+                if (opt.marginLeft != null) { try { c.setMarginLeft(opt.marginLeft); } catch (e) {} }
+                return c;
+            }
+
+            function clampPos(bar, pos) {
+                try {
+                    var n = bar.getChildren().length;
+                    if (pos == null || pos < 0) pos = n; // default = append (bottom of the bar)
+                    return Math.max(0, Math.min(pos, n));
+                } catch (e) { return 0; }
+            }
+            function reinsertAll() {
+                var bar = getBar();
+                if (!bar) return;
+                for (var i = 0; i < items.length; i++) {
+                    var it = items[i];
+                    try {
+                        if (it.widget.isDisposed && it.widget.isDisposed()) continue;
+                        var on = it.enabled ? (it.enabled() === true) : true;
+                        var cur = bar.indexOf(it.widget);
+                        if (!on) { if (cur >= 0) bar.remove(it.widget); continue; }
+                        var want = clampPos(bar, it.getPos ? it.getPos() : null);
+                        if (cur < 0) bar.addAt(it.widget, want);
+                        else if (cur !== want) { bar.remove(it.widget); bar.addAt(it.widget, clampPos(bar, it.getPos ? it.getPos() : null)); }
+                    } catch (e) { /* never let one item break the bar */ }
+                }
+            }
+            function ensureTimer() { if (!timer) { try { timer = window.setInterval(reinsertAll, 1500); } catch (e) {} } }
+
+            return {
+                available: available,
+                styledPanel: styledPanel,
+                // dock(widget, { pos, enabled }) -> { remove(), refresh() }. pos = index (number|fn|null=append);
+                // enabled = optional fn; when it returns false the widget is pulled out of the bar (kept for re-add).
+                dock: function (widget, o) {
+                    o = o || {};
+                    var rec = {
+                        widget: widget,
+                        getPos: (typeof o.pos === "function") ? o.pos : function () { return (o.pos == null ? null : o.pos); },
+                        enabled: (typeof o.enabled === "function") ? o.enabled : null
+                    };
+                    items.push(rec);
+                    ensureTimer();
+                    reinsertAll();
+                    return {
+                        remove: function () {
+                            try { var bar = getBar(); if (bar && bar.indexOf(widget) >= 0) bar.remove(widget); } catch (e) {}
+                            var idx = items.indexOf(rec); if (idx >= 0) items.splice(idx, 1);
+                        },
+                        refresh: reinsertAll
+                    };
+                }
+            };
+        })();
+
         // buttons: CommonButtonHandler - a single draggable HUD "tray" that every script's button
         // registers into. Plug-n-play: no matter which scripts are enabled or in what order, their
         // buttons stack side-by-side in one bar instead of fighting for fixed corners.
@@ -1576,8 +1676,25 @@
         // opts: { id, label, icon, tooltip, onExecute }. Returns the qx button or null. Call at game-ready.
         NS.buttons = (function () {
             var tray = null, handle = null, slots = [];
+            var menuPanel = null, menuDock = null;   // when docked into the game menu bar instead of the float tray
             var DEFAULTS = { bottom: 40, right: 220 }; // initial parking spot, clear of game UI
             var KEY = "HUDTray";
+
+            // Display mode: "float" (the draggable tray, default) or "menubar" (the buttons live inside the
+            // game's base-navigation bar via NS.menubar). Read once at register time; changing it needs a reload.
+            function dockMode() { try { return NS.settings.get(KEY + ".dock", "float"); } catch (e) { return "float"; } }
+            // Build (once) a styled panel docked in the game menu bar that the MM buttons stack into.
+            // Returns null if the bar isn't reachable, so register() falls back to the float tray.
+            function ensureMenuPanel() {
+                if (menuPanel) return menuPanel;
+                try {
+                    if (!NS.menubar || !NS.menubar.available()) return null;
+                    menuPanel = NS.menubar.styledPanel({ width: 124, spacing: 3, marginLeft: 5 });
+                    menuPanel.add(new qx.ui.basic.Label("MM Tools").set({ font: "bold", textColor: "#595969", textAlign: "center", alignX: "center" }));
+                    menuDock = NS.menubar.dock(menuPanel, { pos: null, enabled: function () { return showPref(); } });
+                } catch (e) { NS.log.err("menubar panel:", e); menuPanel = null; }
+                return menuPanel;
+            }
 
             // Optional display: the HUD tray can be hidden (the CnC Pack menu provides the same
             // window-openers). The intent is persisted per player+world; default = shown so existing
@@ -1587,6 +1704,8 @@
             }
             function applyVisible(v) {
                 try { if (tray) { if (v) tray.show(); else tray.exclude(); } } catch (e) {}
+                try { if (menuPanel) { if (v) menuPanel.show(); else menuPanel.exclude(); } } catch (e) {}
+                try { if (menuDock) menuDock.refresh(); } catch (e) {}
             }
 
             // Apply absolute {left,top} layout properties to the tray, replacing whatever placement
@@ -1697,8 +1816,6 @@
                 register: function (opts) {
                     opts = opts || {};
                     try {
-                        var t = ensureTray();
-                        if (!t) return null;
                         // de-dupe: if a script registers twice (e.g. on reload), return the existing button
                         if (opts.id) {
                             for (var i = 0; i < slots.length; i++) {
@@ -1712,7 +1829,18 @@
                             appearance: "button-text-small"
                         });
                         if (opts.onExecute) btn.addListener("execute", opts.onExecute);
-                        t.add(btn);
+                        // menubar mode: stack into the in-game panel; fall back to the float tray if the bar
+                        // isn't reachable, so buttons are never lost.
+                        var placed = false;
+                        if (dockMode() === "menubar") {
+                            var mp = ensureMenuPanel();
+                            if (mp) { mp.add(btn); placed = true; }
+                        }
+                        if (!placed) {
+                            var t = ensureTray();
+                            if (!t) return null;
+                            t.add(btn);
+                        }
                         slots.push({ id: opts.id, btn: btn });
                         feedMenu(opts);
                         return btn;
@@ -1721,6 +1849,10 @@
                         return null;
                     }
                 },
+                // Display mode for the MM buttons: "float" (draggable tray) or "menubar" (in the game's base
+                // navigation bar). Changing it takes effect on the next game reload.
+                dockMode: function () { return dockMode(); },
+                setDockMode: function (m) { try { NS.settings.set(KEY + ".dock", (m === "menubar") ? "menubar" : "float"); } catch (e) {} return dockMode(); },
                 // Optional-display control (used by the CnC Pack menu's "Show Toolbar Buttons" toggle).
                 isVisible: function () { return showPref(); },
                 setVisible: function (v) {
@@ -1961,8 +2093,17 @@
                     menu.addSeparator();
                     var trayCb = makeToggle("Show Toolbar Buttons", NS.buttons.isVisible(),
                         function (v) { NS.buttons.setVisible(v); },
-                        "Show or hide the floating MM button bar");
+                        "Show or hide the MM button bar");
                     menu.add(trayCb);
+                    // Dock the MM buttons inside the game's base menu bar instead of the floating tray.
+                    // Changing it needs a game reload (buttons are placed at register time), so we note that.
+                    try {
+                        var dockCb = makeToggle("Dock buttons in game menu (reload)",
+                            (NS.buttons.dockMode && NS.buttons.dockMode() === "menubar"),
+                            function (v) { try { NS.buttons.setDockMode(v ? "menubar" : "float"); } catch (e) {} },
+                            "Put the MM buttons inside the game's base-navigation bar (applies after you reload the game)");
+                        menu.add(dockCb);
+                    } catch (e) { NS.log.err("dock toggle:", e); }
                     sb.setMenu(menu);
                     built = true;
                     NS.log.log("CnC Pack menu built");
