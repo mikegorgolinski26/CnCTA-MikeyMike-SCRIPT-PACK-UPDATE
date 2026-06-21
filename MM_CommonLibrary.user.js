@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.7
+// @version         1.0.8
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -27,8 +27,8 @@
  STATUS OF EACH MODULE
    Implemented & ready:  log, net, settings, num, time, coords, deobf, scan, loot,
    base, map, ui (dockable window), buttons (CommonButtonHandler, now optionally
-   shown), menu (the in-game "CnC Pack" top menu)
-   Scaffold (TODO, ported as each consumer script is migrated): cnctaopt, repair
+   shown), menu (the in-game "CnC Pack" top menu), cnctaopt (base->cnctaopt.com link)
+   Scaffold (TODO, ported as each consumer script is migrated): repair
 
  DEBUG: set  window.MM_DEBUG = true  in the game console for verbose [MM ...] logs.
 ================================================================================
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.5"
+            version: "1.0.8"
         };
 
         // -------------------------------------------------------------------
@@ -321,8 +321,273 @@
         }
 
         // cnctaopt: encode a city/base into a cnctaopt.com share link.
-        // Canonical source to port from: TA_CnCTAOpt_Link_Button.user.js (keymaps + 20x9 grid encoder).
-        NS.cnctaopt = { encode: todo("cnctaopt.encode") };
+        // Faithful port of TA_CnCTAOpt_Link_Button.user.js (zbluebugz, v1.0.7.7) - the LIVE cnctaopt.com
+        // "ver=3" encoder: the base/defense/offense hotkey maps + the 20x9 grid walk + faction logic.
+        // Runs in page context, so GAMEDATA / PerforceChangelist / ClientLib are available.
+        //   MMCommon.cnctaopt.url(cityId) / .encode(cityId) -> full https://www.cnctaopt.com/index.html?... URL
+        //   MMCommon.cnctaopt.payload(cityId)               -> the raw "ver=3~...~ML=.." string (pre-encodeURI)
+        //   MMCommon.cnctaopt.open(cityId)                  -> opens the URL in a new tab; returns it
+        // All return null (and warn) on error so callers can guard. cityId is a city/base id
+        // (e.g. visObject.get_Id()); the base's data must be loaded (GetCity owner != 0).
+        NS.cnctaopt = (function () {
+            var clog = NS.makeLogger("cnctaopt");
+
+            // base / defense / offense - map the game's unit names to cnctaopt's single-letter hotkeys.
+            var base_unit_map = {
+                /* GDI Buildings */
+                "GDI_Construction Yard": "y", "GDI_Power Plant": "p", "GDI_Refinery": "r", "GDI_Silo": "s",
+                "GDI_Accumulator": "a", "GDI_Command Center": "e", "GDI_Barracks": "b", "GDI_Factory": "f",
+                "GDI_Airport": "d", "GDI_Defense HQ": "q", "GDI_Defense Facility": "w", "GDI_Support_Air": "i",
+                "GDI_Support_Ion": "x", "GDI_Support_Art": "z", "GDI_Harvester": "h",
+                "GDI_Harvester_Crystal": "n", "GDI_Harvester_Tiberium": "j",
+                /* Nod Buildings */
+                "NOD_Construction Yard": "y", "NOD_Power Plant": "p", "NOD_Refinery": "r", "NOD_Silo": "s",
+                "NOD_Accumulator": "a", "NOD_Command Post": "e", "NOD_Barracks": "b", "NOD_Factory": "f",
+                "NOD_Airport": "d", "NOD_Defense HQ": "q", "NOD_Defense Facility": "w", "NOD_Support_Air": "i",
+                "NOD_Support_Ion": "x", "NOD_Support_Art": "z", "NOD_Harvester": "h",
+                "NOD_Harvester_Crystal": "n", "NOD_Harvester_Tiberium": "j",
+                /* Forgotten Buildings */
+                "FOR_Construction Yard": "y", "FOR_Refinery": "r", "FOR_Trade Center": "u", "FOR_Silo": "s",
+                "FOR_Defense HQ": "q", "FOR_Defense Facility": "w", "FOR_Harvester_Crystal": "n",
+                "FOR_Harvester_Tiberium": "j", "FOR_Crystal Booster": "v", "FOR_Tiberium Booster": "o",
+                /* Forgotten Infected Buildings */
+                "FOR_EVENT_Construction_Yard": "y", "FOR_GDI_Construction Yard": "y", "FOR_GDI_Power Plant": "p",
+                "FOR_GDI_Refinery": "r", "FOR_GDI_Silo": "s", "FOR_GDI_Accumulator": "a",
+                "FOR_GDI_Command Center": "e", "FOR_GDI_Barracks": "b", "FOR_GDI_Factory": "f",
+                "FOR_GDI_Airport": "d", "FOR_GDI_Defense HQ": "q", "FOR_GDI_Defense Facility": "w",
+                "FOR_GDI_Support_Air": "i", "FOR_GDI_Support_Ion": "x", "FOR_GDI_Support_Art": "z",
+                "FOR_GDI_Harvester": "h", "FOR_GDI_Harvester_Crystal": "n", "FOR_GDI_Harvester_Tiberium": "j",
+                "FOR_NOD_Construction Yard": "y", "FOR_NOD_Power Plant": "p", "FOR_NOD_Refinery": "r",
+                "FOR_NOD_Silo": "s", "FOR_NOD_Accumulator": "a", "FOR_NOD_Command Post": "e",
+                "FOR_NOD_Barracks": "b", "FOR_NOD_Factory": "f", "FOR_NOD_Airport": "d", "FOR_NOD_Defense HQ": "q",
+                "FOR_NOD_Defense Facility": "w", "FOR_NOD_Support_Air": "i", "FOR_NOD_Support_Ion": "x",
+                "FOR_NOD_Support_Art": "z", "FOR_NOD_Harvester": "h", "FOR_NOD_Harvester_Crystal": "n",
+                "FOR_NOD_Harvester_Tiberium": "j",
+                "": ""
+            };
+            var defense_unit_map = {
+                /* GDI */
+                "GDI_Wall": "w", "GDI_Def_Predator": "d", "GDI_Turret": "m", "GDI_Def_Pitbull": "p",
+                "GDI_Barbwire": "b", "GDI_Def_Zone Trooper": "z", "GDI_Flak": "f", "GDI_Def_Missile Squad": "q",
+                "GDI_Antitank Barrier": "t", "GDI_Def_Sniper": "s", "GDI_Cannon": "c", "GDI_Def_APC Guardian": "g",
+                "GDI_Art Tank": "a", "GDI_Art Air": "e", "GDI_Art Inf": "r",
+                /* Nod */
+                "NOD_Def_Wall": "w", "NOD_Def_Scorpion Tank": "d", "NOD_Def_MG Nest": "m",
+                "NOD_Def_Attack Bike": "p", "NOD_Def_Barbwire": "b", "NOD_Def_Black Hand": "z", "NOD_Def_Flak": "f",
+                "NOD_Def_Militant Rocket Soldiers": "q", "NOD_Def_Antitank Barrier": "t", "NOD_Def_Confessor": "s",
+                "NOD_Def_Cannon": "c", "NOD_Def_Reckoner": "g", "NOD_Def_Art Tank": "a", "NOD_Def_Art Air": "e",
+                "NOD_Def_Art Inf": "r",
+                /* Forgotten */
+                "FOR_Wall": "w", "FOR_Mammoth": "d", "FOR_Turret_VS_Inf": "m", "FOR_Veh_VS_Air": "p",
+                "FOR_Barbwire_VS_Inf": "b", "FOR_Inf_VS_Veh": "z", "FOR_Turret_VS_Air": "f", "FOR_Inf_VS_Air": "q",
+                "FOR_Barrier_VS_Veh": "t", "FOR_Sniper": "s", "FOR_Turret_VS_Veh": "c", "FOR_Veh_VS_Inf": "g",
+                "FOR_Turret_VS_Veh_ranged": "a", "FOR_Turret_VS_Air_ranged": "e", "FOR_Turret_VS_Inf_ranged": "r",
+                "FOR_Inf_VS_Inf": "i", "FOR_Veh_VS_Veh": "o",
+                /* Forgotten Fortress */
+                "FOR_Fortress_DEF_Sniper": "s", "FOR_Fortress_DEF_Inf_VS_Inf": "i", "FOR_Fortress_DEF_Veh_VS_Air": "p",
+                "FOR_Fortress_DEF_Turret_VS_Inf": "m", "FOR_Fortress_DEF_Turret_VS_Veh": "c",
+                "FOR_Fortress_DEF_Turret_VS_Air": "f", "FOR_Fortress_DEF_Turret_VS_Veh_ranged": "a",
+                "FOR_Fortress_DEF_Turret_VS_Air_ranged": "e", "FOR_Fortress_DEF_Turret_VS_Inf_ranged": "r",
+                "FOR_Fortress_DEF_Mammoth": "d",
+                /* Forgotten Infected GDI */
+                "FOR_GDI_Wall": "w", "FOR_GDI_Def_Predator": "d", "FOR_GDI_Turret": "m", "FOR_GDI_Def_Pitbull": "p",
+                "FOR_GDI_Barbwire": "b", "FOR_GDI_Def_Zone Trooper": "z", "FOR_GDI_Flak": "f",
+                "FOR_GDI_Def_Missile Squad": "q", "FOR_GDI_Antitank Barrier": "t", "FOR_GDI_Def_Sniper": "s",
+                "FOR_GDI_Cannon": "c", "FOR_GDI_Def_APC Guardian": "g", "FOR_GDI_Art Tank": "a",
+                "FOR_GDI_Art Air": "e", "FOR_GDI_Art Inf": "r",
+                /* Forgotten Infected NOD */
+                "FOR_NOD_Def_Wall": "w", "FOR_NOD_Def_Scorpion Tank": "d", "FOR_NOD_Def_MG Nest": "m",
+                "FOR_NOD_Def_Attack Bike": "p", "FOR_NOD_Def_Barbwire": "b", "FOR_NOD_Def_Black Hand": "z",
+                "FOR_NOD_Def_Flak": "f", "FOR_NOD_Def_Militant Rocket Soldiers": "q",
+                "FOR_NOD_Def_Antitank Barrier": "t", "FOR_NOD_Def_Confessor": "s", "FOR_NOD_Def_Cannon": "c",
+                "FOR_NOD_Def_Reckoner": "g", "FOR_NOD_Def_Art Tank": "a", "FOR_NOD_Def_Art Air": "e",
+                "FOR_NOD_Def_Art Inf": "r",
+                "": ""
+            };
+            var offense_unit_map = {
+                /* GDI */
+                "GDI_Riflemen": "i", "GDI_Missile Squad": "q", "GDI_Zone Trooper": "z", "GDI_Commando": "c",
+                "GDI_Sniper Team": "s", "GDI_APC Guardian": "g", "GDI_Pitbull": "p", "GDI_Predator": "d",
+                "GDI_Juggernaut": "j", "GDI_Mammoth": "a", "GDI_Orca": "v", "GDI_Firehawk": "f", "GDI_Paladin": "o",
+                "GDI_Kodiak": "k",
+                /* Nod */
+                "NOD_Militants": "i", "NOD_Militant Rocket Soldiers": "q", "NOD_Black Hand": "z", "NOD_Commando": "c",
+                "NOD_Confessor": "s", "NOD_Reckoner": "g", "NOD_Attack Bike": "p", "NOD_Scorpion Tank": "d",
+                "NOD_Specter Artilery": "j", "NOD_Avatar": "a", "NOD_Venom": "v", "NOD_Vertigo": "f",
+                "NOD_Cobra": "o", "NOD_Salamander": "k",
+                "": ""
+            };
+
+            function findTechLayout(city) {
+                for (var k in city) {
+                    if ((typeof (city[k]) == "object") && city[k] && (0 in city[k]) && (8 in city[k])) {
+                        if ((typeof (city[k][0]) == "object") && city[k][0] && (0 in city[k][0]) && (15 in city[k][0])) {
+                            if ((typeof (city[k][0][0]) == "object") && city[k][0][0] && ("BuildingIndex" in city[k][0][0])) {
+                                return city[k];
+                            }
+                        }
+                    }
+                }
+                return null;
+            }
+            function findBuildings(city) {
+                var cityBuildings = city.get_CityBuildingsData();
+                for (var k in cityBuildings) {
+                    if (PerforceChangelist >= 376877) {
+                        if ((typeof (cityBuildings[k]) === "object") && cityBuildings[k] && ("d" in cityBuildings[k]) && ("c" in cityBuildings[k]) && (cityBuildings[k].c > 0)) {
+                            return cityBuildings[k].d;
+                        }
+                    } else {
+                        if ((typeof (cityBuildings[k]) === "object") && cityBuildings[k] && "l" in cityBuildings[k]) {
+                            return cityBuildings[k].l;
+                        }
+                    }
+                }
+            }
+            function isDefenseUnit(unit) { return (unit.get_UnitGameData_Obj().n in defense_unit_map); }
+            function isOffenseUnit(unit) { return (unit.get_UnitGameData_Obj().n in offense_unit_map); }
+            function getUnitArrays(city) {
+                var ret = [];
+                for (var k in city) {
+                    if ((typeof (city[k]) == "object") && city[k]) {
+                        for (var k2 in city[k]) {
+                            var lst;
+                            if (PerforceChangelist >= 376877) {
+                                if ((typeof (city[k][k2]) == "object") && city[k][k2] && "d" in city[k][k2]) {
+                                    lst = city[k][k2].d;
+                                    if ((typeof (lst) == "object") && lst) {
+                                        for (var i in lst) {
+                                            if (typeof (lst[i]) == "object" && lst[i] && "get_CurrentLevel" in lst[i]) { ret.push(lst); }
+                                        }
+                                    }
+                                }
+                            } else {
+                                if ((typeof (city[k][k2]) == "object") && city[k][k2] && "l" in city[k][k2]) {
+                                    lst = city[k][k2].l;
+                                    if ((typeof (lst) == "object") && lst) {
+                                        for (var j in lst) {
+                                            if (typeof (lst[j]) == "object" && lst[j] && "get_CurrentLevel" in lst[j]) { ret.push(lst); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                return ret;
+            }
+            function getDefenseUnits(city) {
+                var arr = getUnitArrays(city);
+                for (var i = 0; i < arr.length; ++i) { for (var j in arr[i]) { if (isDefenseUnit(arr[i][j])) { return arr[i]; } } }
+                return [];
+            }
+            function getOffenseUnits(city) {
+                var arr = getUnitArrays(city);
+                for (var i = 0; i < arr.length; ++i) { for (var j in arr[i]) { if (isOffenseUnit(arr[i][j])) { return arr[i]; } } }
+                return [];
+            }
+
+            // Build the raw "ver=3~...~ML=.." payload for a city id (pre-encodeURI). Returns null on error.
+            function payload(cityId) {
+                try {
+                    var city = ClientLib.Data.MainData.GetInstance().get_Cities().GetCity(cityId);
+                    var own_city = ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity();
+                    var server = ClientLib.Data.MainData.GetInstance().get_Server();
+                    if (!city) { clog.warn("payload: no city for id", cityId); return null; }
+                    var coordX = city.get_X();
+                    var coordY = city.get_Y();
+                    var worldName = server.get_Name().trim();
+                    var worldId = server.get_WorldId();
+                    var maxLevel = server.get_PlayerUpgradeCap();
+                    var economy = (server.get_TechLevelUpgradeFactorBonusAmount() != 1.20) ? "new" : "old";
+
+                    var link = "ver=3~";
+                    // base / defense faction (of the base being viewed)
+                    var faction = city.get_CityFaction();
+                    if (faction === 1) { link += "G~"; }
+                    else if (faction === 2) { link += "N~"; }
+                    else if (faction > 2 && faction < 9) { link += "F~"; }
+                    else { clog.warn("Unknown faction (1):", faction); link += "E~"; }
+                    // offense faction - for a Forgotten target, use the player's own offense setup
+                    faction = city.get_CityFaction();
+                    if (faction > 2) { faction = own_city.get_CityFaction(); }
+                    if (faction === 1) { link += "G~"; }
+                    else if (faction === 2) { link += "N~"; }
+                    else { clog.warn("Unknown faction (2):", faction); link += "E~"; }
+                    // city name
+                    link += city.get_Name().trim() + "~";
+
+                    // 20x9 defense-unit grid (offset +8)
+                    var defense_units = [], i, j, col;
+                    for (i = 0; i < 20; ++i) { col = []; for (j = 0; j < 9; ++j) { col.push(null); } defense_units.push(col); }
+                    var defense_unit_list = getDefenseUnits(city);
+                    for (i in defense_unit_list) { var du = defense_unit_list[i]; defense_units[du.get_CoordX()][du.get_CoordY() + 8] = du; }
+                    // 20x9 offense-unit grid (offset +16); for a Forgotten target use own city's offense
+                    var offense_units = [];
+                    for (i = 0; i < 20; ++i) { col = []; for (j = 0; j < 9; ++j) { col.push(null); } offense_units.push(col); }
+                    var offense_unit_list = (city.get_CityFaction() == 1 || city.get_CityFaction() == 2) ? getOffenseUnits(city) : getOffenseUnits(own_city);
+                    for (i in offense_unit_list) { var ou = offense_unit_list[i]; offense_units[ou.get_CoordX()][ou.get_CoordY() + 16] = ou; }
+
+                    // walk the 20x9 grid: building / defense / offense / terrain
+                    var techLayout = findTechLayout(city);
+                    var buildings = findBuildings(city);
+                    for (i = 0; i < 20; ++i) {
+                        for (j = 0; j < 9; ++j) {
+                            var spot = i > 16 ? null : techLayout[j][i];
+                            var level = 0;
+                            var building = null;
+                            if (spot && spot.BuildingIndex >= 0) { building = buildings[spot.BuildingIndex]; level = building.get_CurrentLevel(); }
+                            var defense_unit = defense_units[j][i];
+                            if (defense_unit) { level = defense_unit.get_CurrentLevel(); }
+                            var offense_unit = offense_units[j][i];
+                            if (offense_unit) { level = offense_unit.get_CurrentLevel(); }
+                            if (level > 0) { link += level; }
+
+                            switch (i > 16 ? 0 : city.GetResourceType(j, i)) {
+                                case 0:
+                                    if (building) {
+                                        var techId = building.get_MdbBuildingId();
+                                        if (GAMEDATA.Tech[techId].n in base_unit_map) { link += base_unit_map[GAMEDATA.Tech[techId].n]; }
+                                        else { clog.warn("Unhandled building:", techId); link += "."; }
+                                    } else if (defense_unit) {
+                                        if (defense_unit.get_UnitGameData_Obj().n in defense_unit_map) { link += defense_unit_map[defense_unit.get_UnitGameData_Obj().n]; }
+                                        else { clog.warn("Unhandled defense unit:", defense_unit.get_UnitGameData_Obj().n); link += "."; }
+                                    } else if (offense_unit) {
+                                        if (offense_unit.get_UnitGameData_Obj().n in offense_unit_map) { link += offense_unit_map[offense_unit.get_UnitGameData_Obj().n]; }
+                                        else { clog.warn("Unhandled offense unit:", offense_unit.get_UnitGameData_Obj().n); link += "."; }
+                                    } else { link += "."; }
+                                    break;
+                                case 1: link += (spot.BuildingIndex < 0) ? "c" : "n"; break; /* crystal */
+                                case 2: link += (spot.BuildingIndex < 0) ? "t" : "j"; break; /* tiberium */
+                                case 4: link += "j"; break; /* woods */
+                                case 5: link += "h"; break; /* scrub */
+                                case 6: link += "l"; break; /* oil */
+                                case 7: link += "k"; break; /* swamp */
+                                default: clog.warn("Unhandled resource type:", city.GetResourceType(j, i)); link += "."; break;
+                            }
+                        }
+                    }
+
+                    link += "~E=" + economy;
+                    link += "~X=" + coordX + "~Y=" + coordY;
+                    link += "~WID=" + worldId;
+                    link += "~WN=" + worldName;
+                    link += "~ML=" + maxLevel;
+                    return link;
+                } catch (e) { clog.warn("payload error:", e); return null; }
+            }
+            function url(cityId) {
+                var p = payload(cityId);
+                return p ? ("https://www.cnctaopt.com/index.html?" + encodeURI(p)) : null;
+            }
+            return {
+                maps: { base: base_unit_map, defense: defense_unit_map, offense: offense_unit_map },
+                payload: payload,
+                url: url,
+                encode: url, // alias: the practical output is the full URL
+                open: function (cityId) { var u = url(cityId); if (u) { window.open(u, "_blank"); } return u; }
+            };
+        })();
 
         // scan: iterate attackable world objects within range of an origin base.
         // Ported from TA_Maelstrom_ADDON_Basescanner_AIO's FJ enumeration (the sync phase).
