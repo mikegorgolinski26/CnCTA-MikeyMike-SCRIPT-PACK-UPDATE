@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Draws a live on-map overlay of small bubbles showing Offense / Defense level (stacked) over every visible player base in region view (own / alliance / enemy). Off/def for other players' bases is surveyed in the background; a base's bubble only appears once its values are known. Bubbles track the map as you pan and zoom. A HUD options panel toggles which base types show.
-// @version      1.2.1
+// @version      1.2.2
 // @author       XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -116,12 +116,26 @@
 				surveyRestoreId = null;
 			}
 		}
+		// Relationship from the LIVE vis object (get_AllianceId/IsOwnBase) when the base is on-screen -
+		// that's the field the game colours base outlines from, and it classifies alliance members
+		// correctly. The detail-city classifier (get_OwnerAllianceId) mis-bucketed alliance-mates as
+		// neutral (white bubbles); this fixes that. Falls back to the detail classifier off-screen.
+		function relFor(id, ncity, ownMap) {
+			try {
+				var v = visible[id];
+				if (v && MM.map && MM.map.visObjectAt) {
+					var vo = MM.map.visObjectAt(v.x, v.y);
+					if (vo && MM.base.relationshipFromVis) return MM.base.relationshipFromVis(vo);
+				}
+			} catch (e) {}
+			return MM.base.relationship(id, ncity, ownMap);
+		}
 		function onDetail(id, ncity, ownMap) {
 			if (!ncity) return; // timed out - leave uncached so the backstop retries when it loads
 			var ghost = (typeof ncity.get_IsGhostMode === "function" && ncity.get_IsGhostMode());
 			if (ghost) { cache[id] = { type: "enemy", ghost: true }; removeBubble(id); return; }
 			cache[id] = {
-				type: MM.base.relationship(id, ncity, ownMap), ghost: false,
+				type: relFor(id, ncity, ownMap), ghost: false,
 				name: ncity.get_Name ? ncity.get_Name() : "",
 				off: ncity.get_LvlOffense().toFixed(2), def: ncity.get_LvlDefense().toFixed(2)
 			};

@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.6
+// @version         1.0.7
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -533,6 +533,26 @@
                     return "enemy";
                 } catch (e) { return "enemy"; }
             },
+            // SYNCHRONOUS own/alliance/neutral/enemy from a VIS region object (see map.visObjectAt).
+            // The vis object carries get_AllianceId()/IsOwnBase() live, so this needs NO detail-load
+            // survey (unlike relationship(), which reads a loaded detail city's get_OwnerAllianceId -
+            // that path mis-bucketed alliance members as neutral; this one keys off the same field the
+            // game colours outlines from). myAllianceId optional (defaults to ours). Classifies:
+            //   own = your base; alliance = your alliance id; neutral = a different alliance you have
+            //   NAP/peace/ally diplomacy with; enemy = everyone else (incl. unaffiliated).
+            relationshipFromVis: function (vo, myAllianceId) {
+                try {
+                    if (!vo) return "enemy";
+                    if (typeof vo.IsOwnBase === "function" && vo.IsOwnBase()) return "own";
+                    var their = (typeof vo.get_AllianceId === "function") ? (vo.get_AllianceId() || 0) : 0;
+                    if (myAllianceId == null) {
+                        try { myAllianceId = ClientLib.Data.MainData.GetInstance().get_Alliance().get_Id(); } catch (e) { myAllianceId = 0; }
+                    }
+                    if (their && myAllianceId && their === myAllianceId) return "alliance";
+                    if (their && NS.base.isAlly(their, myAllianceId)) return "neutral";
+                    return "enemy";
+                } catch (e) { return "enemy"; }
+            },
             // Async-load a base's server detail by id and call cb(ncity) once it lands (or cb(null) on
             // timeout). GetCity returns a version:-1 stub until you TRIGGER the load with
             // set_CurrentCityId(id) (one shared "current city" pointer), so by default this triggers it
@@ -712,6 +732,18 @@
                     var cv = document.querySelector("canvas");
                     var r = cv ? cv.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
                     return api.screenToWorld(r.width / 2, r.height / 2);
+                },
+                // The VIS region object at grid (gx,gy) - the RENDERED object, which (unlike the
+                // lightweight data world object from get_World().GetObjectFromPosition) exposes
+                // synchronous owner/alliance getters: get_AllianceId(), get_AllianceName(),
+                // IsOwnBase(), get_PlayerId()/get_PlayerName(), get_RawX()/get_RawY(),
+                // get_VisObjectType(). This is what the game itself colours base outlines from, so it
+                // lets a script classify relationship LIVE (no detail-load survey). Returns null if
+                // nothing is there / not in region view. (region.GetObjectFromPosition wants PIXEL
+                // coords = grid * gridWidth/Height.)
+                visObjectAt: function (gx, gy) {
+                    try { return rg().GetObjectFromPosition(gx * gw(), gy * gh()); }
+                    catch (e) { return null; }
                 },
                 // visible grid rect (padded 1 tile). Defaults to the game canvas size.
                 visibleBounds: function (w, h) {

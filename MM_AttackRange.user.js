@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  While you are using the game's "move base" tool, highlights every base that would fall within your attack/tunnel influence range of the spot under the cursor - other players' bases in orange, Forgotten (NPC) bases in green. Markers follow the map as you pan and zoom and clear when you finish moving. A HUD options panel toggles each layer and lets you override the range.
-// @version      1.0.1
+// @version      1.0.2
 // @author       Napali, XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -18,9 +18,12 @@
  *   When you pick up a base with the game's "move base" tool and drag it around the
  *   region map, this paints a translucent highlight over every base that would be within
  *   your attack / tunnel-influence range of the candidate spot under the cursor:
- *     - other players' bases  -> orange
- *     - Forgotten (NPC) bases -> green
- *   Your own bases are skipped. The markers are glued to the map via the game's own
+ *     - your alliance's bases  -> blue
+ *     - other players' bases   -> orange
+ *     - Forgotten (NPC) bases  -> green
+ *   Your own bases are skipped. Relationship is read live from the rendered (vis) map object's
+ *   get_AllianceId()/IsOwnBase() - the same data the game colours base outlines from - so no
+ *   per-base server survey is needed. The markers are glued to the map via the game's own
  *   world->screen projection, so they stay put as you pan and zoom, and they clear the
  *   moment you drop the base or cancel the move.
  *
@@ -41,9 +44,9 @@
  *   Common Library helpers instead of hand-rolled copies.
  *
  * DEPENDENCIES (pack rule: wrapper + Common Library only)
- *   MMCommon.map.*    - world->screen projection, watch() (safe camera poll), inRegionView()
+ *   MMCommon.map.*    - world->screen projection, visObjectAt(), watch() (safe camera poll), inRegionView()
  *   MMCommon.coords.* - distance() (the game's own tile-distance)
- *   MMCommon.base.*   - ownIdMap() (cheap own-base check)
+ *   MMCommon.base.*   - relationshipFromVis() (live own/alliance/other classification)
  *   MMCommon.net.*    - attach/detach (the move-tool events)
  *   MMCommon.ui / buttons / settings - options window + HUD button + persistence
  *   No dependency on any other userscript.
@@ -75,6 +78,7 @@
 		function getS(k, d) { try { return (MM && MM.settings) ? MM.settings.get(k, d) : d; } catch (e) { return d; } }
 		function setS(k, v) { try { if (MM && MM.settings) MM.settings.set(k, v); } catch (e) {} }
 		function masterOn() { return getS("AttackRange.enabled", true) === true; }
+		function showAlliance() { return getS("AttackRange.showAlliance", true) === true; }
 		function showPlayers() { return getS("AttackRange.showPlayers", true) === true; }
 		function showForgotten() { return getS("AttackRange.showForgotten", true) === true; }
 		// Range: a positive override wins; otherwise the alliance announcement [tir]N[/tir], else 10.
@@ -89,8 +93,8 @@
 			return 10;
 		}
 
-		// high-contrast layer colours (translucent fill)
-		var COLOR = { player: "#ff3600", forgotten: "#06ff00" };
+		// high-contrast layer colours (translucent fill): alliance=blue, other players=orange, NPC=green
+		var COLOR = { alliance: "#1e90ff", player: "#ff3600", forgotten: "#06ff00" };
 
 		// ---- overlay DOM -----------------------------------------------------------
 		var layer = null;
@@ -190,26 +194,34 @@
 			try {
 				var range = currentRange();
 				var scan = Math.ceil(range) + 1;
-				var world = ClientLib.Data.MainData.GetInstance().get_World();
-				var ownMap = MM.base.ownIdMap();
+				var myAll = 0; try { myAll = ClientLib.Data.MainData.GetInstance().get_Alliance().get_Id(); } catch (e) {}
+				var CT = ClientLib.Vis.VisObject.EObjectType.RegionCityType;
+				var NB = ClientLib.Vis.VisObject.EObjectType.RegionNPCBase;
 				var seen = {};
-				var wantPlayers = showPlayers(), wantForgotten = showForgotten();
 				for (var gx = startX - scan; gx <= startX + scan; gx++) {
 					for (var gy = startY - scan; gy <= startY + scan; gy++) {
-						var o;
-						try { o = world.GetObjectFromPosition(gx, gy); } catch (e) { o = null; }
-						if (!o || typeof o.getID !== "function") continue;
-						var type = o.Type; // 1 = player, 2 = NPC/Forgotten base, 3 = camp
+						// the VIS object carries live relationship (get_AllianceId/IsOwnBase); the data
+						// world object does not (it's a stub), so we classify off the vis object here.
+						var vo = MM.map.visObjectAt(gx, gy);
+						if (!vo) continue;
+						var t; try { t = vo.get_VisObjectType(); } catch (e) { continue; }
 						var color = null;
-						if (type === 1) { if (!wantPlayers) continue; color = COLOR.player; }
-						else if (type === 2) { if (!wantForgotten) continue; color = COLOR.forgotten; }
-						else continue;
-						var id = o.getID();
-						if (seen[id]) continue;
-						if (type === 1 && ownMap[id]) continue; // never highlight your own bases
-						if (MM.coords.distance(startX, startY, gx, gy) > range) continue;
-						seen[id] = true;
-						var m = { id: id, x: gx, y: gy, color: color, el: makeMarkerEl(color) };
+						if (t === CT) {
+							var rel = MM.base.relationshipFromVis(vo, myAll);
+							if (rel === "own") continue;                                  // never highlight your own
+							if (rel === "alliance") { if (!showAlliance()) continue; color = COLOR.alliance; }
+							else { if (!showPlayers()) continue; color = COLOR.player; }  // neutral or enemy = orange
+						} else if (t === NB) {
+							if (!showForgotten()) continue; color = COLOR.forgotten;
+						} else continue;
+						var id; try { id = vo.get_Id(); } catch (e) { id = null; }
+						var key = (id != null) ? ("v" + id) : (gx + ":" + gy);
+						if (seen[key]) continue;
+						var rx = (typeof vo.get_RawX === "function") ? vo.get_RawX() : gx;
+						var ry = (typeof vo.get_RawY === "function") ? vo.get_RawY() : gy;
+						if (MM.coords.distance(startX, startY, rx, ry) > range) continue;
+						seen[key] = true;
+						var m = { x: rx, y: ry, color: color, el: makeMarkerEl(color) };
 						positionMarker(m);
 						markers.push(m);
 					}
@@ -254,6 +266,7 @@
 		}
 		function onToolCellChange(startX, startY) {
 			try {
+				if (!toolActive) return; // only react while the move-base tool is genuinely active
 				if (startX == null || startY == null) return;
 				drawAt(startX | 0, startY | 0);
 			} catch (e) { werr("onToolCellChange:", e); }
@@ -280,6 +293,7 @@
 				c.addListener("changeValue", function (e) { setS(key, e.getData() === true); redrawLast(); });
 				return c;
 			}
+			body.add(cb("Alliance bases (blue)", "AttackRange.showAlliance", true));
 			body.add(cb("Other players' bases (orange)", "AttackRange.showPlayers", true));
 			body.add(cb("Forgotten / NPC bases (green)", "AttackRange.showForgotten", true));
 
