@@ -28,7 +28,8 @@ scripts, fan-out of 7 read-only agents). Supersedes the per-script verdicts in `
 ## 1. The three biggest cross-cutting wins (do these first — they unlock multiple retires)
 
 1. **Bulk public-data fetch path** — `CommunicationManager.SendSimpleCommand("GetPublicAllianceInfo"/"GetPublicPlayerInfo"/"GetPublicPlayerInfoByName"/"RankingGetData", …)` + `phe.cnc.Util.createEventDelegate`.
-   Found in **TA_CD_PvP_Quick_Map**, **TA_PvP_PvE_Ranking…**, **TA_POIs_Analyser**, **TA_Real_POI_Bonus**.
+   Found in **TA_POIs_Analyser**, **TA_Real_POI_Bonus** (live keepers). (Also was in the now-RETIRED
+   TA_CD_PvP_Quick_Map + TA_PvP_PvE_Ranking… — path captured here, so retiring them lost nothing.)
    Returns whole alliances'/players' base lists in one round-trip. **LIVE-SNIFFED 2026-06-21 — the payload is
    enumeration only:** base entry = `{i, n, p, x, y}` (id/name/**points**/coords), member entry =
    `{c, f, i, n, p, r}` (cityCount/faction/id/name/points/rank). **It does NOT carry per-base offense/defense**
@@ -184,10 +185,10 @@ Priority order (high → low), with the new MM name and the one-line reason:
   `MoveBattleUnit` round-trip into **MM - Battle Simulator** (store via `settings`, not raw localStorage).
 
 **Player info / links**
-- **TA_PvP_PvE_Ranking…** (superset of the pair) → salvage (1) per-member `GetPublicPlayerInfoByName`
-  **fan-out** → Member Status batched fetch (pairs with §1.1); (2) support-building Ion→Art→Air detection →
-  `base.status`; (3) 2-tile POI-on-base predicate → `scan`/poi helper. Both info surfaces covered by Base
-  Info + Member Status.
+- ~~**TA_PvP_PvE_Ranking…**~~ → **RETIRED 2026-06-21** (Mike: retire it; file + bg row id 10002 gone). Both
+  info surfaces are covered by Base Info + Member Status. Salvage recipes NOT mined now but documented here for
+  if `base.fetch*`/`base.status` get built: (1) per-member `GetPublicPlayerInfoByName` fan-out (pairs with
+  §1.1); (2) support-building Ion→Art→Air detection; (3) the 2-tile (corner-excluded) POI-on-base predicate.
 - **TA_PvP_PvE_Player_Info_Mod** (subset) → salvage only the 2-tile POI-on-base predicate; else superseded.
 - **TA_View_Player_Base** → target site **cncopt.com is dead**; encoder superseded by the cnctaopt one (do
   NOT mix keymaps). Salvage only the alliance-`get_POI*Bonus()` getters → base/layout bonus model.
@@ -308,7 +309,7 @@ RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 en
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Auto_Repair, Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
 CityMoveInfoExtend, Map, The_Green_Cross_Tools, Report_Summary, Formation_Saver,
-PvP_PvE_Ranking_…, PvP_PvE_Player_Info_Mod, View_Player_Base, CnCTAOpt_Link_Button,
+PvP_PvE_Player_Info_Mod, View_Player_Base, CnCTAOpt_Link_Button,
 New_Resource_Trade_Window, Transfer_All_resources.
 KEEP-PENDING-REVIEW: xTrim_Base_Overlay_DR_4_3, MovableMenuOverlay, Supplies_Mod,
 Multissesion_MOD. (TheMovement → MM-IFIED 2026-06-21, MM - The Movement id 10209.)
