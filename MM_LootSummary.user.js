@@ -3,7 +3,7 @@
 // @description     Click any base / camp on the region map and a panel shows its lootable resources, offense/defense/base levels, condition, and where its Defense Facility & Construction Yard sit. Rebuilt on the MM - Common Library (merges the old MHTools "Available Loot Summary + Info" and "PluginsLib mhLoot").
 // @author          MH, netquik (original MHTools / PluginsLib mhLoot)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.0
+// @version         1.1.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_LootSummary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_LootSummary.user.js
@@ -20,11 +20,15 @@
        (computed from the target's repair costs, scaled by its current damage -
        i.e. what you'd actually take).
      - Levels: Base / Defense / Offense.
-     - Condition: buildings / defense / offense health %.
+     - Condition: buildings / defense / offense health as colour-coded 0-100 bars
+       (red low / yellow mid / green high - the same bar style as MM - Next MCV).
      - Key buildings: which row the Defense Facility and Construction Yard are on
        (rows from the front), with the support weapon if present.
    The colour of the title shows the relationship (own / alliance / neutral /
    enemy). Clicking empty map or leaving region view shows a "select a base" hint.
+
+ UX: a frameless, draggable floating panel (no title bar - drag it by its body;
+ the base name is the title) opened by the "Loot Info" HUD-tray button (toggle).
 
  WHY IT'S NEEDED
    It's the fastest read on whether a base is worth attacking - loot and how hard
@@ -86,21 +90,27 @@
             });
             body.add(hintLbl);
 
-            // the data block (a stack of rich labels), hidden until something is selected
+            // the data block (rich-label rows + three condition bars), hidden until something is selected
             function row(color) {
                 return new qx.ui.basic.Label("").set({
                     rich: true, textAlign: "center", allowGrowX: true, textColor: color || "#e8e8e8",
                     font: new qx.bom.Font(12, ["sans-serif"])
                 });
             }
+            // a 0-100 progress bar (rich label rendering a self-contained HTML bar), as in MM - Next MCV
+            function progressBar() { return new qx.ui.basic.Label("").set({ rich: true, allowGrowX: true, height: 18 }); }
             var lootLbl = row("#e8e8e8");
             var lvlLbl = row("#cfe0ea");
-            var condLbl = row("#cfe0ea");
-            var bldLbl = row("#b9c2c7");
+            var bldBar = progressBar();   // buildings condition %
+            var defBar = progressBar();   // defense condition %
+            var offBar = progressBar();   // offense condition %
+            var bldLbl = row("#b9c2c7");  // key buildings (DF / CY / Support rows)
             var dataBox = new qx.ui.container.Composite(new qx.ui.layout.VBox(4));
             dataBox.add(lootLbl);
             dataBox.add(lvlLbl);
-            dataBox.add(condLbl);
+            dataBox.add(bldBar);
+            dataBox.add(defBar);
+            dataBox.add(offBar);
             dataBox.add(bldLbl);
             dataBox.exclude(); // hidden until a base is selected
             body.add(dataBox);
@@ -112,7 +122,8 @@
                 pos: [260, 160],
                 resizable: false,
                 restoreOpen: true,
-                dock: true
+                dock: true,
+                frameless: true   // clean floating panel, dragged by its body; toggled by the HUD button
             });
             if (!win) { werr("window creation failed"); return; }
             win.add(body);
@@ -131,7 +142,17 @@
                 try { hintLbl.setValue(msg || "Click a base or camp on the map."); hintLbl.show(); dataBox.exclude(); titleLbl.setValue("Loot Summary"); titleLbl.setTextColor("#cfe6ff"); } catch (e) {}
             }
             function compact(n) { try { return MM.num.compact(n || 0); } catch (e) { return String(Math.round(n || 0)); } }
-            function pct(n) { return (n == null) ? "?" : (Math.round(n) + "%"); }
+
+            // colour-by-magnitude bar, identical to MM - Next MCV: red low / yellow mid / green high.
+            function barColor(p) { return (p < 15) ? "#cc3b2e" : (p < 85) ? "#c7a91e" : "#3a9d3a"; }
+            function barHtml(value, label) {
+                var p = Math.max(0, Math.min(100, (value == null ? 0 : value)));
+                return '<div style="position:relative;height:18px;background:#11151a;border:1px solid #3a4750;border-radius:4px;overflow:hidden;">'
+                    + '<div style="position:absolute;left:0;top:0;bottom:0;width:' + p.toFixed(1) + '%;background:' + barColor(p) + ';"></div>'
+                    + '<div style="position:absolute;left:0;right:0;top:0;height:18px;line-height:18px;text-align:center;font:bold 11px sans-serif;color:#fff;text-shadow:0 0 3px #000,0 0 2px #000;">' + label + '</div>'
+                    + '</div>';
+            }
+            function condBar(bar, name, h) { bar.setValue(barHtml(h, name + "  " + (h == null ? "?" : Math.round(h) + "%"))); }
 
             // Fill the data block from a loaded city object.
             function renderCity(vo, ncity, rel) {
@@ -151,7 +172,9 @@
 
                     var army = MM.base.army(ncity);
                     lvlLbl.setValue("Base <b>" + army.base.Level + "</b>   Def <b>" + army.defense.Level + "</b>   Off <b>" + army.offense.Level + "</b>");
-                    condLbl.setValue("Condition  Bld " + pct(army.base.HealthInPercent) + " · Def " + pct(army.defense.HealthInPercent) + " · Off " + pct(army.offense.HealthInPercent));
+                    condBar(bldBar, "Buildings", army.base.HealthInPercent);
+                    condBar(defBar, "Defense", army.defense.HealthInPercent);
+                    condBar(offBar, "Offense", army.offense.HealthInPercent);
 
                     var kb = MM.base.keyBuildings(ncity);
                     var parts = [];
