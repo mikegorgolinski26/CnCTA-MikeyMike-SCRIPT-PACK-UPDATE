@@ -110,7 +110,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | Script | What it does | Status |
 |---|---|---|
 | TA_Formation_Saver | Save/load attack formations per city-pair (sim has its own too) | ✅🔁 |
-| TA_Attack_Range | Highlights bases reachable by move tool (incomplete widget init) | ⚠️ |
+| TA_Attack_Range → **MM - Attack Range** | Highlights bases in range while moving a base | ✅ MM-ified 2026-06-20 (1.0.0; on MMCommon map/coords/base; dead offense-panel dropped; options + HUD button) |
 | TA_Tunnel_Info | Tunnel block/activate overlays + required offense level | ✅ |
 | TA_PvP_PvE_Ranking_POI_Holding_Split_Base_Kill_Score | Alliance PvP/PvE + POI holdings tabs in player info | ✅ |
 
