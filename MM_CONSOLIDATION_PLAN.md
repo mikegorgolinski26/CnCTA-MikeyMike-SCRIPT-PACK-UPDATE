@@ -169,8 +169,10 @@ Priority order (high → low), with the new MM name and the one-line reason:
 **Maps**
 - **TA_Map** → salvage whole-region scan→canvas **paint loop** → new "MM - Region Minimap" on `map.grid/
   worldToScreen`; POI min/max-level filter UI; two-point "border line" overlay concept.
-- **TA_CD_PvP_Quick_Map** → **salvage the bulk-fetch path (§1.1)** → `base.fetch*`. Radar view itself
-  optional. The alliance-picker/color-assign options could feed Player Base Info / Member Status.
+- ~~**TA_CD_PvP_Quick_Map**~~ → **RETIRED 2026-06-21** (Mike: not pursuing it; file + bg row gone). Nothing
+  salvaged into MMCommon now, but nothing lost: the bulk-fetch path it used is documented in §1.1 and still
+  lives in keeper scripts (Real POI Bonus / POIs Analyser / PvP_PvE_Ranking) when `base.fetch*` is built. Its
+  radar/canvas view + alliance-picker were not wanted.
 
 **POI / reports / combat**
 - **TA_The_Green_Cross_Tools** → POI window is a dup of POIs_Analyser; scanner is dead + covered by MM -
@@ -305,7 +307,7 @@ RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6):
 RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 entry on Info_Sticker): Info_Sticker.
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Auto_Repair, Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
-CityMoveInfoExtend, Map, CD_PvP_Quick_Map, The_Green_Cross_Tools, Report_Summary, Formation_Saver,
+CityMoveInfoExtend, Map, The_Green_Cross_Tools, Report_Summary, Formation_Saver,
 PvP_PvE_Ranking_…, PvP_PvE_Player_Info_Mod, View_Player_Base, CnCTAOpt_Link_Button,
 New_Resource_Trade_Window, Transfer_All_resources.
 KEEP-PENDING-REVIEW: xTrim_Base_Overlay_DR_4_3, MovableMenuOverlay, Supplies_Mod,
