@@ -139,7 +139,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | TA_Hotkeys | Login hotkeys (**plaintext passwords**) + chat/info inserts; `link` bug | 🔐⚠️ |
 | TA_Multissesion_MOD | "New session" link (clears cookies); deprecated jQuery `.live()` | ✅ |
 | TA_MovableMenuOverlay | Makes game menu overlays draggable (brittle regex patching) | ⚠️ |
-| TA_PTE_CheatScript | PTE-server cheat loop; all cheats off by default (non-functional OOB) | ✅ (niche) |
+| ~~TA_PTE_CheatScript~~ | PTE-server cheat loop; all cheats off by default (non-functional OOB) | ❌ RETIRED 2026-06-21 (PTE test-server cheat artifact; /cheat commands do nothing on live, gated to /320/; no value to us) |
 | TA_Hotkeys / others | — | |
 
 ---
