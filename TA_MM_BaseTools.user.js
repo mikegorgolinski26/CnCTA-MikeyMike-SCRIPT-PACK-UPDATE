@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.0
+// @version         1.1.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_BaseTools.user.js
@@ -455,6 +455,380 @@
             try { return ClientLib.Vis.VisMain.FormatTimespan(sec); } catch (e) { return window.MMCommon.time.dhms(sec); }
         }
 
+        // ===== Layout Optimizer engine (Phase A: recommend-only) =====================
+        // Live-verified production model (see the base-layout-bonus-model memory):
+        //   production_R(building) = Σ over its link types of  perConn × min(adjCount, maxConn)
+        //   There is NO separate flat base term (proven: per-modifier sum-of-link-Values == TotalValue).
+        //   Adjacency is the 8-neighborhood (diagonals count). Field tiles count even when occupied.
+        // The per-connection magnitudes are CALIBRATED LIVE from the game's own
+        // GetBuildingDetailViewInfo link Values, so the optimizer stays correct across game updates
+        // instead of relying on hard-coded (era-stale) tables.
+        var OPT = (function () {
+            var GRID_W = 9, GRID_H = 8;
+
+            // Production modifier ids (from OwnProdModifiers): the four resources we optimize.
+            var MOD = { Tib: 1, Cry: 4, Pow: 6, Dol: 30 };
+
+            // What each link type's "neighbor" is. kind 'b' = adjacent building of a tech (optionally a
+            // specific harvester resource); kind 't' = adjacent terrain field tile of a type.
+            // Verified link ids: 34/35 silo→harv, 39/40 harv→silo, 29 accum→pp, 38 crystalField→pp,
+            // 41 pp→accum, 36 pp→refinery, 37 tibField→refinery, 42 refinery→pp.
+            var LINK = {
+                34: { kind: "b", tech: "Silo" },
+                35: { kind: "b", tech: "Silo" },
+                39: { kind: "b", tech: "Harvester", res: "Tib" },
+                40: { kind: "b", tech: "Harvester", res: "Cry" },
+                29: { kind: "b", tech: "Accumulator" },
+                41: { kind: "b", tech: "PowerPlant" },
+                36: { kind: "b", tech: "PowerPlant" },
+                42: { kind: "b", tech: "Refinery" },
+                38: { kind: "t", terr: "CRYSTAL" },
+                37: { kind: "t", terr: "TIBERIUM" }
+            };
+
+            // Which buildings each resource button is allowed to move. Everything else is a fixed
+            // obstacle - this keeps each single-resource optimize from wrecking the other resources and
+            // shrinks the search space. (Silos are shared by Tib/Cry; PowerPlants by Pow/Dol - inherent
+            // contention, accepted for single-objective optimize.)
+            var RES_CFG = {
+                Tib: { mod: MOD.Tib, label: "Tiberium", movable: function (b) { return (b.techName === "Harvester" && b.harvRes === "Tib") || b.techName === "Silo"; } },
+                Cry: { mod: MOD.Cry, label: "Crystal",  movable: function (b) { return (b.techName === "Harvester" && b.harvRes === "Cry") || b.techName === "Silo"; } },
+                Pow: { mod: MOD.Pow, label: "Power",    movable: function (b) { return b.techName === "PowerPlant" || b.techName === "Accumulator"; } },
+                Dol: { mod: MOD.Dol, label: "Credits",  movable: function (b) { return b.techName === "Refinery" || b.techName === "PowerPlant"; } }
+            };
+
+            // ETechName -> name string (reverse map), computed once and cached.
+            var _techRev = null;
+            function techRev() {
+                if (_techRev) return _techRev;
+                _techRev = {};
+                try { var T = ClientLib.Base.ETechName; for (var n in T) { if (typeof T[n] === "number") _techRev[T[n]] = n; } } catch (e) { werr("OPT.techRev failed:", e); }
+                return _techRev;
+            }
+
+            // Terrain enum name map + buildable/field helpers.
+            var _terrRev = null;
+            function terrRev() {
+                if (_terrRev) return _terrRev;
+                _terrRev = {};
+                try { var T = ClientLib.Data.ECityTerrainType; for (var n in T) { if (typeof T[n] === "number") _terrRev[T[n]] = n; } } catch (e) { werr("OPT.terrRev failed:", e); }
+                return _terrRev;
+            }
+
+            // Locate the (obfuscated) terrain getter on a city: the 2-arg method that returns values in
+            // the ECityTerrainType range across the grid. Cached per city id. Returns fn(x,y)->name or null.
+            var _terrFnCache = {};
+            function terrainFn(city) {
+                var cid; try { cid = city.get_Id(); } catch (e) { cid = 0; }
+                if (_terrFnCache[cid]) return _terrFnCache[cid];
+                var rev = terrRev();
+                var maxT = 0; for (var k in rev) { var v = +k; if (v > maxT) maxT = v; }
+                var found = null;
+                // Fast path: the known name from the live sniff.
+                try { if (typeof city.TOIMPX === "function" && city.TOIMPX.length === 2) found = city.TOIMPX; } catch (e) {}
+                if (!found) {
+                    // Fallback: scan for any 2-arg fn returning valid terrain enums (game may have renamed it).
+                    for (var p in city) {
+                        var f; try { f = city[p]; } catch (e) { continue; }
+                        if (typeof f !== "function" || f.length !== 2) continue;
+                        var ok = true;
+                        try { for (var y = 0; y < 3 && ok; y++) for (var x = 0; x < 3; x++) { var r = f.call(city, x, y); if (typeof r !== "number" || r < 0 || r > maxT || r !== Math.floor(r)) { ok = false; break; } } }
+                        catch (e) { ok = false; }
+                        if (ok) { found = f; break; }
+                    }
+                }
+                if (!found) { wwarn("OPT: terrain getter not found (game may have updated)"); return null; }
+                var wrap = function (x, y) { try { return rev[found.call(city, x, y)] || "NONE"; } catch (e) { return "NONE"; } };
+                _terrFnCache[cid] = wrap;
+                return wrap;
+            }
+
+            function N(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+            function inGrid(x, y) { return x >= 0 && x < GRID_W && y >= 0 && y < GRID_H; }
+
+            // Read a full optimization snapshot for a city + chosen resource. Returns null on failure.
+            //   { ok, terrain[y][x], buildings:{id->b}, order:[ids], producers:[ids w/ this mod],
+            //     movable:[ids], modId, resKey, calibWarn }
+            // Each building b: { id, techName, harvRes, x, y, level, links:{modId->[{lt,perConn,max}]} }.
+            function snapshot(city, resKey) {
+                try {
+                    var cfg = RES_CFG[resKey]; if (!cfg) { werr("OPT.snapshot: bad resKey", resKey); return null; }
+                    var modId = cfg.mod;
+                    var tf = terrainFn(city); if (!tf) return null;
+                    var terrain = [];
+                    for (var y = 0; y < GRID_H; y++) { var row = []; for (var x = 0; x < GRID_W; x++) row.push(tf(x, y)); terrain.push(row); }
+
+                    var rev = techRev();
+                    var bd; try { bd = city.get_Buildings().d; } catch (e) { werr("OPT: get_Buildings failed", e); return null; }
+                    var buildings = {}, order = [];
+                    var iconByLink = {}; // linkTypeId -> full CDN icon URL (harvested live; auto-handles faction/era)
+                    // First pass: read every building + its production-modifier links.
+                    for (var o in bd) {
+                        var raw = bd[o]; if (!raw || !raw.get_Id) continue;
+                        var b = { id: raw.get_Id(), techName: rev[raw.get_TechName()] || String(raw.get_TechName()),
+                                  x: raw.get_CoordX(), y: raw.get_CoordY(), level: raw.get_CurrentLevel ? raw.get_CurrentLevel() : 0,
+                                  harvRes: null, links: {} };
+                        var dv; try { dv = city.GetBuildingDetailViewInfo(raw); } catch (e) { dv = null; }
+                        if (dv && dv.OwnProdModifiers && dv.OwnProdModifiers.d) {
+                            var mods = dv.OwnProdModifiers.d;
+                            for (var mt in mods) {
+                                var m = mods[mt]; if (typeof m !== "object") continue;
+                                var mid = N(m.ModifierTypeId);
+                                if (mid !== MOD.Tib && mid !== MOD.Cry && mid !== MOD.Pow && mid !== MOD.Dol) continue;
+                                // Harvester resource = whichever raw-resource modifier it carries.
+                                if (b.techName === "Harvester") { if (mid === MOD.Tib) b.harvRes = "Tib"; else if (mid === MOD.Cry) b.harvRes = "Cry"; }
+                                var arr = [];
+                                if (m.ConnectedLinkTypes && m.ConnectedLinkTypes.d) {
+                                    var C = m.ConnectedLinkTypes.d;
+                                    for (var lt in C) {
+                                        var l = C[lt]; if (typeof l !== "object") continue;
+                                        var ltid = N(l.LQJDCI), conns = N(l.NrOfLinkConnections), val = N(l.Value), max = N(l.MaxConnections);
+                                        if (l.IconPath && iconByLink[ltid] == null) iconByLink[ltid] = l.IconPath; // building/field icon URL
+                                        arr.push({ lt: ltid, max: max, conns: conns, value: val, perConn: conns > 0 ? (val / conns) : null });
+                                    }
+                                }
+                                b.links[mid] = arr;
+                            }
+                        }
+                        buildings[b.id] = b; order.push(b.id);
+                    }
+
+                    // Second pass: calibrate per-connection magnitude for links that currently have 0
+                    // connections (Value 0) by borrowing from a same-(tech,level,linkType) sibling that
+                    // does have connections. If a link type can't be calibrated anywhere, warn + drop it.
+                    var sib = {}; // tech|level|lt -> perConn
+                    for (var i = 0; i < order.length; i++) { var bb = buildings[order[i]];
+                        for (var mk in bb.links) { var ls = bb.links[mk];
+                            for (var j = 0; j < ls.length; j++) { if (ls[j].perConn != null) { var key = bb.techName + "|" + bb.level + "|" + ls[j].lt; if (sib[key] == null) sib[key] = ls[j].perConn; } }
+                        }
+                    }
+                    var calibWarn = 0;
+                    for (var i2 = 0; i2 < order.length; i2++) { var b2 = buildings[order[i2]];
+                        for (var mk2 in b2.links) { var ls2 = b2.links[mk2];
+                            for (var j2 = 0; j2 < ls2.length; j2++) {
+                                if (ls2[j2].perConn == null) {
+                                    var key2 = b2.techName + "|" + b2.level + "|" + ls2[j2].lt;
+                                    if (sib[key2] != null) ls2[j2].perConn = sib[key2]; else { ls2[j2].perConn = 0; calibWarn++; }
+                                }
+                            }
+                        }
+                    }
+                    if (calibWarn) wwarn("OPT: " + calibWarn + " link(s) could not be calibrated (no connected sibling) - excluded from scoring");
+
+                    // Classify producers (have this mod) and movable buildings (this resource's set).
+                    var producers = [], movable = [];
+                    for (var i3 = 0; i3 < order.length; i3++) { var b3 = buildings[order[i3]];
+                        if (b3.links[modId]) producers.push(b3.id);
+                        if (cfg.movable(b3)) movable.push(b3.id);
+                    }
+                    // Map harvested link icons to a tech -> URL table the UI can draw on tiles.
+                    var icons = { Silo: iconByLink[34] || iconByLink[35] || null, Accumulator: iconByLink[29] || null,
+                                  PowerPlant: iconByLink[36] || iconByLink[41] || null, Refinery: iconByLink[42] || null,
+                                  HarvTib: iconByLink[39] || null, HarvCry: iconByLink[40] || null };
+                    return { ok: true, terrain: terrain, buildings: buildings, order: order, producers: producers, movable: movable, modId: modId, resKey: resKey, calibWarn: calibWarn, icons: icons };
+                } catch (e) { werr("OPT.snapshot failed:", e); return null; }
+            }
+
+            // ----- scoring (pure; operates on a positions map, no game calls) ----------
+            // pos: { id -> {x,y} }. `removed` (optional {id:true}) = demolished buildings: excluded from
+            // the occupancy grid (their tiles free up) and never scored. Build an occupancy grid, then sum
+            // each producer's resource output = Σ links perConn × min(adjCount, max).
+            function buildOcc(snap, pos, removed) {
+                var g = []; for (var y = 0; y < GRID_H; y++) { g.push([]); for (var x = 0; x < GRID_W; x++) g[y].push(null); }
+                for (var i = 0; i < snap.order.length; i++) { var id = snap.order[i]; if (removed && removed[id]) continue; var p = pos[id]; if (p && inGrid(p.x, p.y)) g[p.y][p.x] = snap.buildings[id]; }
+                return g;
+            }
+            function countLink(snap, g, x, y, def) {
+                var c = 0;
+                for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+                    if (!dx && !dy) continue; var nx = x + dx, ny = y + dy; if (!inGrid(nx, ny)) continue;
+                    if (def.kind === "t") { if (snap.terrain[ny][nx] === def.terr) c++; }
+                    else { var nb = g[ny][nx]; if (nb && nb.techName === def.tech && (!def.res || nb.harvRes === def.res)) c++; }
+                }
+                return c;
+            }
+            // Score a layout for resource modId over the producer id list `prod` (caller supplies the list
+            // so sell-scenarios can drop demolished producers).
+            function score(snap, pos, prod, removed) {
+                var g = buildOcc(snap, pos, removed), total = 0, modId = snap.modId;
+                prod = prod || snap.producers;
+                for (var i = 0; i < prod.length; i++) {
+                    var b = snap.buildings[prod[i]]; if (removed && removed[b.id]) continue; var p = pos[b.id]; if (!p) continue;
+                    var ls = b.links[modId]; if (!ls) continue;
+                    for (var j = 0; j < ls.length; j++) {
+                        var L = ls[j], def = LINK[L.lt]; if (!def || !L.perConn) continue;
+                        total += L.perConn * Math.min(countLink(snap, g, p.x, p.y, def), L.max);
+                    }
+                }
+                return total;
+            }
+
+            // ----- legality (geometric; the game's IsBuildingFreeToBePlaced validates final moves) -----
+            function buildable(terr) { return terr === "NONE" || terr === "CRYSTAL" || terr === "TIBERIUM"; }
+            // Can building b occupy (x,y) given occupancy grid g (ignoring b's own current cell)?
+            // Terrain rules (verified in-game): Tiberium/Crystal FIELD tiles are HARVESTER-ONLY - a
+            // tiberium harvester may sit only on a tiberium tile, a crystal harvester only on a crystal
+            // tile, and NO non-harvester building may occupy a field tile. Everything else goes on NONE.
+            function terrainOK(snap, b, x, y) {
+                var terr = snap.terrain[y][x];
+                if (b.techName === "Harvester") {
+                    if (b.harvRes === "Cry") return terr === "CRYSTAL";
+                    return terr === "TIBERIUM"; // default/Tib harvester
+                }
+                return terr === "NONE"; // non-harvesters: clear ground only (never on a field tile)
+            }
+            function legalFor(snap, g, b, x, y) {
+                if (!inGrid(x, y)) return false;
+                if (!terrainOK(snap, b, x, y)) return false;
+                var occ = g[y][x];
+                if (occ && occ.id !== b.id) return false; // tile taken by someone else
+                return true;
+            }
+            function legalForSwap(snap, b, x, y) {
+                if (!inGrid(x, y)) return false;
+                return terrainOK(snap, b, x, y);
+            }
+
+            // ----- search: iterated local search (steepest-ascent hill climb + kicks) -----
+            // Mirrors the battle-sim optimizer pattern. Pure planning - never moves anything in-game.
+            // `mov` = movable id list, `prod` = producer id list, `removed` = demolished set (all caller-supplied
+            // so sell-scenarios reuse the same engine).
+            function clonePos(pos) { var o = {}; for (var k in pos) o[k] = { x: pos[k].x, y: pos[k].y }; return o; }
+            function emptyTiles(snap, g) { var out = []; for (var y = 0; y < GRID_H; y++) for (var x = 0; x < GRID_W; x++) { if (!g[y][x] && buildable(snap.terrain[y][x])) out.push({ x: x, y: y }); } return out; }
+
+            function climbStep(snap, pos, prod, mov, removed, maxN) {
+                var g = buildOcc(snap, pos, removed), base = score(snap, pos, prod, removed);
+                var bestGain = 1e-6, bestApply = null;
+                var empties = emptyTiles(snap, g);
+                for (var i = 0; i < mov.length; i++) {
+                    var id = mov[i], b = snap.buildings[id]; var tried = 0;
+                    for (var e = 0; e < empties.length; e++) {
+                        var t = empties[e];
+                        if (!legalFor(snap, g, b, t.x, t.y)) continue;
+                        if (++tried > maxN) break;
+                        var old = pos[id]; pos[id] = { x: t.x, y: t.y };
+                        var s = score(snap, pos, prod, removed); pos[id] = old;
+                        if (s - base > bestGain) { bestGain = s - base; bestApply = { a: id, ax: t.x, ay: t.y }; }
+                    }
+                }
+                for (var a = 0; a < mov.length; a++) for (var c = a + 1; c < mov.length; c++) {
+                    var ida = mov[a], idb = mov[c];
+                    var pa = pos[ida], pb = pos[idb];
+                    if (!legalForSwap(snap, snap.buildings[ida], pb.x, pb.y) || !legalForSwap(snap, snap.buildings[idb], pa.x, pa.y)) continue;
+                    pos[ida] = { x: pb.x, y: pb.y }; pos[idb] = { x: pa.x, y: pa.y };
+                    var s2 = score(snap, pos, prod, removed); pos[ida] = pa; pos[idb] = pb;
+                    if (s2 - base > bestGain) { bestGain = s2 - base; bestApply = { swap: true, a: ida, b: idb }; }
+                }
+                if (!bestApply) return false;
+                if (bestApply.swap) { var t1 = pos[bestApply.a], t2 = pos[bestApply.b]; pos[bestApply.a] = { x: t2.x, y: t2.y }; pos[bestApply.b] = { x: t1.x, y: t1.y }; }
+                else { pos[bestApply.a] = { x: bestApply.ax, y: bestApply.ay }; }
+                return true;
+            }
+            function kick(snap, pos, mov, removed, rnd) {
+                var g = buildOcc(snap, pos, removed), empties = emptyTiles(snap, g);
+                if (!empties.length || !mov.length) return;
+                var id = mov[Math.floor(rnd() * mov.length)], b = snap.buildings[id];
+                for (var tryn = 0; tryn < 12; tryn++) { var t = empties[Math.floor(rnd() * empties.length)]; if (legalFor(snap, g, b, t.x, t.y)) { pos[id] = { x: t.x, y: t.y }; return; } }
+            }
+
+            // Lists of producers / movable buildings for the target resource, minus any demolished.
+            function filterIds(list, removed) { if (!removed) return list.slice(); var o = []; for (var i = 0; i < list.length; i++) if (!removed[list[i]]) o.push(list[i]); return o; }
+            function startPosFor(snap, removed) { var p = {}; for (var i = 0; i < snap.order.length; i++) { var id = snap.order[i]; if (removed && removed[id]) continue; var b = snap.buildings[id]; p[id] = { x: b.x, y: b.y }; } return p; }
+            function mkRnd(snap, salt) { var seed = (2166136261 ^ ((snap.order.length + (salt || 0)) * 16777619 >>> 0)) >>> 0; return function () { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return ((seed >>> 0) % 100000) / 100000; }; }
+
+            // Core search for a given demolished-set. Returns { startPos, startScore, bestPos, bestScore }.
+            // Multi-start: `restarts` independent attempts (each a hill-climb + kick chain from the current
+            // layout, with its own RNG stream) and keep the global best - this makes the result robust to
+            // seed luck instead of getting stuck in whichever local optimum one chain happens to hit.
+            function runSearch(snap, removed, opts, salt) {
+                var rounds = opts.rounds || 30, kicks = opts.kicks || 3, maxN = opts.maxNeighbors || 16, restarts = opts.restarts || 1;
+                var prod = filterIds(snap.producers, removed), mov = filterIds(snap.movable, removed);
+                var startPos = startPosFor(snap, removed);
+                var startScore = score(snap, startPos, prod, removed);
+                var best = clonePos(startPos), bestScore = startScore;
+                for (var r = 0; r < restarts; r++) {
+                    var rnd = mkRnd(snap, (salt || 0) * 131 + r * 977 + 1);
+                    var work = clonePos(startPos);
+                    for (var k = 0; k <= kicks; k++) {
+                        var guard = 0;
+                        while (climbStep(snap, work, prod, mov, removed, maxN) && guard++ < rounds) {}
+                        var ws = score(snap, work, prod, removed);
+                        if (ws > bestScore) { bestScore = ws; best = clonePos(work); }
+                        work = clonePos(best);
+                        if (k < kicks) kick(snap, work, mov, removed, rnd);
+                    }
+                }
+                return { startPos: startPos, startScore: startScore, bestPos: best, bestScore: bestScore };
+            }
+
+            // Build the move list (buildings that actually moved) given start + best positions over `mov`.
+            function diffMoves(snap, startPos, bestPos, removed) {
+                var moves = [], mov = filterIds(snap.movable, removed);
+                for (var m = 0; m < mov.length; m++) {
+                    var id = mov[m], a = startPos[id], bp = bestPos[id]; if (!a || !bp) continue;
+                    if (a.x !== bp.x || a.y !== bp.y) { var bb = snap.buildings[id]; moves.push({ id: id, techName: bb.techName, harvRes: bb.harvRes, level: bb.level, fromX: a.x, fromY: a.y, toX: bp.x, toY: bp.y }); }
+                }
+                return moves;
+            }
+
+            // Run the optimizer for a city + resource (no selling). Returns the standard result object.
+            function optimize(city, resKey, opts) {
+                opts = opts || {};
+                var snap = snapshot(city, resKey);
+                if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
+                if (!snap.movable.length) return { ok: false, reason: "no movable buildings for this resource" };
+                var r = runSearch(snap, null, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5 }, 0);
+                var moves = diffMoves(snap, r.startPos, r.bestPos, null);
+                var gainPct = r.startScore > 0 ? ((r.bestScore - r.startScore) / r.startScore * 100) : 0;
+                return { ok: true, resKey: resKey, current: r.startScore, projected: r.bestScore, gainPct: gainPct, moves: moves, sells: [], snapshot: snap, bestPos: r.bestPos, startPos: r.startPos };
+            }
+
+            // Resource buildings that may be demolished to free space (uniques/defense are never sold).
+            var SELLABLE = { Harvester: 1, Silo: 1, PowerPlant: 1, Accumulator: 1, Refinery: 1 };
+
+            // Optimize AND recommend up to sellN buildings to demolish for the biggest target gain.
+            // Greedy: each round, try demolishing each remaining sellable building, re-optimize the target
+            // producers into the freed space, and keep the single demolition that yields the highest target
+            // production - but only if it actually beats the running best (so it won't recommend pointless
+            // sells). Returns the standard result + sells:[{id,techName,harvRes,level,x,y}].
+            function optimizeWithSell(city, resKey, opts, sellN) {
+                opts = opts || {};
+                var snap = snapshot(city, resKey);
+                if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
+                if (!snap.movable.length) return { ok: false, reason: "no movable buildings for this resource" };
+                var baseR = runSearch(snap, null, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 4 }, 0);
+                var current = baseR.startScore;                       // true current production (nothing sold)
+                var bestRemoved = {}, bestR = baseR, bestScore = baseR.bestScore;
+                var sells = [];
+                // Inner sell-evaluation runs stay light (single start) since there are many of them.
+                var lightOpts = { rounds: Math.min(opts.rounds || 30, 20), kicks: 1, maxNeighbors: opts.maxNeighbors || 16, restarts: 1 };
+                for (var k = 0; k < (sellN || 0); k++) {
+                    var roundBest = null, roundBestId = -1, salt = 1;
+                    for (var i = 0; i < snap.order.length; i++) {
+                        var id = snap.order[i], b = snap.buildings[id];
+                        if (bestRemoved[id] || !SELLABLE[b.techName]) continue;
+                        bestRemoved[id] = true;
+                        var r = runSearch(snap, bestRemoved, lightOpts, salt++);
+                        delete bestRemoved[id];
+                        if (!roundBest || r.bestScore > roundBest.bestScore) { roundBest = r; roundBestId = id; }
+                    }
+                    // Only accept the sell if it improves the target beyond the current best (else stop).
+                    if (roundBestId < 0 || roundBest.bestScore <= bestScore + 1e-6) break;
+                    bestRemoved[roundBestId] = true;
+                    var sb = snap.buildings[roundBestId];
+                    sells.push({ id: roundBestId, techName: sb.techName, harvRes: sb.harvRes, level: sb.level, x: sb.x, y: sb.y });
+                    bestScore = roundBest.bestScore;
+                }
+                // Final polish pass at full strength on the accepted demolition set.
+                bestR = runSearch(snap, bestRemoved, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5 }, 99);
+                var moves = diffMoves(snap, bestR.startPos, bestR.bestPos, bestRemoved);
+                var gainPct = current > 0 ? ((bestR.bestScore - current) / current * 100) : 0;
+                return { ok: true, resKey: resKey, current: current, projected: bestR.bestScore, gainPct: gainPct, moves: moves, sells: sells, removed: bestRemoved, snapshot: snap, bestPos: bestR.bestPos, startPos: bestR.startPos };
+            }
+
+            return { snapshot: snapshot, score: score, optimize: optimize, optimizeWithSell: optimizeWithSell, RES_CFG: RES_CFG, GRID_W: GRID_W, GRID_H: GRID_H };
+        })();
+
         // ----- main build ------------------------------------------------------------
         function build() {
             var MM = window.MMCommon;
@@ -471,8 +845,8 @@
                 caption: "Base Tools",
                 key: "BaseTools.Window",
                 pos: [260, 140],
-                width: 520,
-                height: 420,
+                width: 440,
+                height: 460,
                 persistSize: true,   // remember width AND height across reloads
                 restoreOpen: true,   // remember whether it was open across reloads
                 layout: new qx.ui.layout.Grow()
@@ -1142,10 +1516,275 @@
             var pageUpg = buildUpgradeTab();
             tabView.add(pageUpg);
 
-            var pageOpt = placeholderTab("Layout Optimizer",
-                "<b>Coming soon.</b><br><br>One-click optimize your base layout to maximize Tiberium / Crystal / Power / Credit " +
-                "production. Phase A: shows recommended moves as overlay arrows. Phase B: one-click auto-apply via the game's own " +
-                "MoveBuilding primitive (sniffed and ready to use).");
+            // ---- Tab 4: Layout Optimizer (Phase A - recommend-only) ----------------
+            // Four buttons (Tiberium / Crystal / Power / Credits); each runs the OPT engine on the
+            // chosen base and shows the recommended building moves as (a) a summary, (b) a move list,
+            // and (c) an in-tab mini-map of the base with the proposed layout highlighted. Nothing is
+            // applied to the game - this is advice only (Phase B auto-apply is a later batch).
+            function buildOptimizerTab() {
+                var page = new qx.ui.tabview.Page("Layout Optimizer");
+                page.setLayout(new qx.ui.layout.VBox(6));
+                page.setPadding(8);
+                var TILE = 38; // grid tile size in px
+
+                function currentOwnCity() { try { return ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity(); } catch (e) { return null; } }
+
+                // ---- controls row 1: base + resource buttons (Flow so it wraps when the window is narrow) ----
+                var ctrls = new qx.ui.container.Composite(new qx.ui.layout.Flow(6, 6));
+                var baseGroup = new qx.ui.container.Composite(new qx.ui.layout.HBox(4));
+                baseGroup.add(new qx.ui.basic.Label("Base:").set({ alignY: "middle" }));
+                var baseSelect = new qx.ui.form.SelectBox().set({ width: 150, alignY: "middle" });
+                var suppressBase = false, baseBuilt = false;
+                function selectedBaseId() { var s = baseSelect.getSelection()[0]; return s ? s.getModel() : "current"; }
+                function selectedCity() { var bid = selectedBaseId(); return (bid === "current") ? currentOwnCity() : getCityById(bid); }
+                function rebuildBases() {
+                    var prev = baseBuilt ? selectedBaseId() : "current";
+                    baseBuilt = true; suppressBase = true;
+                    try {
+                        try { baseSelect.removeAll(); } catch (e) {}
+                        var itC = new qx.ui.form.ListItem("Current base"); itC.setModel("current"); baseSelect.add(itC);
+                        var list = [];
+                        eachOwnCity(function (c) { try { if (c.get_IsGhostMode && c.get_IsGhostMode()) return; list.push({ id: String(c.get_Id()), name: c.get_Name() }); } catch (e) {} });
+                        list.sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+                        var sel = itC;
+                        for (var i = 0; i < list.length; i++) { var it = new qx.ui.form.ListItem(list[i].name); it.setModel(list[i].id); baseSelect.add(it); if (list[i].id === prev) sel = it; }
+                        baseSelect.setSelection([sel]);
+                    } catch (e) { werr("OPT rebuildBases failed:", e); }
+                    suppressBase = false;
+                }
+                baseSelect.addListener("changeSelection", function () { if (suppressBase) return; renderCurrent(); });
+                baseGroup.add(baseSelect);
+                ctrls.add(baseGroup);
+
+                var RESBTN = [
+                    { key: "Tib", label: "Tiberium", color: "#8fe08f" },
+                    { key: "Cry", label: "Crystal",  color: "#8fc4ff" },
+                    { key: "Pow", label: "Power",    color: "#ece28a" },
+                    { key: "Dol", label: "Credits",  color: "#e6c08f" }
+                ];
+                RESBTN.forEach(function (r) {
+                    var b = new qx.ui.form.Button(r.label).set({ toolTipText: "Optimize this base's layout to maximize " + r.label + " production" });
+                    try { b.setTextColor(r.color); } catch (e) {}
+                    b.addListener("execute", function () { runOptimize(r.key); });
+                    ctrls.add(b);
+                });
+                page.add(ctrls);
+
+                // ---- controls row 2: search settings + sell (Flow; each label+spinner stays grouped) ----
+                var setRow = new qx.ui.container.Composite(new qx.ui.layout.Flow(8, 6));
+                function spinner(label, key, def, min, max, tip) {
+                    var grp = new qx.ui.container.Composite(new qx.ui.layout.HBox(4));
+                    grp.add(new qx.ui.basic.Label(label).set({ alignY: "middle", toolTipText: tip }));
+                    var sp = new qx.ui.form.Spinner(min, MM.settings.get(key, def), max).set({ width: 58, alignY: "middle", toolTipText: tip });
+                    sp.addListener("changeValue", function (e) { MM.settings.set(key, Number(e.getData()) || def); });
+                    grp.add(sp); setRow.add(grp); return sp;
+                }
+                var spRounds = spinner("Rounds:", "BaseTools.OptRounds", 30, 5, 200, "Improvement passes per attempt. Higher = more thorough but slower.");
+                var spNeigh = spinner("Neighbors:", "BaseTools.OptNeighbors", 16, 4, 72, "How many candidate destination tiles to test per building each pass. Higher = more thorough but slower.");
+                var spKicks = spinner("Kicks:", "BaseTools.OptKicks", 3, 0, 20, "Random shake-ups to escape a 'good but not best' layout and explore a different arrangement. More = explores more but slower.");
+                var spSell = spinner("Sell up to:", "BaseTools.OptSellN", 0, 0, 6, "Also recommend up to N least-impactful resource buildings to DEMOLISH (free up tiles) for a bigger gain. 0 = don't sell anything. It only suggests a sale if it actually increases the chosen resource.");
+                page.add(setRow);
+
+                var summary = new qx.ui.basic.Label("").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#cccccc" });
+                page.add(summary);
+
+                // ---- body: single vertical column (map on top, legend + results below) inside one scroll,
+                // so the whole panel wraps and the window can be made narrow. ----
+                var scrollAll = new qx.ui.container.Scroll();
+                var contentCol = new qx.ui.container.Composite(new qx.ui.layout.VBox(8));
+                scrollAll.add(contentCol);
+                page.add(scrollAll, { flex: 1 });
+
+                var mapBox = new qx.ui.container.Composite(new qx.ui.layout.VBox(4));
+                var mapTitle = new qx.ui.basic.Label("<b>Base layout</b>").set({ rich: true, textColor: "#ffffff" });
+                mapBox.add(mapTitle);
+                var grid = new qx.ui.container.Composite(new qx.ui.layout.Grid(2, 2));
+                mapBox.add(grid);
+                contentCol.add(mapBox);
+
+                var rightBox = new qx.ui.container.Composite(new qx.ui.layout.VBox(6));
+                contentCol.add(rightBox);
+
+                // ---- icon + label helpers ----
+                var ABBR = { Harvester: "H", Silo: "S", PowerPlant: "P", Accumulator: "A", Refinery: "R", Construction_Yard: "CY", Defense_HQ: "DHQ", Defense_Facility: "DEF", Support_Art: "SUP" };
+                function abbrOf(b) { if (b.techName === "Harvester") return b.harvRes === "Cry" ? "Hc" : "Ht"; var a = ABBR[b.techName]; return a == null ? b.techName.slice(0, 3) : a; }
+                function nameOf(b) { return (b.techName === "Harvester" ? (b.harvRes === "Cry" ? "Crystal Harvester" : "Tiberium Harvester") : b.techName.replace(/_/g, " ")); }
+                function typeColor(b) { if (b.techName === "Harvester") return b.harvRes === "Cry" ? "#8fc4ff" : "#8fe08f"; return { Silo: "#dddddd", PowerPlant: "#ece28a", Accumulator: "#d8b0ff", Refinery: "#e6c08f" }[b.techName] || "#bbbbbb"; }
+                function terrBg(t) { return t === "TIBERIUM" ? "#173117" : (t === "CRYSTAL" ? "#152340" : (t === "NONE" ? "#2a2a2a" : "#101010")); }
+                function iconUrlOf(snap, b) { var I = snap.icons || {}; if (b.techName === "Harvester") return b.harvRes === "Cry" ? I.HarvCry : I.HarvTib; return I[b.techName] || null; }
+
+                // A single grid cell built with a Canvas layout so we can stack: terrain bg, building icon
+                // (or letter), level (bottom-right), and a move/sell badge (top-left).
+                function makeCell(opts) {
+                    var comp = new qx.ui.container.Composite(new qx.ui.layout.Canvas()).set({ width: TILE, height: TILE });
+                    var bg = opts.bg || "#1a1a1a", border = opts.border || "#000000", bw = opts.borderWidth || 1;
+                    try { comp.setDecorator(new qx.ui.decoration.Decorator().set({ width: bw, color: border, style: "solid", backgroundColor: bg })); } catch (e) {}
+                    if (opts.tip) comp.setToolTipText(opts.tip);
+                    if (opts.iconUrl) {
+                        // The game's detail-view icons are wide (~2:1): building on the LEFT, a grey detail
+                        // panel on the right. Crop to the left square (overflow-hidden wrapper + full-height
+                        // img) so only the clean building icon shows - bigger and centred in the tile.
+                        var W = TILE - 6, off = Math.round((TILE - W) / 2);
+                        var html = "<div style='width:" + W + "px;height:" + W + "px;overflow:hidden;border-radius:3px;" + (opts.dim ? "opacity:0.4;" : "") + "'>" +
+                                   "<img src='" + opts.iconUrl + "' style='height:" + W + "px;display:block;' /></div>";
+                        var ic = new qx.ui.basic.Label(html).set({ rich: true });
+                        comp.add(ic, { left: off, top: off });
+                    } else if (opts.text != null) {
+                        var t = new qx.ui.basic.Label(String(opts.text)).set({ rich: true, textColor: opts.fg || "#cccccc", textAlign: "center", width: TILE - 2 });
+                        comp.add(t, { left: 1, top: Math.round(TILE / 2) - 8 });
+                    }
+                    if (opts.level != null) {
+                        var lv = new qx.ui.basic.Label(String(opts.level)).set({ rich: true, textColor: "#ffffff", font: qx.bom.Font.fromString("bold 9px sans-serif") });
+                        try { lv.setDecorator(new qx.ui.decoration.Decorator().set({ backgroundColor: "rgba(0,0,0,0.6)" })); } catch (e) {}
+                        comp.add(lv, { right: 0, bottom: 0 });
+                    }
+                    if (opts.badge != null) {
+                        var bd = new qx.ui.basic.Label(String(opts.badge)).set({ rich: true, textColor: opts.badgeFg || "#ffffff", textAlign: "center", width: 14, font: qx.bom.Font.fromString("bold 9px sans-serif") });
+                        try { bd.setDecorator(new qx.ui.decoration.Decorator().set({ radius: 7, backgroundColor: opts.badgeBg || "#1e6e1e" })); } catch (e) {}
+                        comp.add(bd, { left: 0, top: 0 });
+                    }
+                    return comp;
+                }
+
+                // Render any layout: pos = {id->{x,y}} of buildings to draw; moves/sells overlay markers.
+                function renderLayout(snap, pos, moves, sells) {
+                    try { var kids = grid.removeAll(); for (var ki = 0; ki < kids.length; ki++) { try { kids[ki].destroy(); } catch (e) {} } } catch (e) {}
+                    if (!snap) return;
+                    moves = moves || []; sells = sells || [];
+                    var occ = []; for (var y = 0; y < OPT.GRID_H; y++) { occ.push([]); for (var x = 0; x < OPT.GRID_W; x++) occ[y].push(null); }
+                    for (var id in pos) { var p = pos[id]; if (p && snap.buildings[id]) occ[p.y][p.x] = snap.buildings[id]; }
+                    var moved = {}, moveNum = {};
+                    for (var mi = 0; mi < moves.length; mi++) { moved[moves[mi].id] = mi + 1; }
+                    var vacated = {};
+                    for (var mj = 0; mj < moves.length; mj++) { var mv = moves[mj]; if (!occ[mv.fromY][mv.fromX]) vacated[mv.fromX + "," + mv.fromY] = mj + 1; }
+                    var soldAt = {};
+                    for (var si = 0; si < sells.length; si++) { soldAt[sells[si].x + "," + sells[si].y] = sells[si]; }
+
+                    for (var ry = 0; ry < OPT.GRID_H; ry++) for (var rx = 0; rx < OPT.GRID_W; rx++) {
+                        var b = occ[ry][rx], terr = snap.terrain[ry][rx], key = rx + "," + ry, cell;
+                        if (b) {
+                            var n = moved[b.id];
+                            cell = makeCell({ iconUrl: iconUrlOf(snap, b), text: iconUrlOf(snap, b) ? null : abbrOf(b), fg: typeColor(b),
+                                level: b.level, bg: n ? "#1e6e1e" : terrBg(terr), border: n ? "#7ee07e" : "#000000", borderWidth: n ? 2 : 1,
+                                badge: n || null, badgeBg: "#1e6e1e", badgeFg: "#eaffea",
+                                tip: nameOf(b) + " L" + b.level + " @ " + rx + ":" + ry + (n ? " (moves here - #" + n + ")" : "") });
+                        } else if (soldAt[key]) {
+                            var sb = soldAt[key];
+                            cell = makeCell({ iconUrl: iconUrlOf(snap, sb), text: iconUrlOf(snap, sb) ? null : abbrOf(sb), dim: true, bg: "#4a1414", border: "#ff8a8a", borderWidth: 2,
+                                badge: "✕", badgeBg: "#8a1f1f", badgeFg: "#ffd6d6", tip: "SELL " + nameOf(sb) + " L" + sb.level + " @ " + rx + ":" + ry });
+                        } else if (vacated[key]) {
+                            cell = makeCell({ text: "&rarr;", fg: "#ff8a8a", bg: "#3a1414", border: "#7a2a2a", badge: vacated[key], badgeBg: "#7a2a2a", badgeFg: "#ffd6d6", tip: "tile vacated by move #" + vacated[key] });
+                        } else {
+                            cell = makeCell({ text: terr === "TIBERIUM" ? "t" : (terr === "CRYSTAL" ? "c" : ""), fg: "#5a5a5a", bg: terrBg(terr), tip: terr.toLowerCase() + " " + rx + ":" + ry });
+                        }
+                        grid.add(cell, { row: ry, column: rx });
+                    }
+                }
+
+                // 8-way direction arrow for a move delta.
+                function dirArrow(dx, dy) { var ax = dx < 0 ? -1 : (dx > 0 ? 1 : 0), ay = dy < 0 ? -1 : (dy > 0 ? 1 : 0); return ({ "0,-1": "↑", "0,1": "↓", "-1,0": "←", "1,0": "→", "-1,-1": "↖", "1,-1": "↗", "-1,1": "↙", "1,1": "↘", "0,0": "·" })[ax + "," + ay] || "·"; }
+
+                // Legend + plain-English help (built once, static).
+                function buildLegend() {
+                    // Dark panel so the help text doesn't blend into the light-grey window background.
+                    var panel = new qx.ui.container.Composite(new qx.ui.layout.VBox(4)).set({ padding: 8 });
+                    try { panel.setDecorator(new qx.ui.decoration.Decorator().set({ radius: 5, backgroundColor: "#1b1b1b", width: 1, color: "#3a3a3a", style: "solid" })); }
+                    catch (e) { try { panel.setBackgroundColor("#1b1b1b"); } catch (e2) {} }
+                    panel.add(new qx.ui.basic.Label("<b>Legend</b>").set({ rich: true, textColor: "#ffffff" }));
+                    panel.add(new qx.ui.basic.Label(
+                        "Tiles show each building's icon + its <b>level</b> (corner).<br>" +
+                        "<span style='color:#7ee07e'>&#9632;</span> green tile / #badge = building <b>moves here</b> (matching <span style='color:#ff8a8a'>&rarr;#</span> red tile = where it left).<br>" +
+                        "<span style='color:#ff8a8a'>&#10006;</span> red tile = recommended <b>sell</b> (demolish).<br>" +
+                        "Field tiles tinted: <span style='color:#7ed07e'>tiberium</span> / <span style='color:#8fc0ff'>crystal</span>.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e6e6e6" }));
+                    panel.add(new qx.ui.basic.Label(
+                        "<b>Controls</b><br>" +
+                        "<b>Rounds</b> &ndash; improvement passes per attempt (higher = more thorough, slower).<br>" +
+                        "<b>Neighbors</b> &ndash; candidate destination tiles tested per building each pass.<br>" +
+                        "<b>Kicks</b> &ndash; random shake-ups to escape a 'good-but-not-best' layout.<br>" +
+                        "<b>Sell up to N</b> &ndash; also suggest demolishing up to N low-impact buildings to free tiles for a bigger gain (only if it helps).").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#cfcfcf" }));
+                    rightBox.add(panel);
+                    rightBox.add(new qx.ui.core.Spacer(null, 6));
+                }
+
+                var resultBox = null; // sub-container for per-run move/sell list (so legend stays put)
+                function ensureResultBox() {
+                    if (resultBox) { try { var kids = resultBox.removeAll(); for (var ki = 0; ki < kids.length; ki++) { try { kids[ki].destroy(); } catch (e) {} } } catch (e) {} return resultBox; }
+                    resultBox = new qx.ui.container.Composite(new qx.ui.layout.VBox(2)).set({ padding: 8 });
+                    try { resultBox.setDecorator(new qx.ui.decoration.Decorator().set({ radius: 5, backgroundColor: "#1b1b1b", width: 1, color: "#3a3a3a", style: "solid" })); }
+                    catch (e) { try { resultBox.setBackgroundColor("#1b1b1b"); } catch (e2) {} }
+                    rightBox.add(resultBox);
+                    return resultBox;
+                }
+
+                function renderResultList(res) {
+                    var box = ensureResultBox();
+                    if (!res || !res.ok) { box.add(new qx.ui.basic.Label(res && res.reason ? ("Could not optimize: " + res.reason) : "").set({ textColor: "#ff8a8a" })); return; }
+                    if (res.sells && res.sells.length) {
+                        box.add(new qx.ui.basic.Label("<b style='color:#ff8a8a'>Sell (" + res.sells.length + ")</b>").set({ rich: true }));
+                        for (var s = 0; s < res.sells.length; s++) { var sl = res.sells[s]; box.add(new qx.ui.basic.Label("✕ <b>" + nameOf(sl) + "</b> L" + sl.level + " (at " + sl.x + ":" + sl.y + ")").set({ rich: true, textColor: "#ffc9c9" })); }
+                        box.add(new qx.ui.core.Spacer(null, 4));
+                    }
+                    box.add(new qx.ui.basic.Label("<b>Moves (" + res.moves.length + ")</b>").set({ rich: true, textColor: "#ffffff" }));
+                    if (!res.moves.length) { box.add(new qx.ui.basic.Label("No moves improve " + OPT.RES_CFG[res.resKey].label + " on this base.").set({ rich: true, textColor: "#7ee07e" })); }
+                    for (var i = 0; i < res.moves.length; i++) {
+                        var m = res.moves[i], dist = Math.max(Math.abs(m.toX - m.fromX), Math.abs(m.toY - m.fromY));
+                        box.add(new qx.ui.basic.Label("<b>" + (i + 1) + "</b>. " + nameOf(m) + " L" + m.level + "  <b>" + dirArrow(m.toX - m.fromX, m.toY - m.fromY) + "</b> " + dist + (dist === 1 ? " tile" : " tiles")).set({ rich: true, textColor: "#e6e6e6", toolTipText: m.fromX + ":" + m.fromY + " -> " + m.toX + ":" + m.toY }));
+                    }
+                    box.add(new qx.ui.core.Spacer(null, 6));
+                    box.add(new qx.ui.basic.Label("Numbers match the grid. Apply by hand in the game's move-building mode (auto-apply is a later update).").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#aaaaaa" }));
+                }
+
+                // Draw the base as-is (no moves) so the grid is populated the moment you open the tab / switch base.
+                function renderCurrent() {
+                    try {
+                        var city = selectedCity();
+                        if (!city) { mapTitle.setValue("<b>Base layout</b>"); return; }
+                        var snap = OPT.snapshot(city, "Tib");
+                        if (!snap || !snap.ok) { return; }
+                        var pos = {}; for (var i = 0; i < snap.order.length; i++) { var b = snap.buildings[snap.order[i]]; pos[b.id] = { x: b.x, y: b.y }; }
+                        mapTitle.setValue("<b>Current layout</b> - " + (city.get_Name ? city.get_Name() : ""));
+                        renderLayout(snap, pos, [], []);
+                    } catch (e) { werr("OPT renderCurrent failed:", e); }
+                }
+
+                var busy = false;
+                function runOptimize(resKey) {
+                    if (busy) return;
+                    var city = selectedCity();
+                    if (!city) { summary.setValue("<span style='color:#ff8a8a'>Could not find that base. Open it in-game and use 'Current base'.</span>"); return; }
+                    busy = true;
+                    var sellN = spSell.getValue();
+                    summary.setValue("Optimizing " + OPT.RES_CFG[resKey].label + (sellN ? " (considering up to " + sellN + " sell" + (sellN > 1 ? "s" : "") + ")" : "") + "...");
+                    MM.settings.set("BaseTools.OptResource", resKey);
+                    window.setTimeout(function () {
+                        var res, opts = { rounds: spRounds.getValue(), maxNeighbors: spNeigh.getValue(), kicks: spKicks.getValue() };
+                        try { res = sellN > 0 ? OPT.optimizeWithSell(city, resKey, opts, sellN) : OPT.optimize(city, resKey, opts); }
+                        catch (e) { werr("OPT optimize threw:", e); res = { ok: false, reason: "internal error (see console)" }; }
+                        try {
+                            if (res && res.ok) {
+                                var cn = MM.num.compact(Math.round(res.current), 1), pn = MM.num.compact(Math.round(res.projected), 1);
+                                var sign = res.gainPct >= 0 ? "+" : "";
+                                var changed = res.moves.length || (res.sells && res.sells.length);
+                                var col = changed ? "#ffe14d" : "#7ee07e";
+                                summary.setValue("<b style='color:" + col + "'>" + OPT.RES_CFG[resKey].label + "</b> (continuous /h): <b>" + cn + "</b> &rarr; <b>" + pn + "</b> (<b>" + sign + res.gainPct.toFixed(1) + "%</b>) via <b>" + res.moves.length + "</b> move(s)" + (res.sells && res.sells.length ? " + <b>" + res.sells.length + "</b> sell(s)" : "") + ". Figures are continuous production (packages aren't layout-dependent)." + (res.snapshot && res.snapshot.calibWarn ? " <span style='color:#ffb74d'>(" + res.snapshot.calibWarn + " link(s) uncalibrated)</span>" : ""));
+                                mapTitle.setValue("<b>Proposed layout</b>");
+                                renderLayout(res.snapshot, res.bestPos, res.moves, res.sells);
+                            } else {
+                                summary.setValue("<span style='color:#ff8a8a'>Could not optimize: " + ((res && res.reason) || "unknown") + "</span>");
+                            }
+                            renderResultList(res);
+                        } catch (e2) { werr("OPT render failed:", e2); }
+                        busy = false;
+                    }, 30);
+                }
+
+                buildLegend();
+                var firstAppear = true;
+                page.addListener("appear", function () { rebuildBases(); if (firstAppear) { firstAppear = false; renderCurrent(); } });
+                return page;
+            }
+
+            var pageOpt = buildOptimizerTab();
             tabView.add(pageOpt);
 
             // ---- persist + restore the last-viewed tab (per player+world) ----
