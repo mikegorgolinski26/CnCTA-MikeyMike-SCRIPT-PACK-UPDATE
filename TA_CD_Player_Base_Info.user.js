@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Draws a live on-map overlay of small bubbles showing Offense / Defense level (stacked) over every visible player base in region view (own / alliance / enemy). Off/def for other players' bases is surveyed in the background; a base's bubble only appears once its values are known. Bubbles track the map as you pan and zoom. A HUD options panel toggles which base types show.
-// @version      1.2.0
+// @version      1.2.1
 // @author       XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -140,8 +140,27 @@
 			if (old) old.remove();
 			layer = document.createElement("div");
 			layer.id = "mm_pbi_layer";
-			layer.style.cssText = "position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483000;pointer-events:none;overflow:hidden";
-			(document.body || document.documentElement).appendChild(layer);
+			// Slot the overlay just above the map but UNDER all the game's UI chrome. The map canvas is
+			// the FIRST child of the game root; every HUD/menu panel is a LATER sibling, and they're all
+			// at z-index:10 - stacked purely by DOM order. So we insert our layer right after the canvas
+			// container WITH z-index:10 (matching the siblings): DOM order then paints it above the map and
+			// below every peripheral panel/menu. (z:auto fails - it loses to the canvas container's z:10.)
+			// Falls back to a top-level fixed layer if the game root isn't reachable.
+			var placed = false;
+			try {
+				var app = qx.core.Init.getApplication();
+				var ba = app && app.getBackgroundArea && app.getBackgroundArea();
+				var baEl = ba && ba.getContentElement && ba.getContentElement().getDomElement();
+				if (baEl && baEl.parentNode) {
+					layer.style.cssText = "position:absolute;left:0;top:0;right:0;bottom:0;z-index:10;pointer-events:none;overflow:hidden";
+					baEl.parentNode.insertBefore(layer, baEl.nextSibling); // right after the map canvas
+					placed = true;
+				}
+			} catch (e) {}
+			if (!placed) {
+				layer.style.cssText = "position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483000;pointer-events:none;overflow:hidden";
+				(document.body || document.documentElement).appendChild(layer);
+			}
 		}
 		function makeBubble() {
 			var el = document.createElement("div");
