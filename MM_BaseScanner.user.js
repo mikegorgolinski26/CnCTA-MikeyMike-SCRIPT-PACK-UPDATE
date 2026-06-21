@@ -5,8 +5,8 @@
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @version         1.0.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
-// @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_BaseScanner.user.js
-// @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_BaseScanner.user.js
+// @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
+// @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // ==/UserScript==
 
 /*

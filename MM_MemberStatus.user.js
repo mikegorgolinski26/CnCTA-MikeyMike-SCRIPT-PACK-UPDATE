@@ -5,8 +5,8 @@
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @version         1.0.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
-// @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_AlliancesMemberOnline.user.js
-// @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_AlliancesMemberOnline.user.js
+// @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
+// @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
 // ==/UserScript==
 
 /*

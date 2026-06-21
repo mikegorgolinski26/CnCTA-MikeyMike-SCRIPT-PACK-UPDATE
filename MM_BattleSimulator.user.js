@@ -9,8 +9,8 @@
 // @namespace       https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @icon            http://eistee82.github.io/ta_simv2/icon.png
-// @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_Tiberium_Alliances_Battle_Simulator_V2.user.js
-// @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_Tiberium_Alliances_Battle_Simulator_V2.user.js
+// @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BattleSimulator.user.js
+// @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BattleSimulator.user.js
 // ==/UserScript==
 
 /* 
