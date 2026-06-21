@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.0
+// @version         1.2.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_BaseTools.user.js
@@ -88,6 +88,10 @@
                 var ModeCity = ClientLib.Vis.Mode.City;
                 var ModeArmy = ClientLib.Vis.Mode.ArmySetup;
                 eachOwnCity(function (c) {
+                    // Killed/ghost bases still report residual collectable packages and repairable
+                    // entities, but you can't actually collect or repair them - so skip them entirely.
+                    // Otherwise the collect/repair notification buttons would never clear.
+                    try { if (c.get_IsGhostMode && c.get_IsGhostMode()) return; } catch (e) {}
                     try {
                         var d = c.get_CityBuildingsData && c.get_CityBuildingsData();
                         if (d && d.get_HasCollectableBuildings && d.get_HasCollectableBuildings()) out.collect++;
@@ -95,7 +99,6 @@
                     try {
                         var rd = c.get_CityRepairData && c.get_CityRepairData();
                         if (!rd) return;
-                        if (c.get_IsGhostMode && c.get_IsGhostMode()) return;
                         if (rd.CanRepairAll && rd.CanRepairAll(ModeCity)) out.repBld++;
                         if (rd.CanRepairAll && rd.CanRepairAll(ModeArmy)) out.repUnits++;
                     } catch (e) {}
@@ -108,6 +111,7 @@
             var n = 0;
             eachOwnCity(function (c) {
                 try {
+                    if (c.get_IsGhostMode && c.get_IsGhostMode()) return; // killed base: nothing collectable
                     var d = c.get_CityBuildingsData && c.get_CityBuildingsData();
                     if (d && d.get_HasCollectableBuildings && d.get_HasCollectableBuildings()) {
                         c.CollectAllResources();

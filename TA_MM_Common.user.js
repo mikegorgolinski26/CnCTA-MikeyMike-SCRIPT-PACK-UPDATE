@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.3
+// @version         1.0.4
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_Common.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_Common.user.js
@@ -69,7 +69,7 @@
         }
 
         var NS = {
-            version: "1.0.3"
+            version: "1.0.4"
         };
 
         // -------------------------------------------------------------------
@@ -470,6 +470,79 @@
                 } catch (e) { NS.log.err("base.ownCities failed:", e); }
                 return out;
             },
+            // Map of the player's own base ids -> own city object (already loaded). Cheap own-check.
+            ownIdMap: function () {
+                var m = {};
+                try {
+                    var arr = ClientLib.Data.MainData.GetInstance().get_Cities().get_AllCities();
+                    var d = arr && arr.d;
+                    for (var k in d) { var c = d[k]; if (c && c.get_Id) m[c.get_Id()] = c; }
+                } catch (e) { NS.log.err("base.ownIdMap failed:", e); }
+                return m;
+            },
+            // Is a base whose owner is in alliance theirAllianceId an ally of ours (same alliance, or
+            // NAP/ally by diplomacy)? Faithful port of the AIO / Base-Scanner FG alliance re-check (the
+            // authoritative relationship pass). myAllianceId optional (defaults to our alliance).
+            isAlly: function (theirAllianceId, myAllianceId) {
+                try {
+                    if (myAllianceId == null) {
+                        try { myAllianceId = ClientLib.Data.MainData.GetInstance().get_Alliance().get_Id(); } catch (e) { myAllianceId = 0; }
+                    }
+                    if (!theirAllianceId || !myAllianceId) return false;
+                    if (theirAllianceId === myAllianceId) return true;
+                    var rel = ClientLib.Data.MainData.GetInstance().get_Alliance().get_Relationships();
+                    if (rel) {
+                        for (var k in rel) {
+                            var r = rel[k];
+                            if (r && r.OtherAllianceId === theirAllianceId && (r.Relationship === 1 || r.Relationship === 2)) return true;
+                        }
+                    }
+                } catch (e) {}
+                return false;
+            },
+            // Classify a loaded city as "own" | "alliance" | "neutral" | "enemy":
+            //   own      - one of your bases
+            //   alliance - same alliance as you
+            //   neutral  - a DIFFERENT alliance you're at peace/NAP/ally with (diplomacy)
+            //   enemy    - everyone else (attackable, incl. unaffiliated players)
+            // ncity = the detail city (get_OwnerAllianceId valid once loaded). ownMap optional.
+            relationship: function (id, ncity, ownMap) {
+                try {
+                    if (!ownMap) ownMap = NS.base.ownIdMap();
+                    if (ownMap[id]) return "own";
+                    var their = (ncity && ncity.get_OwnerAllianceId) ? ncity.get_OwnerAllianceId() : 0;
+                    var mine = 0; try { mine = ClientLib.Data.MainData.GetInstance().get_Alliance().get_Id(); } catch (e) {}
+                    if (their && mine && their === mine) return "alliance";
+                    if (NS.base.isAlly(their)) return "neutral"; // different alliance, but NAP/ally by diplomacy
+                    return "enemy";
+                } catch (e) { return "enemy"; }
+            },
+            // Async-load a base's server detail by id and call cb(ncity) once it lands (or cb(null) on
+            // timeout). GetCity returns a version:-1 stub until you TRIGGER the load with
+            // set_CurrentCityId(id) (one shared "current city" pointer), so by default this triggers it
+            // then polls get_Version()>0. Because there is only one current-city pointer, callers MUST
+            // serialize fetchDetail (one in flight at a time) - concurrent calls thrash each other - and
+            // should restore the prior current-city id when their batch drains (see base.currentCityId /
+            // setCurrentCityId). opts: { trigger (default true), tries (20), intervalMs (250) }.
+            fetchDetail: function (id, cb, opts) {
+                opts = opts || {};
+                var tries = opts.tries || 20, interval = opts.intervalMs || 250, n = 0;
+                if (opts.trigger !== false) {
+                    try { ClientLib.Data.MainData.GetInstance().get_Cities().set_CurrentCityId(id); } catch (e) {}
+                }
+                function poll() {
+                    var ncity = null;
+                    try { ncity = ClientLib.Data.MainData.GetInstance().get_Cities().GetCity(id); } catch (e) {}
+                    if (ncity && ncity.get_Version() > 0) { try { cb(ncity); } catch (e) { NS.log.err("fetchDetail cb:", e); } return; }
+                    if (++n > tries) { try { cb(null); } catch (e) {} return; }
+                    window.setTimeout(poll, interval);
+                }
+                poll();
+            },
+            // The game's current-city pointer (the base loaded as "current"; -1 in region view). Used to
+            // save/restore around a fetchDetail survey so it doesn't leave someone else's base "current".
+            currentCityId: function () { try { return ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentCityId(); } catch (e) { return -1; } },
+            setCurrentCityId: function (id) { try { ClientLib.Data.MainData.GetInstance().get_Cities().set_CurrentCityId(id); } catch (e) {} },
             // Army Overview data: repair times per unit group, repair charges, possible/max attacks
             // (PossibleAttacks gets a trailing "*" when offense isn't 100% healthy), and base/offense/
             // defense level + head-count + health. From MaelstromTools.RepairTime.updateCache.
@@ -580,6 +653,145 @@
                 return out;
             }
         };
+
+        // map: region-map world<->screen projection, visible-base enumeration, and pan/zoom/mode
+        // tracking. Live-sniffed (gridWidth 128 / gridHeight 96 at zoom 1; ScreenPosFromWorldPos +
+        // its inverse; PositionChange/ZoomFactorChange/ModeChange net events). Lets any script anchor
+        // an on-map overlay to bases without re-deriving the obfuscated projection. First consumer:
+        // MM - Player Base Info.
+        NS.map = (function () {
+            function vm() { return ClientLib.Vis.VisMain.GetInstance(); }
+            function rg() { return vm().get_Region(); }
+            function gw() { try { return rg().get_GridWidth() || 128; } catch (e) { return 128; } }
+            function gh() { try { return rg().get_GridHeight() || 96; } catch (e) { return 96; } }
+            var api = {
+                // projection usable (region scene + projector present)?
+                ready: function () {
+                    try { return typeof vm().ScreenPosFromWorldPosX === "function" && !!rg() && typeof rg().GetObjectFromPosition === "function"; }
+                    catch (e) { return false; }
+                },
+                // are we in the region/overworld view (vs a base)?
+                inRegionView: function () {
+                    try {
+                        var m = vm().get_Mode();
+                        var R = (ClientLib.Vis.EViewMode && ClientLib.Vis.EViewMode.Region);
+                        return (R != null) ? (m === R) : (m === 2);
+                    } catch (e) { return false; }
+                },
+                grid: function () { return { w: gw(), h: gh() }; },
+                // grid coords -> screen px {x,y}
+                worldToScreen: function (gx, gy) {
+                    var v = vm();
+                    return { x: v.ScreenPosFromWorldPosX(gx * gw()), y: v.ScreenPosFromWorldPosY(gy * gh()) };
+                },
+                // screen px -> fractional grid coords {x,y}
+                screenToWorld: function (sx, sy) {
+                    var v = vm();
+                    return { x: v.WorldPosFromScreenPosX(sx) / gw(), y: v.WorldPosFromScreenPosY(sy) / gh() };
+                },
+                // visible grid rect (padded 1 tile). Defaults to the game canvas size.
+                visibleBounds: function (w, h) {
+                    var v = vm();
+                    if (w == null || h == null) {
+                        var cv = document.querySelector("canvas");
+                        var r = cv ? cv.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
+                        w = r.width; h = r.height;
+                    }
+                    return {
+                        gx0: Math.floor(v.WorldPosFromScreenPosX(0) / gw()) - 1,
+                        gx1: Math.ceil(v.WorldPosFromScreenPosX(w) / gw()) + 1,
+                        gy0: Math.floor(v.WorldPosFromScreenPosY(0) / gh()) - 1,
+                        gy1: Math.ceil(v.WorldPosFromScreenPosY(h) / gh()) + 1
+                    };
+                },
+                // enumerate bases currently in view. opts: { types ([1]=player; 2=NPC base; 3=camp),
+                // max (120) }. Returns [{ id, x, y, type, baseLevel }].
+                visibleBases: function (opts) {
+                    opts = opts || {};
+                    var types = opts.types || [1];
+                    var max = opts.max || 120;
+                    var out = [];
+                    try {
+                        var w = ClientLib.Data.MainData.GetInstance().get_World();
+                        var b = api.visibleBounds();
+                        var seen = {};
+                        for (var y = b.gy0; y <= b.gy1; y++) {
+                            for (var x = b.gx0; x <= b.gx1; x++) {
+                                var o;
+                                try { o = w.GetObjectFromPosition(x, y); } catch (e) { o = null; }
+                                if (!o || types.indexOf(o.Type) === -1 || typeof o.getID !== "function") continue;
+                                var id = o.getID();
+                                if (seen[id]) continue;
+                                seen[id] = true;
+                                out.push({ id: id, x: x, y: y, type: o.Type, baseLevel: (typeof o.get_BaseLevel === "function") ? o.get_BaseLevel() : 0 });
+                                if (out.length >= max) return out;
+                            }
+                        }
+                    } catch (e) { NS.log.err("map.visibleBases failed:", e); }
+                    return out;
+                },
+                // attach pan/zoom/mode handlers. opts: { onMove, onZoom, onMode }. Returns a detach fn.
+                // CRITICAL: these events fire DURING the game's own render/layout (e.g. _onMapAreaResize
+                // -> renderLayout). Running consumer code synchronously inside that dispatch - or letting
+                // it throw - corrupts the game's render (black map). So every handler is (a) given a real
+                // context object (the net layer mishandles a null context) and (b) wrapped to defer to a
+                // fresh task via setTimeout(0) AND swallow errors, so it can never re-enter or throw into
+                // the game's dispatch. The ~0ms defer is invisible for pan tracking.
+                track: function (opts) {
+                    opts = opts || {};
+                    var r = rg(), v = vm(), bound = [];
+                    var ctx = { __mmMapTrack: true };
+                    function wrap(fn) {
+                        return function () {
+                            window.setTimeout(function () { try { fn(); } catch (e) { NS.log.err("map.track handler:", e); } }, 0);
+                        };
+                    }
+                    function on(obj, name, evt, fn) {
+                        if (!fn || !evt) return;
+                        var w = wrap(fn);
+                        try { NS.net.attach(obj, name, evt, ctx, w); bound.push([obj, name, evt, w]); }
+                        catch (e) { NS.log.err("map.track attach " + name + ":", e); }
+                    }
+                    on(r, "PositionChange", ClientLib.Vis.PositionChange, opts.onMove);
+                    on(r, "ZoomFactorChange", ClientLib.Vis.ZoomFactorChange, opts.onZoom);
+                    on(v, "ModeChange", ClientLib.Vis.ModeChange, opts.onMode);
+                    return function detach() {
+                        for (var i = 0; i < bound.length; i++) {
+                            try { NS.net.detach(bound[i][0], bound[i][1], bound[i][2], ctx, bound[i][3]); } catch (e) {}
+                        }
+                        bound = [];
+                    };
+                },
+                // SAFE pan/zoom/mode watcher: POLLS the camera (position/zoom/mode) on an interval
+                // instead of hooking the game's net events. It never touches the game's event dispatch,
+                // so it cannot interfere with the game's render/layout (unlike track(), which hooks events
+                // that fire mid-render - kept for lightweight DOM-only consumers, but prefer watch() for
+                // anything that does real work). opts: { onChange(state), interval (default 200ms) } where
+                // state = { posX, posY, zoom, mode, region:bool }. Fires onChange once immediately, then
+                // whenever any of those change. Returns a stop() fn.
+                watch: function (opts) {
+                    opts = opts || {};
+                    var interval = opts.interval || 200, cb = opts.onChange, last = null, timer = null;
+                    function snap() {
+                        try { var v = vm(); return { x: v.get_PositionX(), y: v.get_PositionY(), z: v.get_ZoomFactor(), m: v.get_Mode() }; }
+                        catch (e) { return null; }
+                    }
+                    function tick() {
+                        try {
+                            var s = snap();
+                            if (s && (!last || s.x !== last.x || s.y !== last.y || s.z !== last.z || s.m !== last.m)) {
+                                last = s;
+                                if (cb) { try { cb({ posX: s.x, posY: s.y, zoom: s.z, mode: s.m, region: api.inRegionView() }); } catch (e) { NS.log.err("map.watch cb:", e); } }
+                            }
+                        } catch (e) {}
+                    }
+                    timer = window.setInterval(tick, interval);
+                    tick();
+                    return function stop() { if (timer) { window.clearInterval(timer); timer = null; } };
+                }
+            };
+            return api;
+        })();
 
         // ui: consistent, movable, position-persistent MMCommon window factory.
         NS.ui = {
