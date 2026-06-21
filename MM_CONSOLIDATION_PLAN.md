@@ -150,9 +150,14 @@ Priority order (high → low), with the new MM name and the one-line reason:
 - **TA_Flunik_Tools_reloaded** → salvage per-resource **POI scoring tables** → MM - Base Scanner / POI Analyser.
 
 **Info overlays**
-- **TA_Info_Sticker** → salvage `interpolateColor`/`formatNumberColor` ratio→color helper → `num`/`ui`;
-  6h-vs-continuous production-with-POI math → Base Tools production view. (MCV/repair/production all already
-  in Next MCV + Base Tools + `repair`.)
+- ~~**TA_Info_Sticker**~~ → **RETIRED 2026-06-21.** Its keeper feature (the MCV docked into the game's base
+  bar with the menu look-and-feel) was rebuilt as the `MMCommon.menubar` module + the MM - Next MCV "Dock in
+  game menu bar" option + the MM buttons "menubar" dock mode (build 1.0.49–1.0.51) — Mike confirmed it looks
+  good. Its other stickers (resources / 6h-vs-continuous production / repair times) were intentionally dropped
+  (Next MCV + Base Tools + Base Scanner already cover them). NOT salvaged into MMCommon (per Mike's "don't ship
+  unused code" rule): the smooth `interpolateColor`/`formatNumberColor` ratio→colour gradient helper is in the
+  retired file's git history if a future smooth gradient is wanted — we currently use the 3-step
+  `barColor` (red/yellow/green) in Next MCV / Loot Summary.
 - **TA_Wavy** → salvage (1) move-base-tool **per-cell cache** overlay → MM - Attack Range; (2) auto-mark
   forgotten-defense reports read (opt-in toggle); (3) wave-count model → MMCommon. De-obf already in Wrapper.
 - **TA_CityMoveInfoExtend** → salvage only the **cooldown-expiry wall-clock** annotation → MM - Attack
@@ -294,8 +299,9 @@ MM-IFY: Tunnel_Info, CD_PvP_Alert_Status, Real_POI_Bonus, POIs_Analyser, POI_Exp
 Warchief_Upgrade_Base_Defense_Army, Warchief_Sector_HUD, Zoom, ADDON_City_Online_Status_Colorer_SC,
 Repair_Time_Of_Death.
 RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6): Report_Stats.
+RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 entry on Info_Sticker): Info_Sticker.
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
-Auto_Repair, Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Info_Sticker, Wavy,
+Auto_Repair, Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
 CityMoveInfoExtend, Map, CD_PvP_Quick_Map, The_Green_Cross_Tools, Report_Summary, Formation_Saver,
 PvP_PvE_Ranking_…, PvP_PvE_Player_Info_Mod, View_Player_Base, CnCTAOpt_Link_Button,
 New_Resource_Trade_Window, Transfer_All_resources.
