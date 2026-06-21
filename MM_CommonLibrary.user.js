@@ -1227,7 +1227,8 @@
                                 if (slots[i].id === opts.id) { feedMenu(opts); return slots[i].btn; }
                             }
                         }
-                        var btn = new qx.ui.form.Button(opts.label || "", opts.icon || null).set({
+                        // text-only: not every tool ships an icon, so show none for a consistent bar
+                        var btn = new qx.ui.form.Button(opts.label || "").set({
                             toolTipText: opts.tooltip || opts.label || "",
                             alignY: "middle",
                             appearance: "button-text-small"
