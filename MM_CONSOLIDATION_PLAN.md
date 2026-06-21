@@ -28,12 +28,15 @@ scripts, fan-out of 7 read-only agents). Supersedes the per-script verdicts in `
 ## 1. The three biggest cross-cutting wins (do these first — they unlock multiple retires)
 
 1. **Bulk public-data fetch path** — `CommunicationManager.SendSimpleCommand("GetPublicAllianceInfo"/"GetPublicPlayerInfo"/"GetPublicPlayerInfoByName"/"RankingGetData", …)` + `phe.cnc.Util.createEventDelegate`.
-   Found independently in **TA_CD_PvP_Quick_Map**, **TA_PvP_PvE_Ranking…**, **TA_POIs_Analyser**,
-   **TA_Real_POI_Bonus**. This is the **off/def batch-fetch** Mike remembered ([[offdef-batch-fetch-idea]])
-   — it returns whole alliances'/players' base lists `{i,n,x,y}` in one round-trip, **without** the
-   `set_CurrentCityId` survey that just caused the Player Base Info render crash. → New
-   `MMCommon.base.fetchAllianceInfo / fetchPublicPlayerBases / fetchPlayerByName / rankingAlliances`.
-   **Highest strategic value: directly fixes the survey-speed problem at its root.**
+   Found in **TA_CD_PvP_Quick_Map**, **TA_PvP_PvE_Ranking…**, **TA_POIs_Analyser**, **TA_Real_POI_Bonus**.
+   Returns whole alliances'/players' base lists in one round-trip. **LIVE-SNIFFED 2026-06-21 — the payload is
+   enumeration only:** base entry = `{i, n, p, x, y}` (id/name/**points**/coords), member entry =
+   `{c, f, i, n, p, r}` (cityCount/faction/id/name/points/rank). **It does NOT carry per-base offense/defense**
+   — so it does NOT replace or speed up the Player Base Info off/def survey (that crash is already handled by
+   the 1.2.3 pause-out-of-region fix). Still useful as `MMCommon.base.fetchPublicPlayerBases /
+   fetchPlayerByName / fetchAllianceInfo` for **instant full base enumeration incl. off-screen bases** + as the
+   data path for the **PvP/PvE Ranking** and **alliance-overview/POI** MM-IFY keepers. **Build it when those
+   tools come up — NOT a survey fix.** Full field decode in [[offdef-batch-fetch-idea]].
 2. **Implement `MMCommon.cnctaopt.encode`** (currently a STUB) from **TA_CnCTAOpt_Link_Button** (the LIVE
    cnctaopt.com `ver=3~…~` encoder). Unlocks retiring the link-button cluster and gives every MM script a
    "share this base" capability.
