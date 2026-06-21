@@ -3,7 +3,7 @@
 // @description     A small always-on counter showing how close you are to your next MCV (the Research_BaseFound level that lets you found another base): time until you can afford the credits, and your research-point progress. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK (original MaelstromTools MCV popup)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.1
+// @version         1.2.2
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
@@ -185,10 +185,11 @@
                     // RP bar: fill = how close RP are to the cost; label = the percent.
                     var rLabel = (d.rpPct >= 100) ? "RP  OK!" : "RP  " + d.rpPct.toFixed(1) + "%";
                     rpBar.setValue(barHtml(d.rpPct, rLabel));
-                    // detail line: current / needed for each
+                    // detail line: current / needed for each. The current-amount colour tracks the same
+                    // red->yellow->green progress as the bars above (the "/ needed" stays muted grey).
                     detailLine.setValue(
-                        "<span style='color:#ff8f00;'>$ " + C(d.curCredits) + "</span> / " + C(d.creditsNeeded) +
-                        "  ·  <span style='color:#ffe14d;'>RP " + C(d.curRP) + "</span> / " + C(d.rpNeeded)
+                        "<span style='color:" + barColor(d.creditPct) + ";'>$ " + C(d.curCredits) + "</span><span style='color:#8a96a0;'> / " + C(d.creditsNeeded) + "</span>" +
+                        "  ·  <span style='color:" + barColor(d.rpPct) + ";'>RP " + C(d.curRP) + "</span><span style='color:#8a96a0;'> / " + C(d.rpNeeded) + "</span>"
                     );
                 } catch (e) { werr("refresh failed:", e); }
             }
