@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Draws a live on-map overlay of small bubbles showing Offense / Defense level (stacked) over every visible player base in region view (own / alliance / enemy). Off/def for other players' bases is surveyed in the background; a base's bubble only appears once its values are known. Bubbles track the map as you pan and zoom. A HUD options panel toggles which base types show.
-// @version      1.2.3
+// @version      1.2.4
 // @author       XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -233,10 +233,52 @@
 			b.el.style.left = Math.round(p.x) + "px";
 			b.el.style.top = (Math.round(p.y) - 6) + "px";
 		}
+		// A base's info popup / right-click menu shares the bubbles' z-index (everything in this view,
+		// incl. the map canvas, is z-index:10), so a bubble overlapping a panel paints ON TOP of it and
+		// we can't fix it by stacking (lowering the layer drops it behind the terrain). Instead we hide
+		// just the bubbles whose box overlaps an open region popup/menu, so the panel reads cleanly while
+		// every other bubble stays put. Cheap in the common case: when no popup is open we skip the
+		// (layout-forcing) getBoundingClientRect entirely.
+		var POPUP_WIDGETS = ["RegionCityInfo", "RegionCityStatusInfo", "RegionGhostStatusInfo",
+			"RegionNPCBaseInfo", "RegionNPCCampInfo", "RegionPointOfInterestStatusInfo",
+			"RegionCityMoveInfo", "RegionCityMenu"];
+		function popupRects() {
+			var rects = [];
+			try {
+				var R = webfrontend.gui.region;
+				for (var i = 0; i < POPUP_WIDGETS.length; i++) {
+					try {
+						var W = R[POPUP_WIDGETS[i]];
+						if (!W || typeof W.getInstance !== "function") continue;
+						var inst = W.getInstance();
+						if (!inst || typeof inst.isVisible !== "function" || !inst.isVisible()) continue;
+						var el = inst.getContentElement && inst.getContentElement().getDomElement();
+						if (!el) continue;
+						var r = el.getBoundingClientRect();
+						if (r.width > 0 && r.height > 0) rects.push(r);
+					} catch (e) {}
+				}
+			} catch (e) {}
+			return rects;
+		}
+		function rectsIntersect(a, b) { return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom); }
+		function updatePopupVisibility() {
+			if (!layer || layer.style.display === "none") return;
+			var rects = popupRects();
+			for (var id in bubbles) {
+				var b = bubbles[id];
+				if (!b || !b.el) continue;
+				if (!rects.length) { b.el.style.visibility = "visible"; continue; }
+				var hit = false, br = b.el.getBoundingClientRect();
+				for (var i = 0; i < rects.length; i++) { if (rectsIntersect(br, rects[i])) { hit = true; break; } }
+				b.el.style.visibility = hit ? "hidden" : "visible";
+			}
+		}
 		function reprojectAll() {
 			if (!MM.map.inRegionView()) { if (layer) layer.style.display = "none"; return; }
 			if (layer) layer.style.display = "block";
 			for (var id in bubbles) positionBubble(id);
+			updatePopupVisibility();
 		}
 
 		// ---- enumerate visible player bases (via MMCommon.map) ---------------------
@@ -345,6 +387,9 @@
 					// backstop: re-survey (bases finish loading, off/def changes) every 8s in region view
 					try { qx.util.TimerManager.getInstance().start(function () { if (masterOn() && MM.map.inRegionView()) refreshOverlay(); }, 8000, this, null, 8000); }
 					catch (e) { window.setInterval(function () { if (masterOn() && MM.map.inRegionView()) refreshOverlay(); }, 8000); }
+					// hide bubbles sitting under an open base-info popup / right-click menu - poll, since a
+					// popup opening doesn't move the camera and so wouldn't trigger reprojectAll above.
+					window.setInterval(updatePopupVisibility, 150);
 					buildOptions();
 					window.MM_PBI_INSTALLED = true;
 					wlog("overlay engine installed.");
