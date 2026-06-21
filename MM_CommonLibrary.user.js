@@ -1378,6 +1378,10 @@
                 try {
                     packBtn = sb;
                     sb.setLabel("CnC Pack");
+                    // The native Scripts button ships "excluded" (hidden) and is only revealed when a
+                    // script calls its .Add() method. We populate it with setMenu() instead, so we must
+                    // reveal it ourselves - otherwise the whole CnC Pack menu is invisible in the top bar.
+                    try { sb.show(); } catch (e) {}
                     var menu = new qx.ui.menu.Menu();
                     itemsById = {};
                     for (var c = 0; c < CATS.length; c++) {
