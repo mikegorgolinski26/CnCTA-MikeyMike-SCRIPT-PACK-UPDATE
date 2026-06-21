@@ -158,8 +158,10 @@ Priority order (high → low), with the new MM name and the one-line reason:
   unused code" rule): the smooth `interpolateColor`/`formatNumberColor` ratio→colour gradient helper is in the
   retired file's git history if a future smooth gradient is wanted — we currently use the 3-step
   `barColor` (red/yellow/green) in Next MCV / Loot Summary.
-- **TA_Wavy** → salvage (1) move-base-tool **per-cell cache** overlay → MM - Attack Range; (2) auto-mark
-  forgotten-defense reports read (opt-in toggle); (3) wave-count model → MMCommon. De-obf already in Wrapper.
+- **TA_Wavy** → **RETIRED 2026-06-21** (file + bg row gone). MM - Move Info already provides the same
+  forgotten/NPC-bases-in-range + level breakdown + wave estimate while moving a base, so Wavy was redundant.
+  (Historic salvage ideas if ever wanted: move-base-tool per-cell cache overlay; auto-mark forgotten-defense
+  reports read; wave-count model → MMCommon. De-obf already in Wrapper.)
 - **TA_CityMoveInfoExtend** → salvage only the **cooldown-expiry wall-clock** annotation → MM - Attack
   Range / move-info. Its range scan is the inferior dup of Wavy/scan.inRange.
 
