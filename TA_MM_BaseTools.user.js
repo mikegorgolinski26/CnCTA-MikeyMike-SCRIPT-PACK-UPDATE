@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.0
+// @version         1.2.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/TA_MM_BaseTools.user.js
@@ -27,9 +27,14 @@
                         types; per-base/resource/availability filters (all
                         persisted); one-click upgrade and transfer-then-upgrade.
    Layout Optimizer   - one-click optimize for tiberium / crystal / power /
-                        credits via building rearrangement. [PHASE A:
-                        recommend-only overlay; PHASE B: auto-apply via the
-                        sniffed CityBuilding move primitive. NOT YET BUILT.]
+                        credits via building rearrangement. PHASE A:
+                        recommend-only overlay (icons, on-grid move markers,
+                        sell-up-to-N). PHASE B: one-click "Apply to base" -
+                        auto-applies the proposed moves/demolitions via the
+                        sniffed CityBuilding primitives (move IXYXAF / demolish
+                        BFHPNB), with a confirm-with-preview dialog (total moves,
+                        permanent demolitions, package progress reset) and
+                        effect-verified, dependency-safe step ordering.
 
  Credit: the original tool this descends from was authored by Maelstrom,
  HuffyLuf, KRS_L, Krisan, DLwarez and NetquiK (see @author). This is a ground-up
@@ -826,8 +831,157 @@
                 return { ok: true, resKey: resKey, current: current, projected: bestR.bestScore, gainPct: gainPct, moves: moves, sells: sells, removed: bestRemoved, snapshot: snap, bestPos: bestR.bestPos, startPos: bestR.startPos };
             }
 
-            return { snapshot: snapshot, score: score, optimize: optimize, optimizeWithSell: optimizeWithSell, RES_CFG: RES_CFG, GRID_W: GRID_W, GRID_H: GRID_H };
+            // ===================== PHASE B: auto-apply ============================
+            // Turn an optimize result into a dependency-safe ordered step list and fire it
+            // against the live base. The move primitive is the (obfuscated) CityBuilding mover
+            // `IXYXAF(x,y)` and demolish is `BFHPNB()` (both sniffed live - see the
+            // base-edit-move-primitive notes). N() coerces .NET-wrapped numbers.
+
+            // Read every building's LIVE position + object handle right now (authoritative -
+            // the optimize snapshot may be a few seconds stale). byId[id]={id,obj,x,y}; occ["x,y"]=id.
+            function readLive(city) {
+                var bd; try { bd = city.get_Buildings().d; } catch (e) { return null; }
+                var byId = {}, occ = {};
+                for (var k in bd) {
+                    var raw = bd[k]; if (!raw || !raw.get_Id) continue;
+                    var id = raw.get_Id(), x = N(raw.get_CoordX()), y = N(raw.get_CoordY());
+                    byId[id] = { id: id, obj: raw, x: x, y: y };
+                    occ[x + "," + y] = id;
+                }
+                return { byId: byId, occ: occ };
+            }
+
+            // % of the in-progress package a producer loses when moved (null = makes no packages,
+            // e.g. silo/accumulator - moving them costs no package progress).
+            function pkgProgressPct(obj) {
+                try {
+                    if (obj.get_ProducesPackages && !N(obj.get_ProducesPackages())) return null;
+                    var max = N(obj.get_CollectMaxPackageSize()); if (!(max > 0)) return null;
+                    var cur = N(obj.GetCurrentPackageResourceCollected());
+                    return Math.max(0, Math.min(100, Math.round(cur / max * 100)));
+                } catch (e) { return null; }
+            }
+
+            // PURE planner. Returns { ok, steps, nMoves, nSells, nStaged, lossList, reason }.
+            // steps: {type:'demolish'|'move', id, obj, techName, harvRes, level, fromX, fromY, toX, toY, staged?}.
+            // Strategy: (1) demolish all sells first (frees their tiles); (2) repeatedly apply any move
+            // whose target tile is CURRENTLY empty + terrain-legal; (3) break a move cycle by parking one
+            // building on a spare legal tile (staged) so its target frees up. Every IXYXAF we ultimately
+            // emit is a move-into-an-empty-tile (never relies on the game's swap-on-occupied behaviour).
+            // Also re-validates the plan isn't stale (base unchanged since optimize).
+            function buildApplyPlan(city, res) {
+                if (!res || !res.ok) return { ok: false, reason: "no optimization result to apply" };
+                var snap = res.snapshot;
+                var live = readLive(city); if (!live) return { ok: false, reason: "could not read the base" };
+
+                // Staleness guard: every building the plan touches must still exist at its snapshot tile.
+                var refIds = {};
+                (res.moves || []).forEach(function (m) { refIds[m.id] = 1; });
+                (res.sells || []).forEach(function (s) { refIds[s.id] = 1; });
+                for (var rid in refIds) {
+                    var Lr = live.byId[rid], Br = snap.buildings[rid];
+                    if (!Lr || !Br) return { ok: false, reason: "the base changed since you optimized (a building is gone) - re-run the optimizer" };
+                    if (Lr.x !== N(Br.x) || Lr.y !== N(Br.y)) return { ok: false, reason: "the base changed since you optimized (a building moved) - re-run the optimizer" };
+                }
+
+                var occ = {}; for (var key in live.occ) occ[key] = live.occ[key];           // "x,y" -> id (working)
+                var cur = {}; for (var id0 in live.byId) cur[id0] = { x: live.byId[id0].x, y: live.byId[id0].y };
+
+                var steps = [], sold = {};
+                (res.sells || []).forEach(function (s) {
+                    var L = live.byId[s.id]; if (!L) return; sold[s.id] = 1;
+                    steps.push({ type: "demolish", id: s.id, obj: L.obj, techName: s.techName, harvRes: s.harvRes, level: s.level, fromX: cur[s.id].x, fromY: cur[s.id].y });
+                    delete occ[cur[s.id].x + "," + cur[s.id].y];
+                });
+
+                var targetOf = {}, pending = [];
+                (res.moves || []).forEach(function (m) { if (sold[m.id]) return; targetOf[m.id] = { x: m.toX, y: m.toY }; pending.push(m.id); });
+
+                function tileFree(x, y) { return occ[x + "," + y] == null; }
+                function legalAt(id, x, y) { var b = snap.buildings[id]; return !!b && inGrid(x, y) && terrainOK(snap, b, x, y); }
+                function emit(id, x, y, staged) {
+                    var b = snap.buildings[id], L = live.byId[id];
+                    delete occ[cur[id].x + "," + cur[id].y];
+                    var st = { type: "move", id: id, obj: L.obj, techName: b.techName, harvRes: b.harvRes, level: b.level, fromX: cur[id].x, fromY: cur[id].y, toX: x, toY: y };
+                    if (staged) st.staged = true;
+                    steps.push(st); cur[id] = { x: x, y: y }; occ[x + "," + y] = id;
+                }
+
+                var guard = 0, maxGuard = pending.length * pending.length + pending.length + 10;
+                while (pending.length && guard++ < maxGuard) {
+                    var progressed = false;
+                    for (var i = 0; i < pending.length; i++) {
+                        var id = pending[i], t = targetOf[id];
+                        if (cur[id].x === t.x && cur[id].y === t.y) { pending.splice(i, 1); i--; continue; }
+                        var occId = occ[t.x + "," + t.y];
+                        if (occId != null && targetOf[occId] == null && !sold[occId]) return { ok: false, reason: "a move target is blocked by a fixed building - re-run the optimizer" };
+                        if (tileFree(t.x, t.y) && legalAt(id, t.x, t.y)) { emit(id, t.x, t.y, false); pending.splice(i, 1); i--; progressed = true; }
+                    }
+                    if (!pending.length || progressed) continue;
+                    // Cycle: park one pending building on a spare legal+free tile that no pending move needs.
+                    var staged = false;
+                    for (var p = 0; p < pending.length && !staged; p++) {
+                        var sid = pending[p], sb = snap.buildings[sid];
+                        for (var y = 0; y < GRID_H && !staged; y++) for (var x = 0; x < GRID_W && !staged; x++) {
+                            if (!tileFree(x, y) || !terrainOK(snap, sb, x, y)) continue;
+                            var needed = false; for (var q = 0; q < pending.length; q++) { var tt = targetOf[pending[q]]; if (tt.x === x && tt.y === y) { needed = true; break; } }
+                            if (needed) continue;
+                            emit(sid, x, y, true); staged = true;   // its real target move stays pending
+                        }
+                    }
+                    if (!staged) return { ok: false, reason: "couldn't sequence the moves automatically (no free staging tile) - apply by hand in move mode" };
+                }
+                if (pending.length) return { ok: false, reason: "couldn't sequence all moves automatically - apply by hand in move mode" };
+
+                // Package-progress loss (count each moved building once, even if staged = 2 steps).
+                var lossList = [], seen = {};
+                steps.forEach(function (st) {
+                    if (st.type !== "move" || seen[st.id]) return; seen[st.id] = 1;
+                    var L = live.byId[st.id], pct = L ? pkgProgressPct(L.obj) : null;
+                    if (pct != null && pct > 0) lossList.push({ id: st.id, techName: st.techName, harvRes: st.harvRes, level: st.level, pct: pct });
+                });
+                lossList.sort(function (a, b) { return b.pct - a.pct; });
+                return { ok: true, steps: steps, nMoves: Object.keys(seen).length, nSells: (res.sells || []).length,
+                         nStaged: steps.filter(function (s) { return s.staged; }).length, lossList: lossList };
+            }
+
+            // Fire an ordered plan against the live base, SEQUENTIALLY, verifying each step BY EFFECT
+            // (the building's coords actually change / it actually disappears) rather than by return code
+            // (which is unreliable - same lesson as the upgrade tab). Non-blocking (timer-driven).
+            // hooks: { onStep(index, step, ok, msg), onDone({applied, failed, failedSteps}) }.
+            function executeApplyPlan(city, plan, hooks) {
+                hooks = hooks || {};
+                var steps = plan.steps, i = 0, done = [], failed = [];
+                function findObj(id) { try { var bd = city.get_Buildings().d; for (var k in bd) { var b = bd[k]; if (b && b.get_Id && b.get_Id() === id) return b; } } catch (e) {} return null; }
+                function fail(st, msg) { failed.push({ step: st, msg: msg }); if (hooks.onStep) try { hooks.onStep(i, st, false, msg); } catch (e) {} i++; window.setTimeout(next, 90); }
+                function ok(st) { done.push(st); if (hooks.onStep) try { hooks.onStep(i, st, true, "ok"); } catch (e) {} i++; window.setTimeout(next, 140); }
+                function verify(test, st) { var tries = 0; (function poll() { try { if (test()) return ok(st); } catch (e) {} if (++tries > 25) return fail(st, "no visible effect (timeout)"); window.setTimeout(poll, 120); })(); }
+                function next() {
+                    if (i >= steps.length) { if (hooks.onDone) try { hooks.onDone({ applied: done.length, failed: failed.length, failedSteps: failed }); } catch (e) {} return; }
+                    var st = steps[i], obj = findObj(st.id);
+                    if (!obj) return fail(st, "building not found");
+                    try {
+                        if (st.type === "demolish") {
+                            if (obj.CanDemolish && !obj.CanDemolish()) return fail(st, "game refused demolish");
+                            obj.BFHPNB();
+                            verify(function () { return findObj(st.id) == null; }, st);
+                        } else {
+                            obj.IXYXAF(st.toX, st.toY);
+                            verify(function () { var o = findObj(st.id); return !!o && N(o.get_CoordX()) === st.toX && N(o.get_CoordY()) === st.toY; }, st);
+                        }
+                    } catch (e) { return fail(st, String(e)); }
+                }
+                next();
+            }
+
+            return { snapshot: snapshot, score: score, optimize: optimize, optimizeWithSell: optimizeWithSell,
+                     buildApplyPlan: buildApplyPlan, executeApplyPlan: executeApplyPlan, pkgProgressPct: pkgProgressPct,
+                     RES_CFG: RES_CFG, GRID_W: GRID_W, GRID_H: GRID_H };
         })();
+
+        // Debug handle: when MM debug is on, expose the optimizer engine so the layout/apply logic can be
+        // exercised from the console (e.g. dry-run buildApplyPlan to inspect step ordering before applying).
+        try { if (window.MMBASETOOLS_DEBUG || window.MM_DEBUG) window.MM_BASETOOLS_OPT = OPT; } catch (e) {}
 
         // ----- main build ------------------------------------------------------------
         function build() {
@@ -1106,8 +1260,9 @@
                 page.setLayout(new qx.ui.layout.VBox(6));
                 page.setPadding(8);
 
-                // ---- controls row ----
-                var ctrls = new qx.ui.container.Composite(new qx.ui.layout.HBox(6));
+                // ---- controls row (Flow so it WRAPS when the window is made narrow - an HBox here would
+                // pin the whole window's min-width to the sum of every control, ~1086px) ----
+                var ctrls = new qx.ui.container.Composite(new qx.ui.layout.Flow(6, 4));
 
                 // Base filter (persisted): "All" or a specific base id. The option list is (re)built in
                 // refreshTab, NOT here - at window-build time the city data may not be loaded yet, which
@@ -1179,7 +1334,6 @@
                 var btnRefresh = new qx.ui.form.Button("Refresh").set({ toolTipText: "Recompute the list (clears the '✓ Upgraded' marks and rescans every base)" });
                 ctrls.add(btnRefresh);
 
-                ctrls.add(new qx.ui.core.Spacer(16), { flex: 1 });
                 ctrls.add(new qx.ui.basic.Label("Upgrade top").set({ alignY: "middle" }));
                 var spinTopN = new qx.ui.form.Spinner(1, MM.settings.get("BaseTools.UpgradeTopN", 5), 99).set({ width: 60 });
                 ctrls.add(spinTopN);
@@ -1187,7 +1341,7 @@
                 ctrls.add(btnUpgradeTop);
                 page.add(ctrls);
 
-                var infoLbl = new qx.ui.basic.Label("").set({ rich: true, textColor: "#aaaaaa" });
+                var infoLbl = new qx.ui.basic.Label("").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#aaaaaa" });
                 page.add(infoLbl);
 
                 // ---- the table (hand-rolled sortable grid in a Scroll) ----
@@ -1526,6 +1680,7 @@
                 page.setLayout(new qx.ui.layout.VBox(6));
                 page.setPadding(8);
                 var TILE = 38; // grid tile size in px
+                var lastRes = null;   // the most recent optimize result (the apply plan source); null = showing current layout only
 
                 function currentOwnCity() { try { return ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity(); } catch (e) { return null; } }
 
@@ -1584,6 +1739,16 @@
                 var spKicks = spinner("Kicks:", "BaseTools.OptKicks", 3, 0, 20, "Random shake-ups to escape a 'good but not best' layout and explore a different arrangement. More = explores more but slower.");
                 var spSell = spinner("Sell up to:", "BaseTools.OptSellN", 0, 0, 6, "Also recommend up to N least-impactful resource buildings to DEMOLISH (free up tiles) for a bigger gain. 0 = don't sell anything. It only suggests a sale if it actually increases the chosen resource.");
                 page.add(setRow);
+
+                // ---- Apply row: one-click auto-apply of the proposed layout (Phase B) ----
+                var applyRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8));
+                var applyBtn = new qx.ui.form.Button("Apply to base").set({ enabled: false, toolTipText: "Move (and, if proposed, demolish) buildings in-game to match the proposed layout. Shows a confirmation with exactly what will change first." });
+                try { applyBtn.setTextColor("#7ee07e"); } catch (e) {}
+                applyBtn.addListener("execute", function () { onApply(); });
+                applyRow.add(applyBtn, { flex: 0 });
+                applyRow.add(new qx.ui.basic.Label("Run an optimize first, then apply the proposed moves to your base.").set({ rich: true, alignY: "middle", textColor: "#999999" }), { flex: 1 });
+                page.add(applyRow);
+                function setApplyEnabled(on) { try { applyBtn.setEnabled(!!on); } catch (e) {} }
 
                 var summary = new qx.ui.basic.Label("").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#cccccc" });
                 page.add(summary);
@@ -1731,11 +1896,97 @@
                         box.add(new qx.ui.basic.Label("<b>" + (i + 1) + "</b>. " + nameOf(m) + " L" + m.level + "  <b>" + dirArrow(m.toX - m.fromX, m.toY - m.fromY) + "</b> " + dist + (dist === 1 ? " tile" : " tiles")).set({ rich: true, textColor: "#e6e6e6", toolTipText: m.fromX + ":" + m.fromY + " -> " + m.toX + ":" + m.toY }));
                     }
                     box.add(new qx.ui.core.Spacer(null, 6));
-                    box.add(new qx.ui.basic.Label("Numbers match the grid. Apply by hand in the game's move-building mode (auto-apply is a later update).").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#aaaaaa" }));
+                    var changed = res.moves.length || (res.sells && res.sells.length);
+                    box.add(new qx.ui.basic.Label(changed
+                        ? "Numbers match the grid. Click <b>Apply to base</b> above to make these changes in-game (you'll get a confirmation first), or do them by hand in move mode."
+                        : "Numbers match the grid.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#aaaaaa" }));
+                }
+
+                // ---- Phase B: confirm-with-preview + execute ----------------------------
+                var applying = false;
+                function onApply() {
+                    wlog("onApply: entry", { applying: applying, hasRes: !!lastRes, resOk: lastRes && lastRes.ok });
+                    if (applying || !lastRes || !lastRes.ok) return;
+                    var city = selectedCity();
+                    if (!city) { summary.setValue("<span style='color:#ff8a8a'>Could not find that base. Open it in-game and use 'Current base'.</span>"); return; }
+                    var plan = OPT.buildApplyPlan(city, lastRes);
+                    wlog("onApply: plan", { ok: plan.ok, reason: plan.reason, steps: plan.steps && plan.steps.length });
+                    if (!plan.ok) { summary.setValue("<span style='color:#ff8a8a'>Can't apply: " + (plan.reason || "unknown") + "</span>"); setApplyEnabled(false); return; }
+                    if (!plan.steps.length) { summary.setValue("Nothing to apply - the base already matches the proposal."); setApplyEnabled(false); return; }
+                    showApplyConfirm(city, plan);
+                }
+
+                // Our own modal confirm (we deliberately bypass the game's MoveBuildingConfirmationWidget so we
+                // can show the WHOLE batch + its true cost up front: moves, permanent demolitions, and the
+                // package-progress each moved building resets).
+                function showApplyConfirm(city, plan) {
+                    wlog("showApplyConfirm: building dialog", { steps: plan.steps.length, moves: plan.nMoves, sells: plan.nSells });
+                    var win = new qx.ui.window.Window("Apply layout changes?").set({
+                        modal: true, showMinimize: false, showMaximize: false, allowMaximize: false,
+                        resizable: false, contentPadding: 12, width: 420 });
+                    win.setLayout(new qx.ui.layout.VBox(8));
+
+                    var html = "";
+                    html += "<b>" + plan.nMoves + "</b> building" + (plan.nMoves === 1 ? "" : "s") + " will be <b>moved</b>";
+                    if (plan.nStaged) html += " (" + plan.nStaged + " via a temporary staging hop to untangle a swap)";
+                    html += ".";
+                    win.add(new qx.ui.basic.Label(html).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e6e6e6" }));
+
+                    if (plan.nSells) {
+                        win.add(new qx.ui.basic.Label("<b style='color:#ff8a8a'>&#9888; " + plan.nSells + " building" + (plan.nSells === 1 ? "" : "s") + " will be PERMANENTLY DEMOLISHED:</b>").set({ rich: true, wrap: true, allowGrowX: true }));
+                        var sells = plan.steps.filter(function (s) { return s.type === "demolish"; });
+                        for (var s = 0; s < sells.length; s++) { var sl = sells[s]; win.add(new qx.ui.basic.Label("&nbsp;&nbsp;&#10006; " + nameOf(sl) + " L" + sl.level + " (at " + sl.fromX + ":" + sl.fromY + ")").set({ rich: true, textColor: "#ffc9c9" })); }
+                    }
+
+                    if (plan.lossList && plan.lossList.length) {
+                        win.add(new qx.ui.basic.Label("<b style='color:#ffd24d'>Package progress reset</b> (moving restarts a building's progress toward its next collectable package):").set({ rich: true, wrap: true, allowGrowX: true }));
+                        var maxShow = 8;
+                        for (var l = 0; l < plan.lossList.length && l < maxShow; l++) { var li = plan.lossList[l]; win.add(new qx.ui.basic.Label("&nbsp;&nbsp;&bull; " + nameOf(li) + " L" + li.level + " &ndash; ~" + li.pct + "% lost").set({ rich: true, textColor: "#e9d9a6" })); }
+                        if (plan.lossList.length > maxShow) win.add(new qx.ui.basic.Label("&nbsp;&nbsp;&hellip; and " + (plan.lossList.length - maxShow) + " more").set({ rich: true, textColor: "#bbbbbb" }));
+                    } else if (plan.nMoves) {
+                        win.add(new qx.ui.basic.Label("No in-progress package progress will be lost.").set({ rich: true, textColor: "#9fdf9f" }));
+                    }
+
+                    win.add(new qx.ui.core.Spacer(null, 4));
+                    var btnRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8, "right"));
+                    var cancel = new qx.ui.form.Button("Cancel");
+                    var go = new qx.ui.form.Button(plan.nSells ? ("Demolish " + plan.nSells + " + apply") : ("Apply " + plan.nMoves + " move" + (plan.nMoves === 1 ? "" : "s")));
+                    try { go.setTextColor(plan.nSells ? "#ff8a8a" : "#7ee07e"); } catch (e) {}
+                    cancel.addListener("execute", function () { try { win.close(); win.destroy(); } catch (e) {} });
+                    go.addListener("execute", function () { try { win.close(); win.destroy(); } catch (e) {} runApply(city, plan); });
+                    btnRow.add(cancel); btnRow.add(go);
+                    win.add(btnRow);
+
+                    try { qx.core.Init.getApplication().getRoot().add(win); } catch (e) { werr("OPT: could not mount confirm window", e); }
+                    try { win.center(); } catch (e) {}
+                    win.open();
+                    wlog("showApplyConfirm: opened", { visible: win.isVisible && win.isVisible() });
+                }
+
+                function runApply(city, plan) {
+                    if (applying) return;
+                    applying = true; setApplyEnabled(false); busy = true;
+                    var total = plan.steps.length, doneN = 0;
+                    summary.setValue("Applying " + plan.nMoves + " move(s)" + (plan.nSells ? " + " + plan.nSells + " demolition(s)" : "") + "&hellip;");
+                    OPT.executeApplyPlan(city, plan, {
+                        onStep: function (idx, step, ok2) {
+                            doneN++;
+                            var verb = step.type === "demolish" ? "Demolished" : (step.staged ? "Staged" : "Moved");
+                            summary.setValue("Applying&hellip; " + doneN + "/" + total + " - " + (ok2 ? "" : "<span style='color:#ff8a8a'>FAILED </span>") + verb + " " + nameOf(step) + (step.type === "move" ? " &rarr; " + step.toX + ":" + step.toY : ""));
+                        },
+                        onDone: function (sum) {
+                            applying = false; busy = false; lastRes = null;
+                            var col = sum.failed ? "#ffb74d" : "#7ee07e";
+                            summary.setValue("<b style='color:" + col + "'>Applied " + sum.applied + "/" + total + " change(s)" + (sum.failed ? " - " + sum.failed + " failed (see console)" : " - done") + ".</b> Re-reading base&hellip;");
+                            if (sum.failed) { for (var f = 0; f < sum.failedSteps.length; f++) { var fs = sum.failedSteps[f]; werr("OPT apply step failed:", fs.step.type, nameOf(fs.step), "->", fs.step.toX + ":" + fs.step.toY, "-", fs.msg); } }
+                            window.setTimeout(function () { renderCurrent(); mapTitle.setValue("<b>Current layout</b> (after apply) - " + (city.get_Name ? city.get_Name() : "")); }, 600);
+                        }
+                    });
                 }
 
                 // Draw the base as-is (no moves) so the grid is populated the moment you open the tab / switch base.
                 function renderCurrent() {
+                    lastRes = null; setApplyEnabled(false);
                     try {
                         var city = selectedCity();
                         if (!city) { mapTitle.setValue("<b>Base layout</b>"); return; }
@@ -1769,8 +2020,10 @@
                                 summary.setValue("<b style='color:" + col + "'>" + OPT.RES_CFG[resKey].label + "</b> (continuous /h): <b>" + cn + "</b> &rarr; <b>" + pn + "</b> (<b>" + sign + res.gainPct.toFixed(1) + "%</b>) via <b>" + res.moves.length + "</b> move(s)" + (res.sells && res.sells.length ? " + <b>" + res.sells.length + "</b> sell(s)" : "") + ". Figures are continuous production (packages aren't layout-dependent)." + (res.snapshot && res.snapshot.calibWarn ? " <span style='color:#ffb74d'>(" + res.snapshot.calibWarn + " link(s) uncalibrated)</span>" : ""));
                                 mapTitle.setValue("<b>Proposed layout</b>");
                                 renderLayout(res.snapshot, res.bestPos, res.moves, res.sells);
+                                lastRes = res; setApplyEnabled(!!changed);   // enable Apply only when there's something to apply
                             } else {
                                 summary.setValue("<span style='color:#ff8a8a'>Could not optimize: " + ((res && res.reason) || "unknown") + "</span>");
+                                lastRes = null; setApplyEnabled(false);
                             }
                             renderResultList(res);
                         } catch (e2) { werr("OPT render failed:", e2); }
