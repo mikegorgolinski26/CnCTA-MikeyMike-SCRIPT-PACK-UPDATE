@@ -1378,10 +1378,16 @@
                 try {
                     packBtn = sb;
                     sb.setLabel("CnC Pack");
-                    // The native Scripts button ships "excluded" (hidden) and is only revealed when a
-                    // script calls its .Add() method. We populate it with setMenu() instead, so we must
-                    // reveal it ourselves - otherwise the whole CnC Pack menu is invisible in the top bar.
-                    try { sb.show(); } catch (e) {}
+                    // The native Scripts button ships hidden AND, when revealed via its .Add() method,
+                    // re-tiles the bar so the previous end button (Ranking) becomes a middle tile and the
+                    // Scripts button becomes the right end-cap. We populate it with setMenu() instead of
+                    // .Add(), so we call the same native integrator (__Hi) to both reveal it and fix the
+                    // tiling - a plain show() leaves it as a detached extra tile with a seam after Ranking.
+                    // __Hi is obfuscated; if a game update renames it, fall back to show() (menu still works,
+                    // just with the cosmetic seam).
+                    var revealed = false;
+                    try { if (typeof sb.__Hi === "function") { sb.__Hi(); revealed = true; } } catch (e) {}
+                    if (!revealed) { try { sb.show(); } catch (e) {} }
                     var menu = new qx.ui.menu.Menu();
                     itemsById = {};
                     for (var c = 0; c < CATS.length; c++) {
