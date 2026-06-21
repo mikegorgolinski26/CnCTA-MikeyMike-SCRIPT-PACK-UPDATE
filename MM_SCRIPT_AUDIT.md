@@ -120,9 +120,9 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | TA_AlliancesMemberOnline | Floating window of online/away alliance members (5s poll) | ✅ |
 | TA_ADDON_City_Online_Status_Colorer_SC | Colors map city text by member online status (NOEVIL) | ✅ |
 | TA_CD_PvP_Alert_Status | Title/favicon/sound alert when a base is attacked (big base64 blobs) | ✅ |
-| TA_Chat_Colorize | Role-based chat name colors + alliance tags (15s startup hack) | ⚠️ |
-| TA_Chat_Helper_Enhanced_Mod | BBCode insert, auto-tag coords/urls, contact list (~2014) | ✅ |
-| TA_Coords_Button_All | Context-menu "paste coords" into chat | ✅🔁 |
+| ~~TA_Chat_Colorize~~ | Role-based chat name colors + alliance tags (15s startup hack) | ❌ RETIRED 2026-06-20 (chat cleanup; feature dropped, no reusable primitive) |
+| ~~TA_Chat_Helper_Enhanced_Mod~~ | BBCode insert, auto-tag coords/urls, contact list (~2014) | ❌ RETIRED 2026-06-20 (chat cleanup; common coords parse/format/insert already in MMCommon, rest was feature logic) |
+| ~~TA_Coords_Button_All~~ | Context-menu "paste coords" into chat | ❌ RETIRED 2026-06-20 (== MMCommon.coords.insertIntoChat + format; no extension file, stale registry entry removed) |
 | ~~TA_Coord_Box_Shortcut~~ | Floating "navigate to X,Y" box (dead test fns) | ❌ RETIRED 2026-06-20 (navigate == MMCommon.coords.goTo, which is better; rest was dead debug scaffolding) |
 | ~~TA_Crucial_CNC_Map_Link~~ | Scripts-menu button → cnc-map.com for this world | ❌ RETIRED 2026-06-20 (external link to third-party site; native Scripts menu now our CnC Pack) |
 
