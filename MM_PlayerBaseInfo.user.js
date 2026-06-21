@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Draws a live on-map overlay of small bubbles showing Offense / Defense level (stacked) over every visible player base in region view (own / alliance / enemy). Off/def for other players' bases is surveyed in the background; a base's bubble only appears once its values are known. Bubbles track the map as you pan and zoom. A HUD options panel toggles which base types show.
-// @version      1.2.4
+// @version      1.2.5
 // @author       XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -378,7 +378,15 @@
 					MM.map.watch({
 						onChange: function (st) {
 							try {
-								if (st.region) { reprojectAll(); scheduleEnumerate(); }
+								// Reproject only - do NOT re-enumerate here. The off/def survey calls
+								// set_CurrentCityId, which nudges the region camera; the watcher then sees a
+								// "change", and if we enumerated it would kick MORE surveys -> another nudge
+								// -> a tight feedback loop (the "overlay: N visible" console spam + a
+								// set_CurrentCityId thrash that froze the map terrain and crashed the game's
+								// closeCityInfo on a null evicted-city event). New bases scrolling into view
+								// are picked up by the 8s backstop below instead. (Proper fix next session:
+								// enumerate off the bulk public-base fetch, no per-base set_CurrentCityId.)
+								if (st.region) reprojectAll();
 								else clearAll();
 							} catch (e) { werr("watch onChange:", e); }
 						}
