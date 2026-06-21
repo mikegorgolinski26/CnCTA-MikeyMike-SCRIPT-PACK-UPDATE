@@ -41,9 +41,16 @@ scripts, fan-out of 7 read-only agents). Supersedes the per-script verdicts in `
    `world.GetObjectFromPosition` ring-walk + the same `/return this\.[A-Z]{6}\.([A-Z]{6})/` de-obf (already
    in the Wrapper). Converging them retires the entire scanner/counter cluster.
 
-**Pack-wide publish blocker:** almost every legacy script carries a third-party `@updateURL`/`@downloadURL`
-(netquik, SebHeuze, userscripts.org) and a couple use remote `@require`. **Strip all remote update/require
-directives before publishing** — auto-updating extension code from third-party repos is a security problem.
+**Publish-gate note (NOT ongoing work — handled by construction):** almost every legacy script carries a
+third-party `@updateURL`/`@downloadURL` (netquik, SebHeuze, userscripts.org). Two things make this a
+non-issue: (1) those headers are **userscript-manager directives that the Chrome extension never reads** —
+`content.js` loads the bundled files, so they're inert metadata, not a live channel; (2) every keeper is
+**re-authored as an MM script** with our own header (pointing at Mike's repo, like the existing 10 MM
+scripts), so the third-party lines vanish automatically. The only genuine **runtime** remote channels
+(`@require` a remote CDN, self-update fetch, data POSTs) live solely in the **3 quarantine scripts**
+(leoStats, BaseShare), which are dropped entirely. → This reduces to a single **publish-gate verification**:
+confirm no legacy file was bundled verbatim, and a build-wide grep for `fetch(`/`XHR`/`$.post`/remote
+`@require` returns nothing outside our own domain. See §8 Phase 6.
 
 ---
 
@@ -215,8 +222,9 @@ Priority order (high → low), with the new MM name and the one-line reason:
 ## 8. Phased execution plan
 
 - **Phase 1 — Cleanup (fast, low-risk).** Retire the 2 pure dups (§3). Quarantine the 3 security scripts
-  (§2) = remove from the build. **Strip third-party `@updateURL`/`@downloadURL`/remote `@require` from ALL
-  scripts.** Shrinks surface before the real work.
+  (§2) = remove from the build (this is what removes the only real runtime remote channels). Shrinks surface
+  before the real work. (Third-party `@updateURL` lines need no separate strip pass — they're inert in the
+  extension and each rebuild replaces the header anyway; see §1 note.)
 - **Phase 2 — High-leverage MMCommon.** Build §1's three wins: `base.fetch*` bulk path, `cnctaopt.encode`,
   unify `scan.inRange`. Add `trade` + `export` (small, enabling). Each is additive (nothing calls it yet →
   can't break the loaded pack; just `node --check`).
@@ -224,8 +232,10 @@ Priority order (high → low), with the new MM name and the one-line reason:
 - **Phase 4 — Salvage-then-retire (§5):** as each MMCommon module / MM keeper lands, lift the named bit from
   its donors and delete them. Batch the deletes.
 - **Phase 5 — Decide the 5 pending (§6)** with Mike.
-- **Phase 6 — Publish gate:** security audit (confirm zero external network calls remain), strip remaining
-  third-party URLs, branding/version/CHANGELOG hygiene, icons/store listing, manifest review.
+- **Phase 6 — Publish gate:** security verification — build-wide grep for `fetch(`/`XHR`/`$.post`/remote
+  `@require` returns nothing outside our own domain, and confirm no legacy file was bundled verbatim (every
+  shipped script is an MM rebuild with our header); branding/version/CHANGELOG hygiene; icons/store listing;
+  manifest review.
 
 **End state estimate:** ~10 current MM scripts + ~11 new MM-ified keepers ≈ **~21 MM scripts**, all on the
 Wrapper + Common Library, zero third-party update/exfiltration, ready to publish.
