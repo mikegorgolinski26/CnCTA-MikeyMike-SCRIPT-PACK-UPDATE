@@ -204,9 +204,26 @@ Priority order (high → low), with the new MM name and the one-line reason:
    (`zoomMin/zoomMax/zoomInc`) through `MMCommon.settings` (`Zoom.MaxFactor/MinFactor/IncStep`);
    wrap each NOEVIL block in its own try/catch with a `wwarn` so a future game patch disables only
    the broken piece. Fix the keyboard-clamp bug. Original in git history.
-10. **TA_ADDON_City_Online_Status_Colorer_SC → MM - Online Status Colorer** — on-map member-online
-    coloring (a delivery mode Member Status doesn't have). Highest fragility (patches a render hot-path);
-    move the `UpdateColor`/`SetCanvasValue` de-obf into the **Wrapper**.
+10. ~~**TA_ADDON_City_Online_Status_Colorer_SC**~~ → **RETIRED 2026-06-21** (id 10021, was already
+    `enabled:false`; Mike: not needed). White X Dragon / Debitosphere / Der_Flake / NetquiK, 179 LOC.
+    Despite the "Maelstrom ADDON" name it was self-contained (the MaelstromTools poll was vestigial).
+    Recolored region-map base LABELS for own-alliance members by online state (Online `#B700FF` /
+    Away `#FFFF00` / Offline `#FF0000` / Hidden `#C2C2C2`), refreshed every 5 min via
+    `alliance.RefreshMemberData()`. Mechanism = the **highest-fragility patch in the set**: added
+    `CityTextcolor()` to `ClientLib.Vis.Region.RegionCity.prototype` (reads
+    `get_Alliance().get_MemberData().d[playerId].OnlineState`) and **wholesale-replaced the obfuscated
+    `SetCanvasValue` render hot-path** reconstructed from a 13-group NOEVIL regex on its minified body,
+    routing the label color through `CityTextcolor`. **Salvage spec (if ever rebuilt as MM - Online
+    Status Colorer):** the two regexes are the reference for the recipe — (a)
+    `RegionCity.prototype.UpdateColor.toString().match(/this\.([A-Z]{6})\(this\.[A-Z]{6},this\.([A-Z]{6})\)/)`
+    recovers the obf `SetCanvasValue` method name + `cityInfo` field; (b) the 13-group regex on
+    `SetCanvasValue.toString()` (line 74 of the original) recovers `M[2..13]` for the hand-rewritten
+    method. If rebuilt: route both through guarded `reMember`/`reMatch` (named errors, fail-safe so a
+    game patch disables only this and doesn't throw on every map tile), restore `SetCanvasValue_ORG` on
+    `lifecycle` disable, route the 4 colors through `MMCommon.settings`, and lift the
+    `UpdateColor`/`SetCanvasValue` de-obf into the **Wrapper** (per §7) so future map-label scripts
+    reuse it. Member Status already surfaces online state in a roster panel (different delivery mode).
+    Original in git history.
 11. ~~**TA_Repair_Time_Of_Death**~~ — **RETIRED 2026-06-21** (file + bg row id 10054 gone; was a §4 MM-IFY
     candidate, cut from initial release). Was ~103 LOC by petui: appended an "offense repair time"
     label (icon + value) to the in-game `RegionGhostStatusInfo` widget — the popup that appears when
@@ -593,7 +610,9 @@ RETIRE: Count_Forgotten_Bases_Range, New_Custom_Flunik_Tools.
 QUARANTINE: leoStats, BaseShare. (Hotkeys salvaged + retired 2026-06-21.)
 MM-IFY: Tunnel_Info ✅, CD_PvP_Alert_Status ✅, Real_POI_Bonus ✅,
 Warchief_Upgrade_Base_Defense_Army ✅,
-ADDON_City_Online_Status_Colorer_SC. (Warchief_Sector_HUD → RETIRED 2026-06-21; Zoom → RETIRED 2026-06-21.)
+(ALL §4 MM-IFY keepers resolved: Warchief_Sector_HUD + Zoom + ADDON_City_Online_Status_Colorer_SC → RETIRED 2026-06-21; rest MM-ified.)
+**MILESTONE 2026-06-21: ADDON_City_Online_Status_Colorer_SC was the LAST non-MM script on the options page.
+Every remaining listed script is now an MM-* script (plus the always-on Framework Wrapper + Common Library).**
 RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6): Report_Stats.
 RETIRED (cut from initial release; salvage spec captured in §4 entry 5): POI_ExporterTools.
 RETIRED (POI window was a POIs_Analyser dup; scanner/upgrade already commented; salvage spec in §5 The_Green_Cross_Tools entry): The_Green_Cross_Tools.
