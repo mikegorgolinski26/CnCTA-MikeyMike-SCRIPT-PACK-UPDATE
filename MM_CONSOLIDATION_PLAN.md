@@ -124,9 +124,13 @@ Priority order (high → low), with the new MM name and the one-line reason:
      reconstructs one by `.toString()`-regexing their minified member names. If ever rebuilt, this belongs in the
      **Framework Wrapper** (de-obf registry) as a guarded `table.addColumn` helper, not a per-script regex.
    - Would also have absorbed **Report_Summary**'s "scan all reports" mode (`reports.scanAll(type)`).
-7. **TA_Warchief_Upgrade_Base_Defense_Army → MM - Upgrade Helper** (or a Base Tools tab) — clean **manual**
-   upgrade-to-level-N UI using official `ClientLib.API.*` (no de-obf). Adds per-selection + Defense/Army
-   upgrade UX Base Tools lacks.
+7. ~~**TA_Warchief_Upgrade_Base_Defense_Army → MM - Upgrade Helper**~~ ✅ DONE 2026-06-21 →
+   **MM - Upgrade 1.0.0** (kept id 10017, file renamed to `MM_Upgrade.user.js`). Selected-unit + All +
+   repair-time sections preserved verbatim; uses official `ClientLib.API.*` (no de-obf). The trigger
+   button next to Trade is kept; the panel itself follows the MM - Member Status pin/dock pattern but
+   anchored on the LEFT (`{left:0, top:130}`, caps unflipped, gray strip on the right of the body).
+   No HUD tray button; lifecycle.watch live-disable wired. NetquiK no-grow-Infinity + MaxLevelCap fixes
+   preserved. Original retired (file + bg row gone).
 7b. **(decide)** could instead become a **new tab in MM - Base Tools** rather than its own script — Mike's call.
 8. **TA_Warchief_Sector_HUD → MM - Sector HUD** — thinnest case; ~20 lines of glue over
    `map.viewCenter/track` + `coords.sector/insertIntoChat/goTo`. Or fold into an existing MM HUD.
@@ -312,8 +316,9 @@ Wrapper + Common Library, zero third-party update/exfiltration, ready to publish
 
 RETIRE: Count_Forgotten_Bases_Range, New_Custom_Flunik_Tools.
 QUARANTINE: leoStats, BaseShare. (Hotkeys salvaged + retired 2026-06-21.)
-MM-IFY: Tunnel_Info, CD_PvP_Alert_Status, Real_POI_Bonus, POI_ExporterTools,
-Warchief_Upgrade_Base_Defense_Army, Warchief_Sector_HUD, Zoom, ADDON_City_Online_Status_Colorer_SC,
+MM-IFY: Tunnel_Info ✅, CD_PvP_Alert_Status ✅, Real_POI_Bonus ✅,
+Warchief_Upgrade_Base_Defense_Army ✅, POI_ExporterTools,
+Warchief_Sector_HUD, Zoom, ADDON_City_Online_Status_Colorer_SC,
 Repair_Time_Of_Death.
 RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6): Report_Stats.
 RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 entry on Info_Sticker): Info_Sticker.
