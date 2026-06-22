@@ -186,7 +186,24 @@ Priority order (high → low), with the new MM name and the one-line reason:
    `ViewCoordY`); sloppy `text.join(' ')` adds extra spaces in the chat paste; blocking `prompt()`
    for the right-click jump.
    Original in git history.
-9. **TA_Zoom → MM - Zoom** — extend map zoom range; tiny QoL. Route constants through `settings`.
+9. ~~**TA_Zoom**~~ → **RETIRED 2026-06-21** (id 10068, cut from initial release; Mike: not interested).
+   Panavia → Gryphon → NetquiK 22.3 fix, 103 LOC, was already `enabled:false`. Extended the region-map
+   zoom range past the game's built-in limits by NOEVIL-patching three things:
+   (a) the obf max-zoom field on `backgroundArea.activeSceneView` (regex `/this\.([A-Z+]{6});?}/` against
+   `get_MaxZoomFactor.toString()`) → overwritten with `1.2`;
+   (b) the obf min-zoom static on `ClientLib.Vis.Region.Region` (regex `/\$I\.[A-Z+]{6}\.([A-Z+]{6});?}/`
+   against `get_MinZoomFactor.toString()`) → overwritten with `0.45`;
+   (c) full replacement of `webfrontend.gui.BackgroundArea.prototype.onHotKeyPress` and
+   `_onMouseWheel` (with listeners removed + re-added on `mapContainer` + `mapBlocker`) using
+   `zoomInc=0.07` / `zoomIncLarge=0.02` (slower step when already zoomed far out).
+   Known bug carried since 1.0.3: the keyboard path clamps to a hardcoded `[0.6, 1.2]` instead of
+   `[get_MinZoomFactor(), get_MaxZoomFactor()]`, so Z/X can't reach the extended min the wheel can.
+   **Salvage spec (if ever rebuilt):** keep both regex de-obf snippets verbatim — they're the
+   reference for "find an obfuscated field on a getter's `this.<FIELD>` body" and "find an
+   obfuscated static on `$I.<class>.<FIELD>`"; route the three magic numbers
+   (`zoomMin/zoomMax/zoomInc`) through `MMCommon.settings` (`Zoom.MaxFactor/MinFactor/IncStep`);
+   wrap each NOEVIL block in its own try/catch with a `wwarn` so a future game patch disables only
+   the broken piece. Fix the keyboard-clamp bug. Original in git history.
 10. **TA_ADDON_City_Online_Status_Colorer_SC → MM - Online Status Colorer** — on-map member-online
     coloring (a delivery mode Member Status doesn't have). Highest fragility (patches a render hot-path);
     move the `UpdateColor`/`SetCanvasValue` de-obf into the **Wrapper**.
@@ -565,7 +582,7 @@ RETIRE: Count_Forgotten_Bases_Range, New_Custom_Flunik_Tools.
 QUARANTINE: leoStats, BaseShare. (Hotkeys salvaged + retired 2026-06-21.)
 MM-IFY: Tunnel_Info ✅, CD_PvP_Alert_Status ✅, Real_POI_Bonus ✅,
 Warchief_Upgrade_Base_Defense_Army ✅,
-Zoom, ADDON_City_Online_Status_Colorer_SC. (Warchief_Sector_HUD → RETIRED 2026-06-21.)
+ADDON_City_Online_Status_Colorer_SC. (Warchief_Sector_HUD → RETIRED 2026-06-21; Zoom → RETIRED 2026-06-21.)
 RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6): Report_Stats.
 RETIRED (cut from initial release; salvage spec captured in §4 entry 5): POI_ExporterTools.
 RETIRED (POI window was a POIs_Analyser dup; scanner/upgrade already commented; salvage spec in §5 The_Green_Cross_Tools entry): The_Green_Cross_Tools.
