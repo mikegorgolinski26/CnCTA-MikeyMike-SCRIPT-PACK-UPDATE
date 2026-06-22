@@ -183,8 +183,21 @@ Priority order (high → low), with the new MM name and the one-line reason:
   grid-position locator → one MM intel helper. Otherwise covered.
 
 **Upgrade / repair automation** (all duplicate MM - Base Tools' auto-collect/repair + upgrade-priority)
-- **TA_Auto_Repair** → salvage (1) drag-drop **repair-order** config, (2) **ROI-on-repair-cost** sort
-  (`getBuildingReturnOnFullRepair`), (3) **lockdown-aware** rescheduling → into Base Tools' repair routine.
+- ~~**TA_Auto_Repair**~~ — **RETIRED 2026-06-21** (file + bg row id 10066 gone). **Salvaged into
+  MM - Base Tools 1.4.0 + MM - Framework Wrapper 1.2.0:** the priority list (default = the script's
+  own Defense_Facility → … → Refinery order, with Support_Air auto-expanding to Ion+Art at run time),
+  the per-building ROI sort within each tier (`sumRepairCosts / sumProductionPerHourDelta`), and the
+  per-building `CanRepair()`/`Repair()` walk that stops at the first cost-blocked building (so a base
+  short on cash heals defenses first, not whatever the game's RepairAll picks). The two de-obf
+  primitives (`CityEntity.prototype.CanRepair` / `.Repair`) now live in the Framework Wrapper —
+  isolated try-block; failure falls back to plain `RepairAll(City)`. UI = `Auto-repair by priority +
+  ROI` checkbox (default ON) on the Collect & Repair tab, with an Up/Down-reorderable list +
+  Reset-to-default (simpler than the original's drag-drop, same end result). Settings keys
+  `BaseTools.RepairPriority` (bool) + `BaseTools.RepairOrder` (string array). Lockdown-aware
+  rescheduling was NOT salvaged — the existing 5-min auto cycle already short-circuits via
+  `c.get_IsLocked()` and re-evaluates every tick, so a one-shot timer to next `LockdownEndStep` was
+  marginal value for the code cost. Original is in git history at SCRIPT-PACK `0de5072` for a full
+  restore.
 - **TA_Upgrade_Top_ModButtonPos** → salvage Tib-vs-Cry harvester/silo classification via `OwnProdModifiers`
   → `base.classifyResourceBuilding`. "Upgrade highest-of-type" as a selectable Base Tools mode.
 - **TA_Autopilot** → diff its health-per-cost unit ranking vs the existing prioritizer; lift only if better.
@@ -301,8 +314,9 @@ Priority order (high → low), with the new MM name and the one-line reason:
 **Extend existing modules**
 - `base.classifyResourceBuilding(building)` (Tib/Cry via `OwnProdModifiers`); `base.status` += support-
   building Ion→Art→Air detection; `base.getResTime(...)` resource-time-to-afford (from Warchief Upgrade).
-- `repair.offenseAtDeath(city)` (Repair_Time_Of_Death); reconcile ROI-on-repair + production-delta-per-cost
-  (Auto_Repair) with the calibrated optimizer model — don't add a 2nd copy.
+- `repair.offenseAtDeath(city)` (Repair_Time_Of_Death). Auto_Repair's ROI-on-repair-cost math
+  already lives in MM - Base Tools (`buildingRepairROI`); if a 2nd consumer ever needs it, lift
+  to `MMCommon.repair.buildingROI` rather than duplicating.
 - `loot.ofCity` → prefer `GetLootFromCurrentCity()` (mhLoot).
 - `map`: consolidate the world→screen **marker projection** + pan/zoom reposition/resize so Tunnel Info,
   Attack Range, Player Base Info share ONE (currently 3 copies); add region scan→canvas paint helper (TA_Map).
@@ -372,9 +386,10 @@ Repair_Time_Of_Death.
 RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6): Report_Stats.
 RETIRED (cut from initial release; salvage spec captured in §4 entry 5): POI_ExporterTools.
 RETIRED (POI window was a POIs_Analyser dup; scanner/upgrade already commented; salvage spec in §5 The_Green_Cross_Tools entry): The_Green_Cross_Tools.
+RETIRED (priority + ROI + per-building CanRepair/Repair lifted INTO MM - Base Tools 1.4.0 + Framework Wrapper 1.2.0; §5 Auto_Repair entry): Auto_Repair.
 RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 entry on Info_Sticker): Info_Sticker.
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
-Auto_Repair, Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
+Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
 CityMoveInfoExtend, Map, Report_Summary, Formation_Saver,
 View_Player_Base, CnCTAOpt_Link_Button,
 New_Resource_Trade_Window, Transfer_All_resources.

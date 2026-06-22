@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.3.1
+// @version         1.4.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -137,6 +137,127 @@
             });
             wlog("repairAll(" + (mode === ClientLib.Vis.Mode.ArmySetup ? "units" : "buildings") + "): triggered on", n, "cities");
             return n;
+        }
+
+        // Default repair priority order (highest first). Salvaged verbatim from TA_Auto_Repair
+        // (petui, NetquiK), retired into this script 2026-06-21. Defenses+yard first so a base
+        // under attack heals what matters; harvesters/refinery last because they're cheap and
+        // recover on their own anyway.
+        function defaultRepairOrder() {
+            var T = ClientLib.Base.ETechName;
+            return [
+                T.Defense_Facility, T.Construction_Yard, T.Defense_HQ, T.Support_Air,
+                T.Command_Center, T.Barracks, T.Factory, T.Airport,
+                T.Silo, T.Accumulator, T.PowerPlant,
+                T.Harvester, T.Harvester_Crystal, T.Refinery
+            ];
+        }
+
+        // Expand Support_Air -> Ion + Art in place (the game stores them as separate ETechNames
+        // but users treat them as one slot, like Auto_Repair did).
+        function expandRepairOrder(order) {
+            var out = order.slice();
+            for (var i = 0; i < out.length; i++) {
+                if (out[i] === ClientLib.Base.ETechName.Support_Air) {
+                    out.splice(i + 1, 0, ClientLib.Base.ETechName.Support_Ion, ClientLib.Base.ETechName.Support_Art);
+                    i += 2;
+                }
+            }
+            return out;
+        }
+
+        // Per-building "return on full repair" = sum of full-repair costs across resources
+        // divided by sum of production-per-hour DELTA we'd gain by going from current HP back to 100%.
+        // Lower ratio = repair first (we recoup the cost faster). Buildings with no positive production
+        // delta return Infinity so they sort to the end. Math is faithful to Auto_Repair.
+        function buildingRepairROI(city, b) {
+            try {
+                var info = city.GetBuildingDetailViewInfo(b);
+                if (!info || !info.OwnProdModifiers) return Infinity;
+                var EMT = ClientLib.Base.EModifierType,
+                    RES_TYPES = [EMT.TiberiumProduction, EMT.CrystalProduction, EMT.PowerProduction, EMT.CreditsProduction],
+                    hp = b.get_HitpointsPercent ? b.get_HitpointsPercent() : 1;
+                if (!hp || hp <= 0) return Infinity;
+                var deltaSum = 0, mods = info.OwnProdModifiers.d;
+                for (var i = 0; i < RES_TYPES.length; i++) {
+                    var e = mods[RES_TYPES[i]];
+                    if (e) deltaSum += (e.TotalValue / hp) - e.TotalValue;
+                }
+                if (deltaSum <= 0) return Infinity;
+                var costs = ClientLib.API.Util && ClientLib.API.Util.GetUnitRepairCostsForCity
+                    ? ClientLib.API.Util.GetUnitRepairCostsForCity(city, b.get_CurrentLevel(), b.get_MdbUnitId(), 1)
+                    : null;
+                if (!costs) return Infinity;
+                var filt = ClientLib.Base.Util.FilterResourceCosts(costs), costSum = 0;
+                for (var j = 0; j < filt.length; j++) costSum += filt[j].Count;
+                return costSum / deltaSum;
+            } catch (e) { return Infinity; }
+        }
+
+        // Prioritized repair across every base. For each LIVE, unlocked, damaged base: walk the
+        // user's tech-name order; for each tier, ROI-sort the damaged buildings and fire CanRepair/
+        // Repair one by one; stop at the first that can't be afforded (don't keep trying lower
+        // tiers if we ran out for a higher-priority one). If the whole priority walk completed
+        // without skipping, RepairAll(City) the rest as a mop-up for anything not in the list.
+        // Falls back to plain repairAll(City) if CityEntity.CanRepair isn't wired by the wrapper
+        // (e.g. wrapper's regex didn't match on a future patch) or if the priority list is empty.
+        function repairAllPrioritized(order) {
+            try {
+                var probe = ClientLib.Data.CityEntity && ClientLib.Data.CityEntity.prototype;
+                if (!probe || typeof probe.CanRepair !== "function" || typeof probe.Repair !== "function") {
+                    wwarn("CityEntity.CanRepair/Repair missing from wrapper - falling back to plain RepairAll");
+                    return repairAll(ClientLib.Vis.Mode.City);
+                }
+                if (!order || !order.length) return repairAll(ClientLib.Vis.Mode.City);
+                var expanded = expandRepairOrder(order),
+                    VisMain = ClientLib.Vis.VisMain.GetInstance(),
+                    prevMode = VisMain.get_Mode();
+                try { VisMain.set_Mode(ClientLib.Vis.Mode.City); } catch (e) {}
+                var touched = 0;
+                eachOwnCity(function (c) {
+                    try {
+                        if (c.get_IsGhostMode && c.get_IsGhostMode()) return;
+                        if (c.get_IsDamaged && !c.get_IsDamaged()) return;
+                        if (c.get_IsLocked && c.get_IsLocked()) return;
+                        var bldData = c.get_CityBuildingsData && c.get_CityBuildingsData();
+                        if (!bldData || !bldData.GetAllBuildingsByTechName) return;
+                        var blocked = false;
+                        for (var i = 0; i < expanded.length; i++) {
+                            var bucket = bldData.GetAllBuildingsByTechName(expanded[i]);
+                            if (!bucket || !bucket.l) continue;
+                            var damaged = [];
+                            for (var j = 0; j < bucket.l.length; j++) {
+                                var bj = bucket.l[j];
+                                if (bj && bj.get_IsDamaged && bj.get_IsDamaged()) damaged.push(bj);
+                            }
+                            if (!damaged.length) continue;
+                            damaged.sort(function (x, y) {
+                                var rx = buildingRepairROI(c, x), ry = buildingRepairROI(c, y);
+                                return (rx === ry) ? 0 : (rx < ry ? -1 : 1);
+                            });
+                            for (var k = 0; k < damaged.length; k++) {
+                                var b = damaged[k];
+                                if (b.CanRepair && b.CanRepair()) b.Repair();
+                                if (b.get_IsDamaged && b.get_IsDamaged()) { blocked = true; break; }
+                            }
+                            if (blocked) break;
+                        }
+                        if (!blocked) {
+                            var rd = c.get_CityRepairData && c.get_CityRepairData();
+                            if (rd && rd.CanRepairAll && rd.CanRepairAll(ClientLib.Vis.Mode.City)) {
+                                rd.RepairAll(ClientLib.Vis.Mode.City);
+                            }
+                        }
+                        touched++;
+                    } catch (e) { werr("prioritized repair on city failed:", e); }
+                });
+                try { VisMain.set_Mode(prevMode); } catch (e) {}
+                wlog("repairAllPrioritized: touched", touched, "cities");
+                return touched;
+            } catch (e) {
+                werr("repairAllPrioritized failed; falling back to RepairAll(City):", e);
+                return repairAll(ClientLib.Vis.Mode.City);
+            }
         }
 
         // ===== Upgrade Priority engine (faithful port of HuffyTools.UpgradePriority) ====
@@ -1223,6 +1344,9 @@
             var AUTO_REP_UNITS = MM.settings.get("BaseTools.autoRepairUnits", false);
             var AUTO_REP_BLDG = MM.settings.get("BaseTools.autoRepairBuildings", true);
             var AUTO_TIMER_MIN = MM.settings.get("BaseTools.AutoCollectTimerMin", 5);
+            var REP_PRIORITY = MM.settings.get("BaseTools.RepairPriority", true);
+            var REP_ORDER = MM.settings.get("BaseTools.RepairOrder", null);
+            if (!REP_ORDER || !REP_ORDER.length) REP_ORDER = defaultRepairOrder();
 
             // ---- main tabbed window ----
             var tabView = new qx.ui.tabview.TabView();
@@ -1287,6 +1411,98 @@
             });
             timerRow.add(spinTimer);
             tabCR.add(timerRow);
+
+            // Auto-repair priority list (salvaged from TA_Auto_Repair, retired 2026-06-21).
+            // Off-by-default-but-on: REP_PRIORITY defaults to true so the smarter behavior is on
+            // out of the box. Unchecking it falls back to the game's RepairAll order. The list
+            // uses Up/Down/Reset (simpler than the original's drag-drop, same end result).
+            tabCR.add(new qx.ui.core.Spacer(null, 6));
+            var prioHeader = new qx.ui.container.Composite(new qx.ui.layout.HBox(6));
+            var cbPrio = new qx.ui.form.CheckBox("Auto-repair by priority + ROI").set({ value: REP_PRIORITY, toolTipText: "When on, the auto-repair tick walks the priority list below and ROI-sorts damaged buildings within each tier. Off = call the game's RepairAll in its default order." });
+            prioHeader.add(cbPrio, { flex: 1 });
+            tabCR.add(prioHeader);
+
+            var prioGroup = new qx.ui.container.Composite(new qx.ui.layout.VBox(4));
+            prioGroup.add(new qx.ui.basic.Label("Highest first &middot; select then Up/Down to reorder").set({ rich: true, textColor: "#aaaaaa" }));
+            var prioList = new qx.ui.form.List().set({ height: 160, selectionMode: "single" });
+            prioGroup.add(prioList);
+
+            function techDisplayName(techName) {
+                try {
+                    var Res = ClientLib.Res.ResMain.GetInstance(),
+                        Tech = ClientLib.Base.Tech,
+                        ETN = ClientLib.Base.ETechName,
+                        faction = ClientLib.Data.MainData.GetInstance().get_Player().get_Faction(),
+                        dn = Res.GetTech_Obj(Tech.GetTechIdFromTechNameAndFaction(techName, faction)).dn;
+                    if (techName === ETN.Harvester) dn += " (" + Res.GetResource(ClientLib.Base.EResourceType.Tiberium).dn + ")";
+                    else if (techName === ETN.Harvester_Crystal) dn += " (" + Res.GetResource(ClientLib.Base.EResourceType.Crystal).dn + ")";
+                    else if (techName === ETN.Support_Air) {
+                        dn = [dn,
+                              Res.GetTech_Obj(Tech.GetTechIdFromTechNameAndFaction(ETN.Support_Ion, faction)).dn,
+                              Res.GetTech_Obj(Tech.GetTechIdFromTechNameAndFaction(ETN.Support_Art, faction)).dn].join("/");
+                    }
+                    return dn;
+                } catch (e) { return String(techName); }
+            }
+            function repaintPrioList(order) {
+                prioList.removeAll();
+                for (var i = 0; i < order.length; i++) {
+                    var item = new qx.ui.form.ListItem(techDisplayName(order[i]));
+                    item.setUserData("techName", order[i]);
+                    prioList.add(item);
+                }
+            }
+            function savePrioOrder() {
+                var items = prioList.getChildren(), arr = [];
+                for (var i = 0; i < items.length; i++) arr.push(items[i].getUserData("techName"));
+                REP_ORDER = arr;
+                MM.settings.set("BaseTools.RepairOrder", arr);
+                wlog("RepairOrder =", arr);
+            }
+            repaintPrioList(REP_ORDER);
+
+            var btnRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(4));
+            var btnUp = new qx.ui.form.Button("Up").set({ width: 60 });
+            var btnDown = new qx.ui.form.Button("Down").set({ width: 60 });
+            var btnReset = new qx.ui.form.Button("Reset to default").set({ width: 130 });
+            btnUp.addListener("execute", function () {
+                var sel = prioList.getSelection()[0];
+                if (!sel) return;
+                var children = prioList.getChildren(), idx = children.indexOf(sel);
+                if (idx <= 0) return;
+                prioList.addBefore(sel, children[idx - 1]);
+                prioList.addToSelection(sel);
+                savePrioOrder();
+            });
+            btnDown.addListener("execute", function () {
+                var sel = prioList.getSelection()[0];
+                if (!sel) return;
+                var children = prioList.getChildren(), idx = children.indexOf(sel);
+                if (idx < 0 || idx >= children.length - 1) return;
+                prioList.addAfter(sel, children[idx + 1]);
+                prioList.addToSelection(sel);
+                savePrioOrder();
+            });
+            btnReset.addListener("execute", function () {
+                REP_ORDER = defaultRepairOrder();
+                MM.settings.set("BaseTools.RepairOrder", REP_ORDER);
+                repaintPrioList(REP_ORDER);
+                wlog("RepairOrder reset to default");
+            });
+            btnRow.add(btnUp);
+            btnRow.add(btnDown);
+            btnRow.add(new qx.ui.core.Spacer(), { flex: 1 });
+            btnRow.add(btnReset);
+            prioGroup.add(btnRow);
+            tabCR.add(prioGroup);
+            prioGroup.setVisibility(REP_PRIORITY ? "visible" : "excluded");
+
+            cbPrio.addListener("changeValue", function (e) {
+                REP_PRIORITY = !!e.getData();
+                MM.settings.set("BaseTools.RepairPriority", REP_PRIORITY);
+                prioGroup.setVisibility(REP_PRIORITY ? "visible" : "excluded");
+                wlog("RepairPriority =", REP_PRIORITY);
+            });
 
             // ---- Tabs 2-4 ----
             function placeholderTab(title, body) {
@@ -2541,7 +2757,10 @@
             function runAuto() {
                 try {
                     if (AUTO_COLLECT) collectAll();
-                    if (AUTO_REP_BLDG) repairAll(ClientLib.Vis.Mode.City);
+                    if (AUTO_REP_BLDG) {
+                        if (REP_PRIORITY) repairAllPrioritized(REP_ORDER);
+                        else              repairAll(ClientLib.Vis.Mode.City);
+                    }
                     if (AUTO_REP_UNITS) repairAll(ClientLib.Vis.Mode.ArmySetup);
                     refresh();
                 } catch (e) { werr("auto cycle failed:", e); }
@@ -2557,7 +2776,7 @@
             // Initial REFRESH happens right away so the HUD buttons show up immediately if needed.
             refresh();
 
-            LOG.log("ready (" + AUTO_TIMER_MIN + " min auto cycle, autoCollect=" + AUTO_COLLECT + ", autoRepBldg=" + AUTO_REP_BLDG + ", autoRepUnits=" + AUTO_REP_UNITS + ")");
+            LOG.log("ready (" + AUTO_TIMER_MIN + " min auto cycle, autoCollect=" + AUTO_COLLECT + ", autoRepBldg=" + AUTO_REP_BLDG + ", autoRepUnits=" + AUTO_REP_UNITS + ", repPriority=" + REP_PRIORITY + ")");
         }
 
         // Wait until the game UI and MMCommon are both ready, then build once.

@@ -103,7 +103,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | TA_Warchief_Upgrade_Base_Defense_Army | Bulk upgrade all buildings/def/army to target level + cost/time | ✅ |
 | TA_xTrim_Base_Overlay_DR_4_3 | Ctrl-hold heat-map of building upgrade cost/gain efficiency | ✅ |
 | TA_MaelstromTools_Dev_Mod_MCV | Big toolkit: auto-collect/repair, MCV calc, loot, upgrade priority | ⚠️ |
-| TA_Auto_Repair | Auto-repair buildings by ROI/priority on interval | ✅ |
+| ~~TA_Auto_Repair~~ | Auto-repair buildings by ROI/priority on interval | ❌ RETIRED 2026-06-21 (priority + ROI + per-building CanRepair/Repair salvaged INTO MM - Base Tools 1.4.0 + Framework Wrapper 1.2.0; see MM_CONSOLIDATION_PLAN §5 Auto_Repair entry) |
 
 ### Combat reports
 | Script | What it does | Status |

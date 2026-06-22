@@ -3,7 +3,7 @@
 // @description     Foundation library for the CnCTA MikeyMike pack: runs inside the game's page context and re-exposes the game's minified/obfuscated internals as stable, human-readable API names that every other script depends on. Also applies a few global game/browser fixes.
 // @author          NetquiK (original code from infernal_me, KRS_L, krisan) - https://github.com/netquik
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.0
+// @version         1.2.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_FrameworkWrapper.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_FrameworkWrapper.user.js
@@ -40,6 +40,11 @@
         * Battleground...GetNerfAndBoostModifier()             (restored if absent)
         * WorldObjectCity/NPCBase/NPCCamp.get_BaseLevel()/getID()/get_CampType()
                                                                (for map/base scanners)
+        * ClientLib.Data.CityEntity.prototype.CanRepair / Repair
+                                                               (per-building repair primitives;
+                                                                lets MM - Base Tools' auto-repair
+                                                                walk a priority list with ROI sort
+                                                                instead of just calling RepairAll)
    - Aliases System and SharedLib to the $I module registry.
    - Sets the global flag CCTAWrapper_IsInstalled = true so dependent scripts
      can confirm the wrapper is present.
@@ -227,6 +232,43 @@
                 }
             } catch (e) {
                 werr('could not wire WorldObject getters:', e);
+            }
+
+            // --- CityEntity per-building repair primitives: CanRepair / Repair. The Data.CityEntity
+            // prototype doesn't publish these directly, but Vis.City.CityBuilding's CanExecuteCommand
+            // / ExecuteCommand both dispatch on a public RepairBuilding enum value and return
+            // this.<obf6>().<obf6>() of a getter that resolves to a CityEntity method. We pluck the
+            // tail member name from the source via the same recipe Auto_Repair used (NetquiK 22.3),
+            // and attach it as a stable CanRepair / Repair on Data.CityEntity.prototype. Auxiliary
+            // block: failures here DON'T mark the wrapper as failed - consumers should guard with
+            // (typeof e.CanRepair === 'function') and fall back to RepairAll.
+            try {
+                var CE = ClientLib.Data.CityEntity && ClientLib.Data.CityEntity.prototype,
+                    VB = ClientLib.Vis.City && ClientLib.Vis.City.CityBuilding && ClientLib.Vis.City.CityBuilding.prototype;
+                if (CE && VB) {
+                    if (typeof CE.CanRepair !== 'function' && typeof VB.CanExecuteCommand === 'function') {
+                        var canSrc = VB.CanExecuteCommand.toString(),
+                            canM = canSrc.match(/case \$I\.[A-Z]{6}\.RepairBuilding:\{?return this\.[A-Z]{6}\(\)\.([A-Z]{6})\(\);/);
+                        if (canM && typeof CE[canM[1]] === 'function') {
+                            CE.CanRepair = CE[canM[1]];
+                            wlog('CityEntity.CanRepair wired to prototype.' + canM[1]);
+                        } else {
+                            wwarn('CityEntity.CanRepair de-obf failed (pattern mismatch)');
+                        }
+                    }
+                    if (typeof CE.Repair !== 'function' && typeof VB.ExecuteCommand === 'function') {
+                        var doSrc = VB.ExecuteCommand.toString(),
+                            doM = doSrc.match(/case \$I\.[A-Z]{6}\.RepairBuilding:[\s{}retun]+this\.[A-Z]{6}\(\)\.([A-Z]{6})\((?:false|!1)\)/);
+                        if (doM && typeof CE[doM[1]] === 'function') {
+                            CE.Repair = CE[doM[1]];
+                            wlog('CityEntity.Repair wired to prototype.' + doM[1]);
+                        } else {
+                            wwarn('CityEntity.Repair de-obf failed (pattern mismatch)');
+                        }
+                    }
+                }
+            } catch (e) {
+                wwarn('CityEntity repair primitive wiring skipped:', e);
             }
 
             if (ok) {
