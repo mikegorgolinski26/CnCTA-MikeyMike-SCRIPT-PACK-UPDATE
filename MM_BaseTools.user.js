@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.3
+// @version         1.4.4
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -610,7 +610,7 @@
                 }
 
                 var ICONS = {
-                    res: "FactionUI/icons/icon_attack_research_points.png",
+                    res: "webfrontend/ui/common/icn_res_research_mission.png", // confirmed-good (the guessed FactionUI/... path 405'd; see Battle Sim's ResearchPoints icon)
                     tib: "webfrontend/ui/common/icn_res_tiberium.png",
                     cry: "webfrontend/ui/common/icn_res_chrystal.png",
                     dol: "webfrontend/ui/common/icn_res_dollar.png"
