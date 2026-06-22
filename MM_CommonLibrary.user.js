@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.19
+// @version         1.0.20
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -2201,7 +2201,15 @@
                         var items = state.scripts.filter(function (s) { return isPackScript(s) && (s.cat || "") === cat; });
                         if (!items.length) continue;
                         items.sort(function (a, b) { return cleanName(a.name).localeCompare(cleanName(b.name)); });
-                        // each grouping is its own submenu; its scripts (checkboxes) nest inside it
+                        // Single-item categories get hoisted to the top level - a one-item drill-down
+                        // submenu is just clicks-for-no-reason. Multi-item categories keep their submenu
+                        // group label (SIMULATOR / GET INFO HELPER / etc).
+                        if (items.length === 1) {
+                            var soleCb = makeCheckItem(items[0]);
+                            itemsById[items[0].id] = soleCb;
+                            menu.add(soleCb);
+                            continue;
+                        }
                         var sub = new qx.ui.menu.Menu();
                         for (var i = 0; i < items.length; i++) {
                             var cb = makeCheckItem(items[i]);

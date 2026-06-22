@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name            MM - Tiberium Alliances Battle Simulator 2026
+// @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.0
+// @version         1.1.1
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -1425,7 +1425,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             if (window.MMCommon && MMCommon.menu && MMCommon.menu.registerWindow) {
                                 MMCommon.menu.registerWindow({
                                     id: 10028,
-                                    label: "Battle Simulator 2026",
+                                    label: "Battle Sim 2026",
                                     icon: TABS.RES.IMG.Menu,
                                     run: function () {
                                         try {
