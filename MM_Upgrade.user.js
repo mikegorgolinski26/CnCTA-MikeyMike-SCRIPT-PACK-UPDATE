@@ -5,7 +5,7 @@
 // @contributor     NetquiK (https://github.com/netquik)
 // @translator      ES: Nefrontheone
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.0
+// @version         1.0.2
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
@@ -167,12 +167,21 @@
                             return (need <= 0 ? 0 : need / (Con + Bonus + POI) * 3600);
                         },
                         getUpgradeCostsToLevel: function (newLevel) {
+                            // ClientLib.API.City/Defense/Army.* dereferences get_CurrentOwnCity()
+                            // internally - if there's no current own city (e.g. the panel becomes visible
+                            // a tick before the city data is populated), the obfuscated accessor crashes
+                            // on null. Bail out cleanly in that window.
+                            try {
+                                if (!ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity()) return null;
+                            } catch (e) { return null; }
                             if (newLevel > 0) {
-                                switch (ClientLib.Vis.VisMain.GetInstance().get_Mode()) {
-                                    case ClientLib.Vis.Mode.City:         return ClientLib.API.City.GetInstance().GetUpgradeCostsForAllBuildingsToLevel(newLevel);
-                                    case ClientLib.Vis.Mode.DefenseSetup: return ClientLib.API.Defense.GetInstance().GetUpgradeCostsForAllUnitsToLevel(newLevel);
-                                    case ClientLib.Vis.Mode.ArmySetup:    return ClientLib.API.Army.GetInstance().GetUpgradeCostsForAllUnitsToLevel(newLevel);
-                                }
+                                try {
+                                    switch (ClientLib.Vis.VisMain.GetInstance().get_Mode()) {
+                                        case ClientLib.Vis.Mode.City:         return ClientLib.API.City.GetInstance().GetUpgradeCostsForAllBuildingsToLevel(newLevel);
+                                        case ClientLib.Vis.Mode.DefenseSetup: return ClientLib.API.Defense.GetInstance().GetUpgradeCostsForAllUnitsToLevel(newLevel);
+                                        case ClientLib.Vis.Mode.ArmySetup:    return ClientLib.API.Army.GetInstance().GetUpgradeCostsForAllUnitsToLevel(newLevel);
+                                    }
+                                } catch (e) { return null; }
                             }
                             return null;
                         },
@@ -529,6 +538,7 @@
                         getInfo: function () {
                             try {
                                 var lvl, win, city = ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity();
+                                if (!city) return; // no current own city yet (e.g. panel visible a tick before data loads)
                                 var g = this.grid.getLayout();
                                 var bd = city.get_CityBuildingsData();
                                 var ud = city.get_CityUnitsData();
@@ -621,8 +631,13 @@
         //      so it faces into the base view.
         // -------------------------------------------------------------------
         function build() {
-            var MM = window.MMCommon;
-            if (!MM || !MM.ui || !MM.menubar) { werr("MMCommon not ready"); return; }
+            // Local alias for MMCommon. Don't use the bare name "MM" - the qx classes we define above
+            // live under the GLOBAL `MM.*` namespace (window.MM.Upgrade.{Current,All,Repair}), and a
+            // local `var MM = MMCommon` would shadow that, making `new MM.Upgrade.Current()` resolve to
+            // MMCommon.Upgrade (undefined) instead of the qx class. So we alias MMCommon as MMC and
+            // leave the global MM namespace for the qx classes.
+            var MMC = window.MMCommon;
+            if (!MMC || !MMC.ui || !MMC.menubar) { werr("MMCommon not ready"); return; }
 
             defineSectionClasses();
 
@@ -664,7 +679,7 @@
             try { content.setBackgroundColor("#23282b"); content.setPadding(8); } catch (e) {} // default to floating look
 
             // ---- floating panel (frameless, drag-by-body, position persists across reloads) ----
-            var win = MM.ui.Window({
+            var win = MMC.ui.Window({
                 caption: "Upgrade",
                 key: "Upgrade.Window",
                 pos: [120, 120],
@@ -684,7 +699,7 @@
                 if (sp.built) return sp.panel;
                 try {
                     var app = qx.core.Init.getApplication();
-                    if (!app || !app.getDesktop || !MM.menubar || !MM.menubar.styledPanel) return null;
+                    if (!app || !app.getDesktop || !MMC.menubar || !MMC.menubar.styledPanel) return null;
                     var holder = new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({ maxWidth: 280, alignX: "left" });
                     var topCap = new qx.ui.basic.Image("ui/common/bgr_messaging_t.png").set({ allowGrowX: true, height: 11, scale: true, zIndex: 12, marginRight: -5 });
                     var botCap = new qx.ui.basic.Image("ui/common/bgr_messaging_b.png").set({ allowGrowX: true, height: 11, scale: true, zIndex: 12, marginRight: -5 });
@@ -692,7 +707,7 @@
                     // left-anchored dock. (Member Status flips them for its right-anchored variant.)
                     // body = the SAME solid button-missionbar panel used elsewhere; width sized for the
                     // resource cost rows + the spinner (wider than the Member Status roster).
-                    var body = MM.menubar.styledPanel({ width: 230, spacing: 4, padding: [4, 6, 4, 6] });
+                    var body = MMC.menubar.styledPanel({ width: 230, spacing: 4, padding: [4, 6, 4, 6] });
                     body.setMarginRight(5);  // gray strip on the RIGHT of the body (facing into the base view)
                     body.setAlignX("left");
                     var dataSection = new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({ allowGrowX: true, decorator: "pane-navigation-bar" });
@@ -761,7 +776,20 @@
                 } catch (e) { werr("setMenuMode:", e); }
             }
 
-            // ---- title text auto-updates with view mode; panel auto-hides when leaving a base ----
+            // The data the panel shows (current/all upgrade costs, repair times) is base-scoped: it
+            // needs `get_CurrentOwnCity()` populated, which is only true while in City/DefenseSetup/
+            // ArmySetup mode. On the region map there's no current own city - the original WarChiefs
+            // script handled this by auto-closing the float window when leaving a base. We do the
+            // same for both modes: never show the panel outside a base view (even when pinned), and
+            // auto-show the docked panel when entering one (this is the "pinned" UX = "always visible
+            // while I'm working in a base").
+            function inBaseMode(mode) {
+                return mode === ClientLib.Vis.Mode.City
+                    || mode === ClientLib.Vis.Mode.DefenseSetup
+                    || mode === ClientLib.Vis.Mode.ArmySetup;
+            }
+
+            // ---- title text auto-updates with view mode; panel auto-shows/hides on enter/leave ----
             function onViewModeChanged(oldMode, newMode) {
                 if (oldMode === newMode) return;
                 try {
@@ -770,9 +798,18 @@
                         case ClientLib.Vis.Mode.City:         label = "Upgrade: Base"; break;
                         case ClientLib.Vis.Mode.DefenseSetup: label = "Upgrade: Defense"; break;
                         case ClientLib.Vis.Mode.ArmySetup:    label = "Upgrade: Offense"; break;
-                        default: hidePanel(); return;
+                        default:
+                            // Left a base view (back to region etc.). Hide whichever container is up,
+                            // and skip the section onAppear churn until we're back in a base.
+                            hidePanel();
+                            return;
                     }
                     titleLbl.setValue(label);
+                    // When pinned, the docked panel "follows" you into the base - auto-show it on enter.
+                    // (Float mode stays closed until the user clicks the trigger button - matches original.)
+                    if (menuOn()) {
+                        try { buildSidePanel(); placeContent(); if (sp.panel) sp.panel.show(); } catch (e) { werr("auto-show on enter:", e); }
+                    }
                 } catch (e) { werr("onViewModeChanged:", e); }
             }
             try {
@@ -814,7 +851,7 @@
 
             // ---- live enable/disable from the CnC Pack menu ----
             try {
-                MM.lifecycle.watch(SCRIPT_ID, {
+                MMC.lifecycle.watch(SCRIPT_ID, {
                     onDisable: function () {
                         try { removeTrigger(); hidePanel(); if (sp.panel) { try { sp.panel.exclude(); } catch (e) {} } } catch (e) { werr("onDisable:", e); }
                     },
@@ -824,25 +861,33 @@
                 });
             } catch (e) { werr("lifecycle.watch:", e); }
 
-            // Make sure the side panel auto-restores on reload when pinned.
+            // Make sure the side panel auto-restores on reload when pinned AND when the user is
+            // currently in a base view. If they're on the region map at load time, we leave the docked
+            // panel hidden - it'll auto-show the next time they enter a base (handled by
+            // onViewModeChanged above). This avoids firing the section onAppear handlers (which call
+            // ClientLib.API.City.GetUpgradeCostsForAllBuildingsToLevel etc.) while get_CurrentOwnCity()
+            // is null and crashes the game's obfuscated UPFMQL accessor.
             updatePin();
             placeContent();
-            if (menuOn()) {
+            var currentMode;
+            try { currentMode = ClientLib.Vis.VisMain.GetInstance().get_Mode(); } catch (e) { currentMode = null; }
+            if (menuOn() && inBaseMode(currentMode)) {
                 if (sp.panel) sp.panel.show();
                 // The desktop should be ready, but keep a short retry in case the menu bar lags behind nav-ready.
                 if (!sp.built) {
                     var mTries = 0;
                     (function tryDock() {
                         try {
-                            if (!menuOn()) return;
+                            if (!menuOn() || !inBaseMode(ClientLib.Vis.VisMain.GetInstance().get_Mode())) return;
                             if (buildSidePanel()) { placeContent(); if (sp.panel) sp.panel.show(); return; }
                         } catch (e) {}
                         if (++mTries < 60) window.setTimeout(tryDock, 500);
                     })();
                 }
             } else {
-                // Floating mode: panel stays closed until the user clicks the trigger button (the original
-                // entry point). Don't auto-open here - we removed restoreOpen for the same reason.
+                // Floating mode (or pinned but not in a base): panel stays closed until the user clicks
+                // the trigger button (float) / enters a base view (pinned). Don't auto-open here -
+                // restoreOpen is intentionally false for the same reason.
                 try { win.close(); } catch (e) {}
             }
 
