@@ -3,7 +3,7 @@
 // @namespace      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include        https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description    Makes the game's own pop-out menu overlays (Mail, Forum, Ranking, alliance/diplomacy panels - anything that flies out from the top menu bar) draggable. Drag them anywhere instead of being locked to centre, and the position is remembered across refreshes.
-// @version        1.0.1
+// @version        1.0.2
 // @license        CC-BY-NC-SA 4.0
 // @author         MikeyMike (rework of Netquik's "MovableMenuOverlay")
 // @contributor    Netquik [SoO] (https://github.com/netquik)
@@ -104,6 +104,64 @@
         var origCenterPosition = null; // saved game original of MenuOverlayWidget.prototype.centerPosition
         var installed = false;
 
+        // ---- position persistence (settings-backed, like our other MM dialogs) -----
+        // The Player/Alliance ranking tabs (and Mail/Forum/etc.) are SEPARATE menu overlays, so
+        // switching tabs re-fires the wrap logic. The original "carried" position via
+        // getLayoutProperties(), which is STALE: qooxdoo's MMovable moves the widget by writing to
+        // the DOM, not to layout properties - so the carry never reflected an actual drag and the
+        // recreate-per-open made the dialog jump. Instead we persist the REAL rendered position
+        // (getContentLocation, desktop-relative) on drag-end and on close, and ALWAYS restore from
+        // that setting on open. Deterministic: every open/switch lands on the remembered spot.
+        function defaultPos() {
+            try {
+                var A = qx.core.Init.getApplication();
+                var C = A.getDesktop().getBounds();
+                var B = A.getMenuBar().getBounds();
+                return { left: Math.floor((C.width - webfrontend.gui.MenuOverlayWidget.OverlayWidth) / 2), top: B.height };
+            } catch (e) { return { left: 129, top: 33 }; }
+        }
+        function clampPos(p) {
+            try {
+                var C = qx.core.Init.getApplication().getDesktop().getBounds();
+                if (C) {
+                    if (typeof p.left !== "number") p.left = 0;
+                    if (typeof p.top !== "number") p.top = 0;
+                    if (p.left > C.width - 50) p.left = C.width - 50;
+                    if (p.top > C.height - 50) p.top = C.height - 50;
+                    if (p.left < 0) p.left = 0;
+                    if (p.top < 0) p.top = 0;
+                }
+            } catch (e) {}
+            return p;
+        }
+        function loadPos() {
+            try {
+                var s = (MM && MM.settings) ? MM.settings.get(POS_KEY, null) : null;
+                if (s && typeof s.left === "number" && typeof s.top === "number") return { left: s.left, top: s.top };
+            } catch (e) {}
+            return null;
+        }
+        function savePos(p) {
+            if (!p || typeof p.left !== "number" || typeof p.top !== "number") return;
+            try { if (MM && MM.settings) MM.settings.set(POS_KEY, { left: Math.round(p.left), top: Math.round(p.top) }); } catch (e) {}
+        }
+        // Read the REAL rendered, desktop-relative position of the container. getContentLocation()
+        // reflects the live DOM rect (so it captures a MMovable drag regardless of whether MMovable
+        // updated layout props or only the DOM). Returns null if not meaningfully laid out yet
+        // (e.g. tab backgrounded - getContentLocation reads null then).
+        function visualPos(mmo) {
+            try {
+                if (!mmo || typeof mmo.getContentLocation !== "function") return null;
+                var desktop = qx.core.Init.getApplication().getDesktop();
+                var loc = mmo.getContentLocation();
+                var dloc = desktop.getContentLocation();
+                if (loc && dloc && typeof loc.left === "number" && (loc.right - loc.left) > 80) {
+                    return { left: loc.left - dloc.left, top: loc.top - dloc.top };
+                }
+            } catch (e) {}
+            return null;
+        }
+
         // ---- the draggable container -----------------------------------------------
         function defineMMOverlayClass() {
             if (qx.Class.isDefined("MMOverlay")) return;
@@ -121,43 +179,35 @@
                 },
                 members: {
                     MMO: null,
-                    // Build (or recycle) the draggable container. Carries the dragged position forward when
-                    // switching overlays, restores the persisted position on the first open after a refresh,
-                    // clamps it on-screen, and re-persists it.
+                    // Build the draggable container at the REMEMBERED position. Before tearing down an
+                    // existing container (tab switch), capture wherever the user dragged it so the new
+                    // one lands in the same spot. Position ALWAYS comes from settings (or the centered
+                    // default) - never from the stale getLayoutProperties() that made it jump.
                     createMM: function () {
                         var A = qx.core.Init.getApplication();
-                        var C = A.getDesktop().getBounds();
-                        var B = A.getMenuBar().getBounds();
-                        var defX = Math.floor((C.width - webfrontend.gui.MenuOverlayWidget.OverlayWidth) / 2);
-                        var defY = B.height;
-                        var position = { left: defX, top: defY };
-                        // First open after a refresh: restore the saved drag position.
-                        if (!this.MMO) {
-                            try {
-                                var saved = MM && MM.settings ? MM.settings.get(POS_KEY, null) : null;
-                                if (saved && typeof saved.left === "number" && typeof saved.top === "number") {
-                                    position = { left: saved.left, top: saved.top };
-                                }
-                            } catch (e) {}
-                        } else {
-                            // Switching overlays: keep wherever the user dragged the previous one.
-                            position = this.MMO.getLayoutProperties();
-                            this.MMO.toggleMovable();
-                            A.getDesktop().remove(this.MMO);
+                        // Capture the old container's real position before discarding it (covers a drag
+                        // made just before switching tabs).
+                        if (this.MMO) {
+                            var cur = visualPos(this.MMO);
+                            if (cur) savePos(clampPos(cur));
+                            try { this.MMO.toggleMovable(); } catch (e) {}
+                            try { A.getDesktop().remove(this.MMO); } catch (e) {}
                         }
-                        // Clamp on-screen (a smaller viewport since last session could push it off-edge).
-                        try {
-                            if (C) {
-                                if (position.left > C.width - 50) position.left = C.width - 50;
-                                if (position.top > C.height - 50) position.top = C.height - 50;
-                                if (position.left < 0) position.left = 0;
-                                if (position.top < 0) position.top = 0;
-                            }
-                        } catch (e) {}
-                        // Persist the current position (default, restored, or carried-over drag pos).
-                        try { if (MM && MM.settings) MM.settings.set(POS_KEY, { left: position.left, top: position.top }); } catch (e) {}
+                        var position = clampPos(loadPos() || defaultPos());
+                        savePos(position); // first run seeds the default; keeps the setting in sync
                         this.MMO = new MMOverlay(new qx.ui.layout.Basic());
                         A.getDesktop().add(this.MMO, position);
+                        // Capture drag-end: pointerup on the move handle bubbles to the container; read
+                        // the real rendered position a tick later and persist it.
+                        var self = this;
+                        try {
+                            this.MMO.addListener("pointerup", function () {
+                                window.setTimeout(function () {
+                                    var p = visualPos(self.MMO);
+                                    if (p) { savePos(clampPos(p)); wlog("drag saved pos", p); }
+                                }, 0);
+                            });
+                        } catch (e) {}
                         return this.MMO;
                     },
                     // Arm dragging on the overlay's title/header child. The index is the game's markup
@@ -188,6 +238,10 @@
                         : qxA[oOE] instanceof webfrontend.gui.MenuOverlayWidget && qxA[oOE].setActive(false);
                     if (qxA[oOE].getLayoutParent() instanceof MMOverlay) {
                         var b = MMOverlay.getInstance().MMO;
+                        // Persist where the user left it before tearing down, so close->reopen and
+                        // tab switches return to the same spot.
+                        var cp = visualPos(b);
+                        if (cp) savePos(clampPos(cp));
                         // IMPORTANT for closing mail messages: deactivate before removing.
                         qxA[oOE]._deactivate();
                         -1 != b.indexOf(qxA[oOE]) && b.remove(qxA[oOE]);
