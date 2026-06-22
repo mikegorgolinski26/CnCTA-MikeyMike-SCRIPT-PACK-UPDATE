@@ -299,8 +299,35 @@ Priority order (high → low), with the new MM name and the one-line reason:
 - **TA_New_Resource_Trade_Window** → salvage `SelfTrade` send primitive + per-base cost math
   (`CalculateTradeCostToCoord`/`CanTrade`) → `MMCommon.trade.selfTrade`. Class-replacement UI is too fragile
   to keep; Base Tools owns transfer.
-- **TA_Transfer_All_resources** → salvage the **serial send-queue with single-retry-per-item** → `trade`
-  module (so Base Tools batches transfers robustly). Subset of the Trade Window otherwise.
+- ~~**TA_Transfer_All_resources**~~ (KRS_L, 1.6.2, ~161 LOC) — **RETIRED 2026-06-21** (file + bg row id
+  10079 gone). Was a single "Transfer All" button injected into the game's TradeOverlay window: select
+  a target base + a resource (Tib/Cry toggle), tick the confirm checkbox to compute total credit fee,
+  click Transfer All to fan-in EVERY other base's full resource pool into the target via a serial
+  SelfTrade queue with single-retry-per-item. Cut from initial release — Mike: no feature lift wanted
+  right now (same don't-ship-inert-code call as Report_Stats / Formation_Saver / etc).
+  **Salvage spec for a future MMCommon.trade.* module (long overdue per §7) — TWO live consumers
+  already duplicate this pattern inline (MM - Base Tools `planTransfer`+`autoTransferAndUpgrade`,
+  MM - Upgrade `planResourceTransfer`+`runTransferPlan`), and a THIRD will be added when
+  TA_New_Resource_Trade_Window retires. Lift opportunity:**
+  - `MMCommon.trade.canTrade(city)` → `(city.CanTrade && city.CanTrade() === ClientLib.Data.ETradeError.None)`.
+    Used in all 3 consumers; centralizes the ETradeError enum dependency.
+  - `MMCommon.trade.cost(srcCity, dstCity, amount)` → `srcCity.CalculateTradeCostToCoord(dstCity.get_PosX(), dstCity.get_PosY(), amount)`
+    with try/catch returning Infinity on failure (matches what BaseTools/Upgrade already do).
+  - `MMCommon.trade.selfTrade(targetCity, sourceCity, ert, amount, doneCb)` → wraps
+    `ClientLib.Net.CommunicationManager.GetInstance().SendCommand("SelfTrade", {targetCityId, sourceCityId, resourceType, amount}, phe.cnc.Util.createEventDelegate(ClientLib.Net.CommandResult, ctx, doneCb), null, true)`.
+    Note: in BOTH live consumers Mike learned that **SelfTrade's result code is NOT a reliable success
+    signal** — they pace transfers and confirm by EFFECT (poll target's `GetResourceCount`). The
+    Transfer_All version's `if (result != 0 && retry == false) → retry once` pattern is a different
+    take (network-level retry); the effect-poll is better for the upgrade flow. The MMCommon helper
+    should expose the raw send and let callers pick their confirmation strategy.
+  - `MMCommon.trade.queue(items, opts)` (or `transferPlan(target, ert, amount)` →
+    `runPlan(plan, onAllDone)`) → the cheapest-per-unit-credit source-ordering + serial-send +
+    effect-poll pattern that BaseTools and Upgrade have copy-pasted. **High-value dedup target** when
+    a touch-existing-consumers refactor is wanted (currently risky — Mike has live-verified both).
+  - The Transfer_All UI itself (button + checkbox + cost label in the game's TradeOverlay) was not
+    salvaged — Base Tools owns transfer flows; if a "fan-in everything" mode is ever wanted, add it as
+    an Upgrade Priority option, not a separate trade-window button.
+  - Full original is in git history at SCRIPT-PACK `f6496ac` for a full restore.
 
 ---
 
@@ -328,7 +355,12 @@ Priority order (high → low), with the new MM name and the one-line reason:
 **New modules**
 - `base.fetchAllianceInfo / fetchPublicPlayerBases / fetchPlayerByName / rankingAlliances` — bulk
   `SendSimpleCommand` path (§1.1). **Build first** — fixes the off/def survey at the root.
-- `trade.selfTrade(src,dst,resType,amount)` + serial retry-queue — from Trade Window + Transfer All.
+- `trade.selfTrade(src,dst,resType,amount)` + `canTrade(city)` + `cost(src,dst,amount)` + plan/queue
+  helpers. **High-value dedup target — TWO live consumers (MM - Base Tools, MM - Upgrade) currently
+  carry near-identical inline copies of `planResourceTransfer` / `runTransferPlan` (cheapest-per-unit
+  source ordering + serial SelfTrade + effect-poll for arrival) and a THIRD copy is in
+  TA_New_Resource_Trade_Window pending retirement.** Full spec captured in §5 Transfer_All_resources
+  RETIRED entry. Refactor the two consumers when a touch-working-code pass is wanted.
 - `export.csv(rows[][]) / download(blob, filename)` — RETIRED salvage spec in §5 (POI_ExporterTools);
   reusable by Base Scanner, Reports, POI export when first consumer lands.
 - `reports.scanAll(type)` + combined cost/loot model — from Report_Summary + Report_Stats.
@@ -415,11 +447,12 @@ RETIRED (cut from initial release; salvage spec captured in §4 entry 5): POI_Ex
 RETIRED (POI window was a POIs_Analyser dup; scanner/upgrade already commented; salvage spec in §5 The_Green_Cross_Tools entry): The_Green_Cross_Tools.
 RETIRED (priority + ROI + per-building CanRepair/Repair lifted INTO MM - Base Tools 1.4.0 + Framework Wrapper 1.2.0; §5 Auto_Repair entry): Auto_Repair.
 RETIRED (cut from initial release; salvage spec — schema + Save/Load API — in §5 Formation_Saver entry): Formation_Saver.
+RETIRED (cut from initial release; salvage spec — canTrade / cost / selfTrade / plan-and-queue, plus dedup target for 2 live consumers — in §5 Transfer_All_resources entry): Transfer_All_resources.
 RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 entry on Info_Sticker): Info_Sticker.
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
 CityMoveInfoExtend, Map, Report_Summary,
 View_Player_Base, CnCTAOpt_Link_Button,
-New_Resource_Trade_Window, Transfer_All_resources.
+New_Resource_Trade_Window.
 KEEP-PENDING-REVIEW: xTrim_Base_Overlay_DR_4_3, MovableMenuOverlay, Supplies_Mod,
 Multissesion_MOD. (TheMovement → MM-IFIED 2026-06-21, MM - The Movement id 10209.)

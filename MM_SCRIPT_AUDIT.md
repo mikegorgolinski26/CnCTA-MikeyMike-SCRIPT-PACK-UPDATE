@@ -90,7 +90,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | Script | What it does | Status |
 |---|---|---|
 | TA_New_Resource_Trade_Window | Replaces trade overlay: multi-base bulk transfer + filters | ✅ |
-| TA_Transfer_All_resources | "Transfer All" button (brittle hardcoded UI indices) | ⚠️🔁 |
+| ~~TA_Transfer_All_resources~~ | "Transfer All" button (brittle hardcoded UI indices) | ❌ RETIRED 2026-06-21 (cut from initial release; salvage spec — canTrade / cost / selfTrade / cheapest-first plan + serial queue, plus dedup target for 2 live consumers — captured in MM_CONSOLIDATION_PLAN §5 Transfer_All_resources entry, for a future MMCommon.trade.* module) |
 | TA_Supplies_Mod | Hides spendable funds in shop to avoid misclicks | ✅ |
 
 ### Upgrade / build automation (overlap)
