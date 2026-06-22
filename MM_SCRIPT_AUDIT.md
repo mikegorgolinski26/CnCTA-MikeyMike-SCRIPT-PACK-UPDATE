@@ -63,7 +63,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | TA_PluginsLib_mhLoot | Loot/repair/distance overlay + **library** for mh* scripts (getBypass) | ⚠️ (library) |
 | TA_PvP_PvE_Player_Info_Mod | Splits destroyed-base count PvP/PvE + POI tab in player info | ✅ |
 | TA_Real_POI_Bonus | Real POI gain/loss corrected for rank multiplier | ✅ |
-| TA_Repair_Time_Of_Death | Repair-time-at-death label on ghost cities | ✅ |
+| ~~TA_Repair_Time_Of_Death~~ | Repair-time-at-death label on ghost cities | ❌ RETIRED 2026-06-21 (cut from initial release; was a §4 MM-IFY candidate; salvage spec — repair.offenseAtDeath(city) 3-line helper using GetResourceCountStep at the death step — captured in MM_CONSOLIDATION_PLAN §4 entry 11 Repair_Time_Of_Death, for a future Off/Def Bubbles ghost-base mode) |
 | TA_CityMoveInfoExtend | Adds in-range base count + wave estimate to move-cooldown tooltip | ✅ |
 | TA_Warchief_Sector_HUD | Tiny HUD: current coord + 8-way sector; click→chat / jump | ✅ |
 

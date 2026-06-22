@@ -166,8 +166,26 @@ Priority order (high → low), with the new MM name and the one-line reason:
 10. **TA_ADDON_City_Online_Status_Colorer_SC → MM - Online Status Colorer** — on-map member-online
     coloring (a delivery mode Member Status doesn't have). Highest fragility (patches a render hot-path);
     move the `UpdateColor`/`SetCanvasValue` de-obf into the **Wrapper**.
-11. **TA_Repair_Time_Of_Death → (fold into MM - Player Base Info / region-tooltip family)** — tiny unique
-    ghost-base "offense repair at death" intel. Add `repair.offenseAtDeath(city)` to MMCommon.
+11. ~~**TA_Repair_Time_Of_Death**~~ — **RETIRED 2026-06-21** (file + bg row id 10054 gone; was a §4 MM-IFY
+    candidate, cut from initial release). Was ~103 LOC by petui: appended an "offense repair time"
+    label (icon + value) to the in-game `RegionGhostStatusInfo` widget — the popup that appears when
+    you click a ghosted (destroyed) base on the region map. Displayed `<repairTime_at_death> /
+    <max>` so you could see how much offense repair the base had banked the moment it died.
+    NOEVIL: patches a `getObject` getter onto `RegionGhostStatusInfo.prototype` by regexing
+    `setObject` (the same `setObject → getObject` recipe MMCommon already has —
+    `MMCommon.deobf.ensureGetObject` would replace the inline regex on a future rebuild).
+    **Salvage spec for a future fold into MM - Off/Def Bubbles ghost-base mode (post-release):**
+    Given a `ClientLib.Data.City` for a ghost base:
+    ```js
+    var stepOfDeath = city.GetResourceData(ClientLib.Base.EResourceType.RepairChargeBase).Step;
+    var charge     = city.get_RepairOffenseResources().get_RepairChargeOffense();
+    var atDeath    = ClientLib.Base.Resource.GetResourceCountStep(charge, stepOfDeath);
+    // present as: getTimespanString(time.GetTimeSpan(atDeath)) + " / " + getTimespanString(time.GetTimeSpan(charge.Max))
+    ```
+    The `Resource.GetResourceCountStep(resData, step)` API freezes the regen-decay calculation at the
+    death step — that's the load-bearing trick the script discovered. Belongs in
+    `MMCommon.repair.offenseAtDeath(city) → { atDeath, max }` (per §7) when the first consumer needs
+    it. Full original is in git history at SCRIPT-PACK `59e4cd1` for a full restore.
 
 ---
 
@@ -414,9 +432,10 @@ Priority order (high → low), with the new MM name and the one-line reason:
 **Extend existing modules**
 - `base.classifyResourceBuilding(building)` (Tib/Cry via `OwnProdModifiers`); `base.status` += support-
   building Ion→Art→Air detection; `base.getResTime(...)` resource-time-to-afford (from Warchief Upgrade).
-- `repair.offenseAtDeath(city)` (Repair_Time_Of_Death). Auto_Repair's ROI-on-repair-cost math
-  already lives in MM - Base Tools (`buildingRepairROI`); if a 2nd consumer ever needs it, lift
-  to `MMCommon.repair.buildingROI` rather than duplicating.
+- `repair.offenseAtDeath(city)` — RETIRED salvage spec in §4 entry 11 (Repair_Time_Of_Death);
+  trivial 3-line helper, lift when first consumer (likely Off/Def Bubbles ghost-base mode) lands.
+  Auto_Repair's ROI-on-repair-cost math already lives in MM - Base Tools (`buildingRepairROI`); if a
+  2nd consumer ever needs it, lift to `MMCommon.repair.buildingROI` rather than duplicating.
 - `loot.ofCity` → prefer `GetLootFromCurrentCity()` (mhLoot).
 - `map`: consolidate the world→screen **marker projection** + pan/zoom reposition/resize so Tunnel Info,
   Attack Range, Player Base Info share ONE (currently 3 copies); add region scan→canvas paint helper (TA_Map).
@@ -481,8 +500,7 @@ RETIRE: Count_Forgotten_Bases_Range, New_Custom_Flunik_Tools.
 QUARANTINE: leoStats, BaseShare. (Hotkeys salvaged + retired 2026-06-21.)
 MM-IFY: Tunnel_Info ✅, CD_PvP_Alert_Status ✅, Real_POI_Bonus ✅,
 Warchief_Upgrade_Base_Defense_Army ✅,
-Warchief_Sector_HUD, Zoom, ADDON_City_Online_Status_Colorer_SC,
-Repair_Time_Of_Death.
+Warchief_Sector_HUD, Zoom, ADDON_City_Online_Status_Colorer_SC.
 RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6): Report_Stats.
 RETIRED (cut from initial release; salvage spec captured in §4 entry 5): POI_ExporterTools.
 RETIRED (POI window was a POIs_Analyser dup; scanner/upgrade already commented; salvage spec in §5 The_Green_Cross_Tools entry): The_Green_Cross_Tools.
@@ -490,6 +508,7 @@ RETIRED (priority + ROI + per-building CanRepair/Repair lifted INTO MM - Base To
 RETIRED (cut from initial release; salvage spec — schema + Save/Load API — in §5 Formation_Saver entry): Formation_Saver.
 RETIRED (cut from initial release; salvage spec — canTrade / cost / selfTrade / plan-and-queue, plus dedup target for 2 live consumers — in §5 Transfer_All_resources entry): Transfer_All_resources.
 RETIRED (cut from initial release; salvage spec — bulk reports scanAll pipeline + per-report cost/loot extraction + per-base × per-date matrix — in §5 Report_Summary entry; closes the reports cluster with §4 entry 6 Report_Stats): Report_Summary.
+RETIRED (cut from initial release; was §4 MM-IFY candidate; salvage spec — repair.offenseAtDeath(city) 3-line helper — in §4 entry 11 Repair_Time_Of_Death): Repair_Time_Of_Death.
 RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 entry on Info_Sticker): Info_Sticker.
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
