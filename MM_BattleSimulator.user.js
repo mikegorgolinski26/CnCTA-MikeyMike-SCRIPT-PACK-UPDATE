@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.3
+// @version         1.1.4
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -2659,6 +2659,10 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             console.groupEnd();
                         }
                     },
+                    events: {
+                        "OnOptimizeStart": "qx.event.type.Data", // data = preset number (6/7); fired when a run begins
+                        "OnOptimizeEnd": "qx.event.type.Data"    // fired when a run ends (finished OR cancelled)
+                    },
                     members: {
                         __running: false,
                         __queue: null,
@@ -3006,6 +3010,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.__kicksUsed = 0;
                             this.__inflight = 0;
                             this.__running = true;
+                            try { this.fireDataEvent("OnOptimizeStart", this.__presetNum); } catch (e) {} // lets the UI swap the optimize buttons to "Stop"
                             // settings (with sane defaults / clamps)
                             var gi = function (k, d) {
                                 try {
@@ -3291,6 +3296,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         },
                         __finish: function (stopped) {
                             this.__running = false;
+                            try { this.fireDataEvent("OnOptimizeEnd", this.__presetNum); } catch (e) {} // lets the UI restore the optimize buttons
                             clearTimeout(this.__stepT);
                             clearTimeout(this.__safetyT);
                             // Restore auto-simulate to its previous state.
@@ -3783,6 +3789,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 appearance: "button-addpoints"
                             });
                             btnOptWin.addListener("click", this.onClick_btnOptimizeWin, this);
+                            this.__btnOptWin = btnOptWin; // kept so the run start/end handlers can toggle it to "Stop"
                             this.boxMove.add(btnOptWin, {
                                 row: 6,
                                 column: 0,
@@ -3796,11 +3803,20 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 appearance: "button-addpoints"
                             });
                             btnOptDF0.addListener("click", this.onClick_btnOptimizeDF0, this);
+                            this.__btnOptDF0 = btnOptDF0; // kept so the run start/end handlers can toggle it to "Stop"
                             this.boxMove.add(btnOptDF0, {
                                 row: 7,
                                 column: 0,
                                 colSpan: 3
                             });
+                            // While a run is in progress, turn the optimize buttons into "Stop" so the
+                            // user can cancel (events fire whether the run was started by a button or the
+                            // console). Wired here once the buttons exist.
+                            try {
+                                var opt = TABS.OPTIMIZER.getInstance();
+                                opt.addListener("OnOptimizeStart", this.__onOptimizeStart, this);
+                                opt.addListener("OnOptimizeEnd", this.__onOptimizeEnd, this);
+                            } catch (e) {}
                             // MikeyMike: open the optimizer options panel (added last so it doesn't shift
                             // the getChildren()[12] skip-victory index used below).
                             var btnOptions = new qx.ui.form.Button(this.tr("Optimizer Options")).set({
@@ -4035,10 +4051,34 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             TABS.UTIL.Formation.Set(formation);
                         },
                         onClick_btnOptimizeWin: function (e) { // MikeyMike: lowest repair, must win (preset #6)
-                            TABS.OPTIMIZER.getInstance().Run(6);
+                            var opt = TABS.OPTIMIZER.getInstance();
+                            if (opt.isRunning()) { opt.Stop(); return; } // button is "Stop" while running -> cancel
+                            opt.Run(6);
                         },
                         onClick_btnOptimizeDF0: function (e) { // MikeyMike: lowest repair for DF=0 (preset #7)
-                            TABS.OPTIMIZER.getInstance().Run(7);
+                            var opt = TABS.OPTIMIZER.getInstance();
+                            if (opt.isRunning()) { opt.Stop(); return; } // button is "Stop" while running -> cancel
+                            opt.Run(7);
+                        },
+                        // While the optimizer runs, swap the active button to "Stop" (click to cancel) and
+                        // disable the other; restore both when the run ends (finished or cancelled).
+                        __onOptimizeStart: function (e) {
+                            try {
+                                var p = e.getData();
+                                if (p === 7) {
+                                    if (this.__btnOptDF0) this.__btnOptDF0.setLabel("■ " + this.tr("Stop"));
+                                    if (this.__btnOptWin) this.__btnOptWin.setEnabled(false);
+                                } else {
+                                    if (this.__btnOptWin) this.__btnOptWin.setLabel("■ " + this.tr("Stop"));
+                                    if (this.__btnOptDF0) this.__btnOptDF0.setEnabled(false);
+                                }
+                            } catch (err) {}
+                        },
+                        __onOptimizeEnd: function (e) {
+                            try {
+                                if (this.__btnOptWin) { this.__btnOptWin.setLabel(this.tr("Best Win")); this.__btnOptWin.setEnabled(true); }
+                                if (this.__btnOptDF0) { this.__btnOptDF0.setLabel(this.tr("Best DF 0")); this.__btnOptDF0.setEnabled(true); }
+                            } catch (err) {}
                         },
                         onClick_btnOptions: function (e) { // MikeyMike: open the optimizer options panel
                             try {
