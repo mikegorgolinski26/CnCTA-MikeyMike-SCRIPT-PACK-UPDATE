@@ -28,8 +28,8 @@ scripts, fan-out of 7 read-only agents). Supersedes the per-script verdicts in `
 ## 1. The three biggest cross-cutting wins (do these first — they unlock multiple retires)
 
 1. **Bulk public-data fetch path** — `CommunicationManager.SendSimpleCommand("GetPublicAllianceInfo"/"GetPublicPlayerInfo"/"GetPublicPlayerInfoByName"/"RankingGetData", …)` + `phe.cnc.Util.createEventDelegate`.
-   Found in **TA_POIs_Analyser**, **TA_Real_POI_Bonus** (live keepers). (Also was in the now-RETIRED
-   TA_CD_PvP_Quick_Map + TA_PvP_PvE_Ranking… — path captured here, so retiring them lost nothing.)
+   Found in **TA_Real_POI_Bonus** (the live keeper that yields it). (Also was in the now-RETIRED
+   TA_CD_PvP_Quick_Map + TA_PvP_PvE_Ranking… + TA_POIs_Analyser — path captured here, so retiring them lost nothing.)
    Returns whole alliances'/players' base lists in one round-trip. **LIVE-SNIFFED 2026-06-21 — the payload is
    enumeration only:** base entry = `{i, n, p, x, y}` (id/name/**points**/coords), member entry =
    `{c, f, i, n, p, r}` (cityCount/faction/id/name/points/rank). **It does NOT carry per-base offense/defense**
@@ -94,8 +94,12 @@ Priority order (high → low), with the new MM name and the one-line reason:
    equivalent. Most robust legacy script. Event-drive via `net.attach` instead of the 5s poll; `enable_sound`→`settings`.
 3. **TA_Real_POI_Bonus → MM - Real POI Bonus** — rank-corrected POI gain/loss; also yields the
    `RankingGetData` bulk path. Convert its `getObject` hack → `deobf.objectMemberOfSetter`.
-4. **TA_POIs_Analyser → MM - POI Analyser** — POI score/tier/rank tables + acquisition simulator. Move the
-   POI math into `MMCommon.poi.*`.
+4. ~~**TA_POIs_Analyser → MM - POI Analyser**~~ — **RETIRED 2026-06-21** (Mike: skipping it; file + bg row
+   id 10014 gone). Nothing salvaged into MMCommon as live code (per the don't-ship-unused-code rule): its POI
+   score/tier/rank/bonus math was thin passthrough to `ClientLib.Base.PointOfInterestTypes` (a future
+   `MMCommon.poi.*` can call that API directly), and the `RankingGetData` bulk path is already documented (§1.1)
+   and live in Real POI Bonus. Its acquisition SIMULATOR (project score→tier→rank→bonus vs rival alliances) +
+   the AllianceOverlay tab-inject NOEVIL recipe are in git history if ever wanted.
 5. **TA_POI_ExporterTools → MM - POI Exporter** — POI→CSV + sector survey; modern/clean code. Lift CSV +
    sector helpers to MMCommon (§6).
 6. ~~**TA_Report_Stats → MM - Report Stats**~~ — **RETIRED 2026-06-21 (Mike: deferred out of the initial
@@ -172,8 +176,8 @@ Priority order (high → low), with the new MM name and the one-line reason:
   worldToScreen`; POI min/max-level filter UI; two-point "border line" overlay concept.
 - ~~**TA_CD_PvP_Quick_Map**~~ → **RETIRED 2026-06-21** (Mike: not pursuing it; file + bg row gone). Nothing
   salvaged into MMCommon now, but nothing lost: the bulk-fetch path it used is documented in §1.1 and still
-  lives in keeper scripts (Real POI Bonus / POIs Analyser / PvP_PvE_Ranking) when `base.fetch*` is built. Its
-  radar/canvas view + alliance-picker were not wanted.
+  lives in keeper script Real POI Bonus when `base.fetch*` is built. Its radar/canvas view + alliance-picker
+  were not wanted.
 
 **POI / reports / combat**
 - **TA_The_Green_Cross_Tools** → POI window is a dup of POIs_Analyser; scanner is dead + covered by MM -
@@ -232,7 +236,8 @@ Priority order (high → low), with the new MM name and the one-line reason:
 - `export.csv(rows[][]) / download(blob, filename)` — from POI ExporterTools (reusable by Base Scanner,
   Reports, POI export).
 - `reports.scanAll(type)` + combined cost/loot model — from Report_Summary + Report_Stats.
-- `poi.*` — score/tier/rank/bonus projection + `RankingGetData` fetch — from POIs_Analyser + Real_POI_Bonus.
+- `poi.*` — score/tier/rank/bonus projection + `RankingGetData` fetch — from Real_POI_Bonus (and the
+  RETIRED POIs_Analyser's simulator logic in git history, if a projection UI is ever wanted).
 - `upgrade.canUpgradeBuilding/canUpgradeUnit` + `getMissingTechIndexes…` — canonicalize ONE copy (appears
   in 3 Flunik scripts).
 - `layout.accumulatorProfile(city)` — tib/cry/mix/pow 4–8 field profile — from Shockr `getLayout` (optimizer).
@@ -301,7 +306,7 @@ Wrapper + Common Library, zero third-party update/exfiltration, ready to publish
 
 RETIRE: Count_Forgotten_Bases_Range, New_Custom_Flunik_Tools.
 QUARANTINE: leoStats, BaseShare, Hotkeys.
-MM-IFY: Tunnel_Info, CD_PvP_Alert_Status, Real_POI_Bonus, POIs_Analyser, POI_ExporterTools,
+MM-IFY: Tunnel_Info, CD_PvP_Alert_Status, Real_POI_Bonus, POI_ExporterTools,
 Warchief_Upgrade_Base_Defense_Army, Warchief_Sector_HUD, Zoom, ADDON_City_Online_Status_Colorer_SC,
 Repair_Time_Of_Death.
 RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6): Report_Stats.
