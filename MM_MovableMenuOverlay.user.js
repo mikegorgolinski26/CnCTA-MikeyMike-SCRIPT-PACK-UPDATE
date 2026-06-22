@@ -3,7 +3,7 @@
 // @namespace      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include        https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description    Makes the game's own pop-out menu overlays (Mail, Forum, Ranking, alliance/diplomacy panels - anything that flies out from the top menu bar) draggable. Drag them anywhere instead of being locked to centre, and the position is remembered across refreshes.
-// @version        1.0.2
+// @version        1.0.3
 // @license        CC-BY-NC-SA 4.0
 // @author         MikeyMike (rework of Netquik's "MovableMenuOverlay")
 // @contributor    Netquik [SoO] (https://github.com/netquik)
@@ -162,6 +162,38 @@
             return null;
         }
 
+        // Pin a wrapped overlay to its MMO container's top-left corner. The game re-centers menu
+        // overlays using DESKTOP coordinates - and some "tabs" (e.g. Player/Alliance in the Ranking
+        // overlay) are the SAME overlay instance re-centering itself, NOT a fresh overlay switch. Once
+        // that overlay is parented inside our offset MMO, those desktop coords get applied relative to
+        // the MMO, pushing the dialog far to the right and ballooning the container width. ALL
+        // positioning funnels through setLayoutProperties, so we override it on the wrapped instance to
+        // force left/top = 0 (size props like width/height/bottom pass through). Restored on unwrap.
+        function pinChild(child) {
+            try {
+                if (!child || child.__mm_pinned) return;
+                child.__mm_origSLP = child.setLayoutProperties;
+                child.setLayoutProperties = function (props) {
+                    if (props && typeof props === "object") {
+                        var p = {}; for (var k in props) p[k] = props[k];
+                        p.left = 0; p.top = 0;
+                        props = p;
+                    }
+                    return child.__mm_origSLP.call(this, props);
+                };
+                child.__mm_pinned = true;
+                // Snap it to the corner now (it may already carry desktop-centered coords).
+                try { child.setLayoutProperties({ left: 0, top: 0 }); } catch (e) {}
+            } catch (e) { werr("pinChild:", e); }
+        }
+        function unpinChild(child) {
+            try {
+                if (!child || !child.__mm_pinned) return;
+                if (child.__mm_origSLP) child.setLayoutProperties = child.__mm_origSLP;
+                child.__mm_pinned = false;
+            } catch (e) { werr("unpinChild:", e); }
+        }
+
         // ---- the draggable container -----------------------------------------------
         function defineMMOverlayClass() {
             if (qx.Class.isDefined("MMOverlay")) return;
@@ -242,6 +274,8 @@
                         // tab switches return to the same spot.
                         var cp = visualPos(b);
                         if (cp) savePos(clampPos(cp));
+                        // Restore the overlay's normal positioning before handing it back to the game.
+                        unpinChild(qxA[oOE]);
                         // IMPORTANT for closing mail messages: deactivate before removing.
                         qxA[oOE]._deactivate();
                         -1 != b.indexOf(qxA[oOE]) && b.remove(qxA[oOE]);
@@ -258,11 +292,13 @@
                             var MMx = MMOverlay.getInstance();
                             var m = MMx.createMM();
                             m.add(qxA[oOE], { left: 0, top: 0 });
+                            // Keep the overlay pinned to the MMO corner even when it re-centers itself
+                            // (e.g. internal Player/Alliance tab switches). Replaces the old fragile
+                            // move/appear listeners, which lost the race against the game's re-center.
+                            pinChild(qxA[oOE]);
                             MMx.activateMM();
                             m.fadeIn(250);
                             qxA[oOE].setMinHeight(625);
-                            qxA[oOE].addListener("move", function () { this.setLayoutProperties({ top: 0, left: 0 }); });
-                            qxA[oOE].addListener("appear", function () { this.setLayoutProperties({ top: 0, left: 0 }); });
                             if (qxA[oOE] instanceof webfrontend.gui.MenuOverlayWidget) qxA[oOE].setActive(true);
                         }
                     } else {
