@@ -5,7 +5,7 @@
 // @contributor     NetquiK (https://github.com/netquik)
 // @translator      ES: Nefrontheone
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.0
+// @version         1.1.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
@@ -919,35 +919,48 @@
             if (!win) { werr("could not create window"); return; }
             win.add(content);
 
-            // ---- docked side panel: built lazily on first pin. Anchored just LEFT of the central base
-            // widget (the qx PlayArea), NOT the absolute left edge of the screen - otherwise it sits
-            // behind the game's permanent left-column UI (player info, resources, Add Funds, alerts).
-            // The PlayArea is the centered ~1266x858 frame that holds the base view + its HUD; its
-            // position depends on viewport size, so we compute the dock position dynamically from
-            // PlayArea.getContentLocation() and reposition on resize. Mirror of the Info Sticker frame:
-            // caps unflipped (face left naturally); gray strip on the RIGHT of the body (marginRight)
-            // so it points INTO the base widget.
-            var DOCK_WIDTH_EST = 260;   // upper-bound estimate for layout math (holder.maxWidth = 280 minus a smidge)
-            var DOCK_GAP       = 5;     // px breathing room between dock and PlayArea
+            // ---- docked side panel: built lazily on first pin. Anchored so the panel's RIGHT edge
+            // sits flush against the central base widget (the qx PlayArea) with a small gap. Using
+            // RIGHT-side anchoring (not "left:X-panel.width") because the panel is content-driven so
+            // its actual width is fluid - right-anchoring lets the panel grow leftward from the base
+            // view's left edge automatically, no width math required. PlayArea's position depends on
+            // viewport size (it's centered between the LeftBarsGroup and the right base bar), so we
+            // recompute the anchor on resize and via a 1-second polling backup since qx's "resize"
+            // events on PlayArea don't always fire reliably on browser-window resize.
+            var DOCK_GAP        = 3;    // px breathing room between dock right edge and PlayArea left
             var DOCK_FALLBACK_LEFT = 130;
             var DOCK_FALLBACK_TOP  = 130;
             function dockAnchor() {
                 try {
-                    var pa = qx.core.Init.getApplication().getPlayArea();
+                    var app = qx.core.Init.getApplication();
+                    var pa = app && app.getPlayArea && app.getPlayArea();
                     var loc = pa && pa.getContentLocation && pa.getContentLocation();
-                    if (loc && loc.left != null) {
-                        return {
-                            left: Math.max(0, loc.left - DOCK_WIDTH_EST - DOCK_GAP),
-                            top: Math.max(0, loc.top || 0)
-                        };
-                    }
-                } catch (e) { /* PlayArea not laid out yet - fall through */ }
-                return { left: DOCK_FALLBACK_LEFT, top: DOCK_FALLBACK_TOP };
+                    if (!loc || loc.left == null) return { left: DOCK_FALLBACK_LEFT, top: DOCK_FALLBACK_TOP };
+                    var deskW = 0;
+                    try {
+                        var d = app.getDesktop && app.getDesktop();
+                        var db = d && d.getBounds && d.getBounds();
+                        deskW = (db && db.width) || window.innerWidth || 0;
+                    } catch (e) { deskW = window.innerWidth || 0; }
+                    if (!deskW) return { left: DOCK_FALLBACK_LEFT, top: DOCK_FALLBACK_TOP };
+                    var rightOffset = Math.max(0, deskW - loc.left + DOCK_GAP);
+                    // left:null clears any prior left-anchor so the canvas layout uses our right value
+                    return { left: null, right: rightOffset, top: Math.max(0, loc.top || 0) };
+                } catch (e) { return { left: DOCK_FALLBACK_LEFT, top: DOCK_FALLBACK_TOP }; }
+            }
+            var lastAnchor = null;
+            function anchorsEqual(a, b) {
+                if (!a || !b) return false;
+                return a.left === b.left && a.right === b.right && a.top === b.top;
             }
             function repositionDock() {
                 if (!sp.panel) return;
-                try { sp.panel.setLayoutProperties(dockAnchor()); }
-                catch (e) { werr("repositionDock:", e); }
+                try {
+                    var a = dockAnchor();
+                    if (anchorsEqual(a, lastAnchor)) return;
+                    sp.panel.setLayoutProperties(a);
+                    lastAnchor = a;
+                } catch (e) { werr("repositionDock:", e); }
             }
 
             var sp = { panel: null, body: null, built: false };
@@ -956,16 +969,18 @@
                 try {
                     var app = qx.core.Init.getApplication();
                     if (!app || !app.getDesktop || !MMC.menubar || !MMC.menubar.styledPanel) return null;
-                    var holder = new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({ maxWidth: 280, alignX: "left" });
-                    var topCap = new qx.ui.basic.Image("ui/common/bgr_messaging_t.png").set({ allowGrowX: true, height: 11, scale: true, zIndex: 12, marginRight: -5 });
-                    var botCap = new qx.ui.basic.Image("ui/common/bgr_messaging_b.png").set({ allowGrowX: true, height: 11, scale: true, zIndex: 12, marginRight: -5 });
-                    // No transform: the caps' rounded art naturally faces the left edge, matching the
-                    // left-anchored dock. (Member Status flips them for its right-anchored variant.)
-                    // body = the SAME solid button-missionbar panel used elsewhere; width sized for the
-                    // resource cost rows + the spinner (wider than the Member Status roster).
+                    var holder = new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({ maxWidth: 280, alignX: "right" });
+                    var topCap = new qx.ui.basic.Image("ui/common/bgr_messaging_t.png").set({ allowGrowX: true, height: 11, scale: true, zIndex: 12, marginLeft: -5 });
+                    var botCap = new qx.ui.basic.Image("ui/common/bgr_messaging_b.png").set({ allowGrowX: true, height: 11, scale: true, zIndex: 12, marginLeft: -5 });
+                    // The game's caps are drawn with the curl on one side and a flat seam on the other;
+                    // for the left-anchored panel we want the FLAT seam against the base view (the panel's
+                    // right edge, which sits flush against PlayArea), and the curl on the outer left edge.
+                    // The flip puts the curl-on-original-right onto the rendered left edge.
+                    topCap.addListener("appear", function () { try { topCap.getContentElement().getDomElement().style.transform = "scale(-1,1)"; } catch (e) {} });
+                    botCap.addListener("appear", function () { try { botCap.getContentElement().getDomElement().style.transform = "scale(-1,1)"; } catch (e) {} });
                     var body = MMC.menubar.styledPanel({ width: 230, spacing: 4, padding: [4, 6, 4, 6] });
-                    body.setMarginRight(5);  // gray strip on the RIGHT of the body (facing into the base view)
-                    body.setAlignX("left");
+                    body.setMarginLeft(5);   // gray strip on the LEFT of the body (matching MM - Member Status's docked look on the opposite side)
+                    body.setAlignX("right");
                     var dataSection = new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({ allowGrowX: true, decorator: "pane-navigation-bar" });
                     dataSection.add(body);
                     holder.add(topCap);
@@ -973,22 +988,36 @@
                     holder.add(botCap);
                     sp.panel = holder;
                     sp.body = body;
-                    // Anchor dynamically to just LEFT of the PlayArea (the central base widget). The
-                    // initial add uses computed coords; repositionDock() handles viewport-resize updates.
-                    app.getDesktop().add(holder, dockAnchor());
+                    // Anchor the panel's RIGHT edge flush to PlayArea.left (with DOCK_GAP px breathing).
+                    // dockAnchor() reads PlayArea's current screen location and converts to a desktop
+                    // right-offset; repositionDock() updates it on resize.
+                    var initialAnchor = dockAnchor();
+                    app.getDesktop().add(holder, initialAnchor);
+                    lastAnchor = initialAnchor;
                     sp.built = true;
-                    // Track PlayArea position changes - on window resize the centered PlayArea shifts,
-                    // and we need to follow it. The PlayArea itself fires "resize" when its bounds change.
+                    // Track PlayArea position changes via every signal we can reach. qx's "resize" event
+                    // on PlayArea sometimes doesn't fire when the OUTER browser window resizes (the
+                    // canvas reflows but qx doesn't always propagate), so we layer multiple sources.
                     try {
-                        var pa = app.getPlayArea();
-                        if (pa && pa.addListener) {
-                            pa.addListener("resize", repositionDock);
-                            pa.addListener("appear", repositionDock);
+                        var pa2 = app.getPlayArea();
+                        if (pa2 && pa2.addListener) {
+                            pa2.addListener("resize", repositionDock);
+                            pa2.addListener("appear", repositionDock);
                         }
                     } catch (e) { wwarn("attach PlayArea resize:", e); }
-                    // Belt + braces: also re-anchor on a native window resize (covers the rare case where
-                    // qx didn't propagate a resize event to PlayArea, e.g. zoom changes).
+                    try {
+                        var root = app.getRoot && app.getRoot();
+                        if (root && root.addListener) root.addListener("resize", repositionDock);
+                    } catch (e) {}
                     try { window.addEventListener("resize", repositionDock); } catch (e) {}
+                    // Polling backup - some viewport changes (e.g. devtools toggle, browser-zoom) don't
+                    // fire any of the above events reliably. A 1Hz check while the panel is visible is
+                    // cheap (one getContentLocation read + one no-op anchor compare).
+                    try {
+                        sp._pollTimer = window.setInterval(function () {
+                            try { if (sp.panel && sp.panel.isVisible && sp.panel.isVisible()) repositionDock(); } catch (e) {}
+                        }, 1000);
+                    } catch (e) {}
                 } catch (e) { werr("buildSidePanel:", e); sp.panel = null; }
                 return sp.panel;
             }
