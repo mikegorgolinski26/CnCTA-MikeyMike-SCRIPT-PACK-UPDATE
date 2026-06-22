@@ -136,7 +136,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | Script | What it does | Status |
 |---|---|---|
 | ~~TA_leoStats~~ | Stats + base scanner + share links; **encrypted payload**, **POSTs to cnc.indyserver.info**; "restructuring" | ❌ RETIRED 2026-06-21 (data exfiltration; was enabled:false/inactive + not even deployed to the build; removed from sources at Mike's request) |
-| TA_POI_ExporterTools | Export POIs to CSV; movable window (clean, modern ES6) | ✅ |
+| ~~TA_POI_ExporterTools~~ | Export POIs to CSV; movable window (clean, modern ES6) | ❌ RETIRED 2026-06-21 (cut from initial release; salvage spec captured in MM_CONSOLIDATION_PLAN §4 entry 5) |
 | TA_Report_Summary | (listed above) | |
 
 ### Utility / GUI tweaks

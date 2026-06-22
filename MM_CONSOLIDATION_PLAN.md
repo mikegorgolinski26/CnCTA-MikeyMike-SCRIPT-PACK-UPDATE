@@ -104,8 +104,36 @@ Priority order (high → low), with the new MM name and the one-line reason:
    `MMCommon.poi.*` can call that API directly), and the `RankingGetData` bulk path is already documented (§1.1)
    and live in Real POI Bonus. Its acquisition SIMULATOR (project score→tier→rank→bonus vs rival alliances) +
    the AllianceOverlay tab-inject NOEVIL recipe are in git history if ever wanted.
-5. **TA_POI_ExporterTools → MM - POI Exporter** — POI→CSV + sector survey; modern/clean code. Lift CSV +
-   sector helpers to MMCommon (§6).
+5. ~~**TA_POI_ExporterTools → MM - POI Exporter**~~ — **RETIRED 2026-06-21** (Mike: cut from the initial
+   release; file + bg row id 10093 gone). Was: movable qx window with three buttons (Free / Alliance / ALL)
+   that dump every POI in `MainData.GetPOIs()` to CSV (`POI_ID, ALLIANCE_ID, ALLIANCE_NAME, POI_Type,
+   POI_Level, POI_X, POI_Y, Sector`), plus a live count per button and a compact "sectors occupied" header
+   label (`⇒ N-NE-S`). Chose to DOCUMENT the salvageable bits here rather than stub inert code into MMCommon
+   (no live consumer yet — same call as Report_Stats / POIs_Analyser). **Salvage spec for a future MM - POI
+   Exporter / Base Scanner (post-release):**
+   - **POI `$ctor` field-name parser** (the de-obf): the per-POI object stores ALLIANCE_ID, LEVEL, SUBTYPE,
+     EXTRA, ALLIANCE_NAME under obfuscated 6-letter member names. Resolve at runtime by `.toString()`-regexing
+     `ClientLib.Data.WorldSector.WorldObjectPointOfInterest.prototype.$ctor`:
+     `/this\.([A-Z]{6})=-1[\s\S]+?this\.([A-Z]{6})=e&255,this\.([A-Z]{6})=e>>[\s\S]+?,this\.([A-Z]{6})=e>>11[\s\S]+?=4,this\.([A-Z]{6})[\s\S]+?,this\.([A-Z]{6})=o\.[A-Z]{6}/m`
+     → `m[1]=ALLIANCE_ID, m[2]=LEVEL, m[3]=SUBTYPE, m[4]=EXTRA, m[6]=ALLIANCE_NAME`. Skip rows where
+     `e[SUBTYPE]===0` (invalid). Coords via `ClientLib.Base.MathUtil.DecodeCoordId(e.worldId, t)` → `t.b/t.c`.
+     POI_Type mapping: 1=TiberiumMine, 2=CrystalMine, 3=PowerVortex, 4=Infantry, 5=Vehicle, 6=Air, 7=Defense.
+     Belongs in `MMCommon.deobf.poiCtorFields()` when the first consumer lands.
+   - **World 8-sector formula** (different from existing `MMCommon.coords.sector(x,y,cx,cy)` which is a
+     generic relative-to-center label; this one is the in-game world-sector ring):
+     `idx = floor((atan2(W/2-x, y-H/2) * SectorCount / 2π) + SectorCount + 0.5) % SectorCount` with
+     `W = Server.get_WorldWidth(), H = Server.get_WorldHeight(), SectorCount = Server.get_SectorCount()`.
+     Label resolver uses `qxApp.tr("tnf:<dir> abbr")` (`south, southwest, west, northwest, north, northeast,
+     east, southeast`) with hard-coded `{0:'S', 1:'SW', 2:'W', 3:'NW', 4:'N', 5:'NE', 6:'E', 7:'SE'}`
+     fallback when the translation returns empty / still contains `tnf:`. Display order for "occupied sectors"
+     summary is `[4,5,6,7,0,1,2,3]` (N→NE→…→NW). Belongs in `MMCommon.coords.worldSector(x,y)` /
+     `worldSectorLabel(i)` when needed.
+   - **CSV writer + browser download** (trivial but reusable for Base Scanner / Reports): RFC-4180-style
+     `q(v) = '"' + String(v).replace(/"/g,'""') + '"'`; build with `[headers.join(","), ...rows.map(r =>
+     cells.map(q).join(","))].join("\n")`; download via `Blob([csv], {type:'text/csv;charset=utf-8;'})` +
+     temp `<a download>` + `URL.revokeObjectURL`. Belongs in `MMCommon.csv.{rows, download}` when needed.
+   - The whole original is ~378 LOC of clean ES6 in git history if a full rebuild is wanted (incl. the
+     qx window with persisted position + sector header + retry-after-1s on empty result).
 6. ~~**TA_Report_Stats → MM - Report Stats**~~ — **RETIRED 2026-06-21 (Mike: deferred out of the initial
    release).** Was: combat-report CP/RT/loot analyzer (a checkbox column on the in-game combat-reports table;
    tick N reports → combined Command-Point cost + Repair-Time + net Loot). Chose to DOCUMENT the salvageable
@@ -243,8 +271,8 @@ Priority order (high → low), with the new MM name and the one-line reason:
 - `base.fetchAllianceInfo / fetchPublicPlayerBases / fetchPlayerByName / rankingAlliances` — bulk
   `SendSimpleCommand` path (§1.1). **Build first** — fixes the off/def survey at the root.
 - `trade.selfTrade(src,dst,resType,amount)` + serial retry-queue — from Trade Window + Transfer All.
-- `export.csv(rows[][]) / download(blob, filename)` — from POI ExporterTools (reusable by Base Scanner,
-  Reports, POI export).
+- `export.csv(rows[][]) / download(blob, filename)` — RETIRED salvage spec in §5 (POI_ExporterTools);
+  reusable by Base Scanner, Reports, POI export when first consumer lands.
 - `reports.scanAll(type)` + combined cost/loot model — from Report_Summary + Report_Stats.
 - `poi.*` — score/tier/rank/bonus projection + `RankingGetData` fetch — from Real_POI_Bonus (and the
   RETIRED POIs_Analyser's simulator logic in git history, if a projection UI is ever wanted).
@@ -260,10 +288,13 @@ Priority order (high → low), with the new MM name and the one-line reason:
 - `loot.ofCity` → prefer `GetLootFromCurrentCity()` (mhLoot).
 - `map`: consolidate the world→screen **marker projection** + pan/zoom reposition/resize so Tunnel Info,
   Attack Range, Player Base Info share ONE (currently 3 copies); add region scan→canvas paint helper (TA_Map).
-- `coords.sector` — reconcile with ExporterTools' `getSectorNo/getSectorText`.
+- `coords.worldSector(x,y)` / `worldSectorLabel(i)` — in-game 8-ring sector (distinct from existing
+  generic `coords.sector(x,y,cx,cy)` relative-to-center label). RETIRED salvage spec in §5
+  (POI_ExporterTools).
 - `num`/`ui`: ~~ratio→color helper (Info_Sticker)~~ **DONE → `MMCommon.color`**; generic qx table-augment helpers `addColumn`/
   `getLastFocusedRow` (Report_Stats).
-- `deobf`: POI `$ctor` field parse (ExporterTools); map-label `UpdateColor`/`SetCanvasValue` recipe
+- `deobf`: POI `$ctor` field parse — RETIRED salvage spec in §5 (POI_ExporterTools); map-label
+  `UpdateColor`/`SetCanvasValue` recipe
   (Colorer) → Wrapper; territory/move recipes + base-0x5b hash (TheMovement) → informs the move primitive.
 
 ---
@@ -317,10 +348,11 @@ Wrapper + Common Library, zero third-party update/exfiltration, ready to publish
 RETIRE: Count_Forgotten_Bases_Range, New_Custom_Flunik_Tools.
 QUARANTINE: leoStats, BaseShare. (Hotkeys salvaged + retired 2026-06-21.)
 MM-IFY: Tunnel_Info ✅, CD_PvP_Alert_Status ✅, Real_POI_Bonus ✅,
-Warchief_Upgrade_Base_Defense_Army ✅, POI_ExporterTools,
+Warchief_Upgrade_Base_Defense_Army ✅,
 Warchief_Sector_HUD, Zoom, ADDON_City_Online_Status_Colorer_SC,
 Repair_Time_Of_Death.
 RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6): Report_Stats.
+RETIRED (cut from initial release; salvage spec captured in §4 entry 5): POI_ExporterTools.
 RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 entry on Info_Sticker): Info_Sticker.
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Auto_Repair, Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
