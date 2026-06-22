@@ -5,7 +5,7 @@
 // @contributor     NetquiK (https://github.com/netquik)
 // @translator      ES: Nefrontheone
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.1
+// @version         1.1.2
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
@@ -218,19 +218,19 @@
                 var plans = [];
                 if (short.tib > 0) {
                     var pT = planResourceTransfer(city, ERT.Tiberium, short.tib);
-                    if (!pT.feasible) { setStatus("<span style='color:#ffb74d'>Tiberium short and " + pT.reason + " - upgrading what fits.</span>"); fireUpgrade(); return; }
+                    if (!pT.feasible) { setStatus("<span style='color:#ffd54f;font-weight:bold'>Tiberium short and " + pT.reason + " - upgrading what fits.</span>"); fireUpgrade(); return; }
                     plans.push({ ert: ERT.Tiberium, plan: pT, label: "Tiberium" });
                 }
                 if (short.cry > 0) {
                     var pC = planResourceTransfer(city, ERT.Crystal, short.cry);
-                    if (!pC.feasible) { setStatus("<span style='color:#ffb74d'>Crystal short and " + pC.reason + " - upgrading what fits.</span>"); fireUpgrade(); return; }
+                    if (!pC.feasible) { setStatus("<span style='color:#ffd54f;font-weight:bold'>Crystal short and " + pC.reason + " - upgrading what fits.</span>"); fireUpgrade(); return; }
                     plans.push({ ert: ERT.Crystal, plan: pC, label: "Crystal" });
                 }
                 var totalCost = 0;
                 for (var k = 0; k < plans.length; k++) totalCost += plans[k].plan.totalCost;
                 var credits = 0;
                 try { credits = ClientLib.Data.MainData.GetInstance().get_Player().GetCreditsCount(); } catch (e) {}
-                if (credits < totalCost) { setStatus("<span style='color:#ffb74d'>Can't afford transfer fee (" + Math.round(totalCost) + " credits) - upgrading what fits.</span>"); fireUpgrade(); return; }
+                if (credits < totalCost) { setStatus("<span style='color:#ffd54f;font-weight:bold'>Can't afford transfer fee (" + Math.round(totalCost) + " credits) - upgrading what fits.</span>"); fireUpgrade(); return; }
                 setStatus("Transferring " + plans.length + " resource type(s), fee " + Math.round(totalCost) + " credits...");
                 var pi = 0;
                 function nextPlan() {
@@ -241,7 +241,7 @@
                     }
                     var pp = plans[pi++];
                     runTransferPlan(city, pp.ert, pp.plan, function (ok) {
-                        if (!ok) { setStatus("<span style='color:#ffb74d'>" + pp.label + " transfer didn't arrive in time - upgrading what fits.</span>"); fireUpgrade(); return; }
+                        if (!ok) { setStatus("<span style='color:#ffd54f;font-weight:bold'>" + pp.label + " transfer didn't arrive in time - upgrading what fits.</span>"); fireUpgrade(); return; }
                         nextPlan();
                     });
                 }
