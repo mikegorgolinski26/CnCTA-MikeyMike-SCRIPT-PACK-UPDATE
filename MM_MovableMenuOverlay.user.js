@@ -3,7 +3,7 @@
 // @namespace      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include        https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description    Makes the game's own pop-out menu overlays (Mail, Forum, Ranking, alliance/diplomacy panels - anything that flies out from the top menu bar) draggable. Drag them anywhere instead of being locked to centre, and the position is remembered across refreshes.
-// @version        1.0.0
+// @version        1.0.1
 // @license        CC-BY-NC-SA 4.0
 // @author         MikeyMike (rework of Netquik's "MovableMenuOverlay")
 // @contributor    Netquik [SoO] (https://github.com/netquik)
@@ -51,11 +51,15 @@
  *   ClientLib / qx / webfrontend (game page context)
  *
  * Debug: window.MOVABLEMENUS_DEBUG = true (or window.MM_DEBUG = true) for verbose logs.
+ *
+ * NOTE: this script is intentionally NOT in strict mode. qooxdoo's super-call
+ * (this.base(arguments)) used by the MMOverlay constructor relies on
+ * arguments.callee, which throws under strict mode ("'caller'/'callee'/'arguments'
+ * may not be accessed on strict mode functions"). Adding "use strict" here breaks
+ * MMOverlay construction (and cascades into a singleton "not ready" error).
  */
-'use strict';
 (function () {
     var main = function () {
-        'use strict';
 
         var OPTIONS_ID = 10090; // MM - Movable Menus (CnC Pack registry id)
         var POS_KEY = "MovableMenus.pos";
