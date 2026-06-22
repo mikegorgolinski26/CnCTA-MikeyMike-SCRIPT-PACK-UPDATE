@@ -5,7 +5,7 @@
 // @contributor     NetquiK (https://github.com/netquik)
 // @translator      ES: Nefrontheone
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.3
+// @version         1.1.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
@@ -60,6 +60,13 @@
         function wwarn() { try { LOG.warn.apply(LOG, arguments); } catch (e) {} }
         function werr()  { try { LOG.err.apply(LOG, arguments); } catch (e) {} }
 
+        // Status sink for the section-level transfer/upgrade flow. build() rebinds this to its
+        // panel-footer status label once the panel is laid out; until then it's a no-op. We use a
+        // main-scope binding because the qx class member functions (in defineSectionClasses) can't
+        // see build()'s locals via closure - main's scope is the shared chain.
+        var statusSink = function (html) {};
+        function setUpgradeStatus(html) { try { statusSink(html); } catch (e) {} }
+
         // Match-script-id for MMCommon.lifecycle.watch (kept stable from the original WarChiefs entry).
         var SCRIPT_ID = 10017;
 
@@ -68,6 +75,179 @@
         function menuOn() { try { return window.localStorage.getItem(DOCK_KEY) === "1"; } catch (e) { return false; } }
         function setMenuFlag(on) { try { window.localStorage.setItem(DOCK_KEY, on ? "1" : "0"); } catch (e) {} }
         function pinIcon(on) { return on ? "FactionUI/icons/icn_thread_pin_active.png" : "FactionUI/icons/icn_thread_pin_inactive.png"; }
+
+        // -------------------------------------------------------------------
+        // "Transfer as needed" - when the current base is short on Tiberium/Crystal for an upgrade,
+        // pull the shortfall in from other bases (cheapest-credit-cost source first) BEFORE firing
+        // the upgrade. Power isn't transferable, so a power shortage just falls through and the game
+        // upgrades what fits. Defaults to OFF (transfers cost credits - opt-in only). Lives in a
+        // global localStorage key so section classes can read it via closure (set in build() too,
+        // since the panel's checkbox writes through this same helper).
+        var TRANSFER_KEY = "MM.Upgrade.transferAsNeeded";
+        function transferOn() { try { return window.localStorage.getItem(TRANSFER_KEY) === "1"; } catch (e) { return false; } }
+        function setTransferFlag(on) { try { window.localStorage.setItem(TRANSFER_KEY, on ? "1" : "0"); } catch (e) {} }
+
+        // Sum a costs array (the shape returned by getUpgradeCostsToLevel: array-like of {Type,Count})
+        // into a {tib, cry, pow} object. Unknown resource types are ignored.
+        function sumCostsByResource(costsArr) {
+            var out = { tib: 0, cry: 0, pow: 0 };
+            try {
+                if (!costsArr) return out;
+                var ERT = ClientLib.Base.EResourceType;
+                for (var i = 0; i < costsArr.length; i++) {
+                    var e = costsArr[i];
+                    if (!e || typeof e !== "object") continue;
+                    var t = parseInt(e.Type, 10), c = +e.Count || 0;
+                    if (t === ERT.Tiberium) out.tib += c;
+                    else if (t === ERT.Crystal) out.cry += c;
+                    else if (t === ERT.Power)   out.pow += c;
+                }
+            } catch (e) { werr("sumCostsByResource:", e); }
+            return out;
+        }
+
+        // What's the local shortfall of {tib, cry, pow} given a current city + total cost obj?
+        function localShortfall(city, costs) {
+            var ERT = ClientLib.Base.EResourceType;
+            return {
+                tib: Math.max(0, (costs.tib || 0) - city.GetResourceCount(ERT.Tiberium)),
+                cry: Math.max(0, (costs.cry || 0) - city.GetResourceCount(ERT.Crystal)),
+                pow: Math.max(0, (costs.pow || 0) - city.GetResourceCount(ERT.Power))
+            };
+        }
+
+        // Plan a transfer of `amount` of one EResourceType to targetCity. Cheapest per-unit-credit
+        // source first; pulls only as much as needed from each source. Returns {feasible, plan,
+        // totalCost, need} or {feasible:false, reason}. (Mirrors MM - Base Tools' planTransfer
+        // pattern; generalised for any ERT and standalone so MM - Upgrade doesn't depend on
+        // MM - Base Tools per the no-cross-script-deps rule.)
+        function planResourceTransfer(targetCity, ert, amount) {
+            try {
+                var ETradeNone = ClientLib.Data.ETradeError.None;
+                if (targetCity.CanTrade && targetCity.CanTrade() !== ETradeNone) return { feasible: false, reason: "target base cannot trade right now" };
+                var need = Math.ceil(amount);
+                if (need <= 0) return { feasible: true, plan: [], totalCost: 0, need: 0 };
+                var tx = targetCity.get_PosX(), ty = targetCity.get_PosY();
+                var sources = [];
+                var arr = ClientLib.Data.MainData.GetInstance().get_Cities().get_AllCities();
+                var d = arr && arr.d;
+                for (var k in d) {
+                    var c = d[k];
+                    try {
+                        if (!c || !c.IsOwnBase || !c.IsOwnBase()) continue;
+                        if (c.get_Id() === targetCity.get_Id()) continue;
+                        if (c.get_IsGhostMode && c.get_IsGhostMode()) continue;
+                        if (c.CanTrade && c.CanTrade() !== ETradeNone) continue;
+                        var have = Math.floor(c.GetResourceCount(ert));
+                        if (have <= 0) continue;
+                        var perUnit = Infinity;
+                        try { var cf = c.CalculateTradeCostToCoord(tx, ty, have); if (have > 0) perUnit = cf / have; } catch (e) {}
+                        sources.push({ city: c, have: have, perUnit: perUnit });
+                    } catch (e) {}
+                }
+                sources.sort(function (a, b) { return a.perUnit - b.perUnit; });
+                var plan = [], remaining = need, totalCost = 0;
+                for (var i = 0; i < sources.length && remaining > 0; i++) {
+                    var amt = Math.min(sources[i].have, remaining);
+                    if (amt <= 0) continue;
+                    var cost = 0;
+                    try { cost = sources[i].city.CalculateTradeCostToCoord(tx, ty, amt); } catch (e) {}
+                    plan.push({ source: sources[i].city, amount: amt, cost: cost });
+                    totalCost += cost;
+                    remaining -= amt;
+                }
+                if (remaining > 0) return { feasible: false, reason: "not enough across all bases" };
+                return { feasible: true, plan: plan, totalCost: totalCost, need: need };
+            } catch (e) { werr("planResourceTransfer:", e); return { feasible: false, reason: "error - see console" }; }
+        }
+
+        // Execute one resource's transfer plan (sequential SelfTrade commands), then poll the target's
+        // resource count to confirm arrival before invoking onAllDone(ok). The poll is needed because
+        // SelfTrade's result code isn't a reliable success signal (same lesson as MM - Base Tools).
+        function runTransferPlan(targetCity, ert, plan, onAllDone) {
+            try {
+                if (!plan || !plan.plan || !plan.plan.length) { onAllDone(true); return; }
+                var startHad = 0;
+                try { startHad = targetCity.GetResourceCount(ert); } catch (e) {}
+                var idx = 0;
+                function nextTransfer() {
+                    if (idx >= plan.plan.length) {
+                        // All commands sent - now wait for tiberium/crystal to arrive at target.
+                        var tries = 0;
+                        (function poll() {
+                            tries++;
+                            var have = 0;
+                            try { have = targetCity.GetResourceCount(ert); } catch (e) {}
+                            if (have >= startHad + plan.need) { onAllDone(true); return; }
+                            if (tries >= 12) { wwarn("runTransferPlan: resource didn't arrive in time (have " + Math.floor(have) + " / need +" + plan.need + ")"); onAllDone(false); return; }
+                            window.setTimeout(poll, 500);
+                        })();
+                        return;
+                    }
+                    var p = plan.plan[idx++];
+                    try {
+                        ClientLib.Net.CommunicationManager.GetInstance().SendCommand("SelfTrade", {
+                            targetCityId: targetCity.get_Id(),
+                            sourceCityId: p.source.get_Id(),
+                            resourceType: ert,
+                            amount: p.amount
+                        }, webfrontend.phe.cnc.Util.createEventDelegate(ClientLib.Net.CommandResult, {}, function () {
+                            window.setTimeout(nextTransfer, 200);
+                        }), null, true);
+                    } catch (e) { werr("SelfTrade failed:", e); onAllDone(false); }
+                }
+                nextTransfer();
+            } catch (e) { werr("runTransferPlan:", e); onAllDone(false); }
+        }
+
+        // Top-level helper used by the section onUpgrade handlers. If transfer-as-needed is OFF, just
+        // calls fireUpgrade() and we're done (matches the original behaviour). If ON, computes the
+        // shortfall in Tib/Cry, plans + runs transfers to cover it, then fires the upgrade. Power
+        // shortfalls always fall through (game upgrades what fits). `setStatus(html)` is the callback
+        // used to surface progress to the user (transfer status label in the panel footer); pass a
+        // no-op if you don't care.
+        function upgradeWithMaybeTransfer(totalCosts, setStatus, fireUpgrade) {
+            try {
+                if (!transferOn()) { fireUpgrade(); return; }
+                var city;
+                try { city = ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity(); } catch (e) {}
+                if (!city) { fireUpgrade(); return; }
+                var short = localShortfall(city, totalCosts);
+                if (short.tib <= 0 && short.cry <= 0) { fireUpgrade(); return; }
+                var ERT = ClientLib.Base.EResourceType;
+                var plans = [];
+                if (short.tib > 0) {
+                    var pT = planResourceTransfer(city, ERT.Tiberium, short.tib);
+                    if (!pT.feasible) { setStatus("<span style='color:#ffb74d'>Tiberium short and " + pT.reason + " - upgrading what fits.</span>"); fireUpgrade(); return; }
+                    plans.push({ ert: ERT.Tiberium, plan: pT, label: "Tiberium" });
+                }
+                if (short.cry > 0) {
+                    var pC = planResourceTransfer(city, ERT.Crystal, short.cry);
+                    if (!pC.feasible) { setStatus("<span style='color:#ffb74d'>Crystal short and " + pC.reason + " - upgrading what fits.</span>"); fireUpgrade(); return; }
+                    plans.push({ ert: ERT.Crystal, plan: pC, label: "Crystal" });
+                }
+                var totalCost = 0;
+                for (var k = 0; k < plans.length; k++) totalCost += plans[k].plan.totalCost;
+                var credits = 0;
+                try { credits = ClientLib.Data.MainData.GetInstance().get_Player().GetCreditsCount(); } catch (e) {}
+                if (credits < totalCost) { setStatus("<span style='color:#ffb74d'>Can't afford transfer fee (" + Math.round(totalCost) + " credits) - upgrading what fits.</span>"); fireUpgrade(); return; }
+                setStatus("Transferring " + plans.length + " resource type(s), fee " + Math.round(totalCost) + " credits...");
+                var pi = 0;
+                function nextPlan() {
+                    if (pi >= plans.length) {
+                        setStatus("<span style='color:#7ee07e'>Transfers complete - upgrading.</span>");
+                        window.setTimeout(function () { fireUpgrade(); window.setTimeout(function () { setStatus(""); }, 2500); }, 400);
+                        return;
+                    }
+                    var pp = plans[pi++];
+                    runTransferPlan(city, pp.ert, pp.plan, function (ok) {
+                        if (!ok) { setStatus("<span style='color:#ffb74d'>" + pp.label + " transfer didn't arrive in time - upgrading what fits.</span>"); fireUpgrade(); return; }
+                        nextPlan();
+                    });
+                }
+                nextPlan();
+            } catch (e) { werr("upgradeWithMaybeTransfer:", e); fireUpgrade(); }
+        }
 
         // -------------------------------------------------------------------
         // The three qx classes that hold the actual upgrade logic
@@ -245,12 +425,19 @@
                             try {
                                 var newLevel = parseInt(this.txtLevel.getValue(), 10);
                                 if (newLevel <= 0) return;
-                                switch (ClientLib.Vis.VisMain.GetInstance().get_Mode()) {
-                                    case ClientLib.Vis.Mode.City:         ClientLib.API.City.GetInstance().UpgradeAllBuildingsToLevel(newLevel); break;
-                                    case ClientLib.Vis.Mode.DefenseSetup: ClientLib.API.Defense.GetInstance().UpgradeAllUnitsToLevel(newLevel); break;
-                                    case ClientLib.Vis.Mode.ArmySetup:    ClientLib.API.Army.GetInstance().UpgradeAllUnitsToLevel(newLevel); break;
+                                var self = this;
+                                var totalCosts = sumCostsByResource(this.getUpgradeCostsToLevel(newLevel));
+                                function fire() {
+                                    try {
+                                        switch (ClientLib.Vis.VisMain.GetInstance().get_Mode()) {
+                                            case ClientLib.Vis.Mode.City:         ClientLib.API.City.GetInstance().UpgradeAllBuildingsToLevel(newLevel); break;
+                                            case ClientLib.Vis.Mode.DefenseSetup: ClientLib.API.Defense.GetInstance().UpgradeAllUnitsToLevel(newLevel); break;
+                                            case ClientLib.Vis.Mode.ArmySetup:    ClientLib.API.Army.GetInstance().UpgradeAllUnitsToLevel(newLevel); break;
+                                        }
+                                        self.reset();
+                                    } catch (e) { werr("All.onUpgrade fire:", e); }
                                 }
-                                this.reset();
+                                upgradeWithMaybeTransfer(totalCosts, setUpgradeStatus, fire);
                             } catch (e) { werr("All.onUpgrade:", e); }
                         }
                     }
@@ -420,9 +607,13 @@
                                     paintRes(this.resTiberium, Tib, TibTime);
                                     paintRes(this.resChrystal, Cry, CryTime);
                                     paintRes(this.resPower,    Pow, PowTime);
-                                    // Original behaviour: enable the upgrade button only when you can already
-                                    // afford the upgrade (all three grow-times are zero).
-                                    this.btnLevel.setEnabled(TibTime === 0 && CryTime === 0 && PowTime === 0);
+                                    // Enable the upgrade button when you can already afford it (original
+                                    // behaviour) OR when "Transfer as needed" is on and the only thing
+                                    // short is Tiberium/Crystal (transferable - PowTime===0 is still
+                                    // required, since power can't be transferred).
+                                    var locallyAffordable = (TibTime === 0 && CryTime === 0 && PowTime === 0);
+                                    var coverableByTransfer = transferOn() && PowTime === 0;
+                                    this.btnLevel.setEnabled(locallyAffordable || coverableByTransfer);
                                 } else {
                                     clearRes(this.resTiberium); clearRes(this.resChrystal); clearRes(this.resPower);
                                 }
@@ -432,17 +623,25 @@
                             try {
                                 var newLevel = parseInt(this.txtLevel.getValue(), 10);
                                 if (newLevel <= 0 || this.Selection === null) return;
-                                switch (this.Selection.get_VisObjectType()) {
-                                    case ClientLib.Vis.VisObject.EObjectType.CityBuildingType:
-                                        if (newLevel > this.Selection.get_BuildingLevel()) { ClientLib.API.City.GetInstance().UpgradeBuildingToLevel(this.Selection.get_BuildingDetails(), newLevel); this.onSelectionChange(null, this.Selection); }
-                                        break;
-                                    case ClientLib.Vis.VisObject.EObjectType.DefenseUnitType:
-                                        if (newLevel > this.Selection.get_UnitLevel()) { ClientLib.API.Defense.GetInstance().UpgradeUnitToLevel(this.Selection.get_UnitDetails(), newLevel); this.onSelectionChange(null, this.Selection); }
-                                        break;
-                                    case ClientLib.Vis.VisObject.EObjectType.ArmyUnitType:
-                                        if (newLevel > this.Selection.get_UnitLevel()) { ClientLib.API.Army.GetInstance().UpgradeUnitToLevel(this.Selection.get_UnitDetails(), newLevel); this.onSelectionChange(null, this.Selection); }
-                                        break;
+                                var sel = this.Selection;
+                                var self = this;
+                                var totalCosts = sumCostsByResource(this.getUpgradeCostsToLevel(sel, newLevel));
+                                function fire() {
+                                    try {
+                                        switch (sel.get_VisObjectType()) {
+                                            case ClientLib.Vis.VisObject.EObjectType.CityBuildingType:
+                                                if (newLevel > sel.get_BuildingLevel()) { ClientLib.API.City.GetInstance().UpgradeBuildingToLevel(sel.get_BuildingDetails(), newLevel); self.onSelectionChange(null, sel); }
+                                                break;
+                                            case ClientLib.Vis.VisObject.EObjectType.DefenseUnitType:
+                                                if (newLevel > sel.get_UnitLevel()) { ClientLib.API.Defense.GetInstance().UpgradeUnitToLevel(sel.get_UnitDetails(), newLevel); self.onSelectionChange(null, sel); }
+                                                break;
+                                            case ClientLib.Vis.VisObject.EObjectType.ArmyUnitType:
+                                                if (newLevel > sel.get_UnitLevel()) { ClientLib.API.Army.GetInstance().UpgradeUnitToLevel(sel.get_UnitDetails(), newLevel); self.onSelectionChange(null, sel); }
+                                                break;
+                                        }
+                                    } catch (e) { werr("Current.onUpgrade fire:", e); }
                                 }
+                                upgradeWithMaybeTransfer(totalCosts, setUpgradeStatus, fire);
                             } catch (e) { werr("Current.onUpgrade:", e); }
                         }
                     }
@@ -668,14 +867,43 @@
             headerRow.add(titleLbl, { flex: 1 });
             headerRow.add(pinBtn);
 
-            // ---- content composite = header + 3 sections. Re-parented between float window + dock panel.
-            // Background painted per mode in placeContent(): dark solid (Loot Summary look) when floating,
-            // transparent when docked so the menu texture / gray strip show through.
+            // ---- content composite = header + 3 sections + transfer footer. Re-parented between
+            // float window + dock panel. Background painted per mode in placeContent(): dark solid
+            // (Loot Summary look) when floating, transparent when docked so the menu texture / gray
+            // strip show through.
             var content = new qx.ui.container.Composite(new qx.ui.layout.VBox(4));
             content.add(headerRow);
             if (secCurrent) content.add(secCurrent);
             if (secAll)     content.add(secAll);
             if (secRepair)  content.add(secRepair);
+
+            // Transfer-as-needed footer (shared across all 3 sections). The checkbox writes through
+            // setTransferFlag, which the section onUpgrade handlers read via transferOn() each time.
+            // Below it, transferStatus is a small live status label (used during transfer flows to
+            // surface "transferring...", "transfers complete", "can't afford fee" etc).
+            var transferRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(6).set({ alignY: "middle" }));
+            transferRow.set({ padding: [2, 4, 0, 4] });
+            var cbTransferUpgrade = new qx.ui.form.CheckBox("Transfer as needed").set({
+                value: transferOn(),
+                alignY: "middle",
+                toolTipText: "When the current base lacks Tiberium or Crystal for an upgrade, transfer the shortfall in from your other bases (cheapest first) before firing the upgrade. Power isn't transferable - those shortages still fall through. Off by default (transfers cost credits)."
+            });
+            cbTransferUpgrade.addListener("changeValue", function (e) {
+                try {
+                    setTransferFlag(!!e.getData());
+                    // Re-evaluate the Current section's button-enable now that the toggle changed.
+                    if (secCurrent && secCurrent.onInput) try { secCurrent.onInput(); } catch (x) {}
+                } catch (x) { werr("cbTransferUpgrade change:", x); }
+            });
+            transferRow.add(cbTransferUpgrade);
+            var transferStatus = new qx.ui.basic.Label("").set({ rich: true, textColor: "#cfe6ff", alignY: "middle" });
+            transferRow.add(new qx.ui.core.Spacer(8, 1));
+            transferRow.add(transferStatus, { flex: 1 });
+            content.add(transferRow);
+            // Wire the main-scope statusSink to this label so the section onUpgrade handlers can
+            // surface transfer progress via setUpgradeStatus(html).
+            statusSink = function (html) { try { transferStatus.setValue(html || ""); } catch (e) {} };
+
             try { content.setBackgroundColor("#23282b"); content.setPadding(8); } catch (e) {} // default to floating look
 
             // ---- floating panel (frameless, drag-by-body, position persists across reloads) ----

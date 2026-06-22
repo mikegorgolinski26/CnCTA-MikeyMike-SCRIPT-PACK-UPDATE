@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.1
+// @version         1.3.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -672,6 +672,91 @@
                 return total;
             }
 
+            // ---- ALLOW REDUCTIONS support: per-resource scoring + multi-resource compound score ----
+            // The default search above only ever measures the TARGET resource and only moves buildings in
+            // that resource's set, so a layout that helps Crystal at the cost of Tiberium can never even be
+            // tried (and inversely a swap that would help Crystal but requires moving a Refinery out of the
+            // way is invisible to the Crystal optimizer). When "allow reductions" is on the search widens
+            // the movable set to ALL resource buildings and switches to a compound score that lets us trade
+            // small losses in non-target resources for a larger target gain.
+
+            // Producer ids that have a link in modId. Cached lookup of snap.buildings.
+            function producersForMod(snap, modId) {
+                var out = [];
+                for (var i = 0; i < snap.order.length; i++) {
+                    var b = snap.buildings[snap.order[i]];
+                    if (b.links[modId]) out.push(b.id);
+                }
+                return out;
+            }
+            // Score ONE resource (modId) over its producer list. Same formula as score(), but indexed by
+            // an explicit modId / producer list rather than snap.modId / snap.producers.
+            function scoreForMod(snap, pos, modId, prodList, removed) {
+                var g = buildOcc(snap, pos, removed), total = 0;
+                var prod = prodList || producersForMod(snap, modId);
+                for (var i = 0; i < prod.length; i++) {
+                    var b = snap.buildings[prod[i]]; if (removed && removed[b.id]) continue;
+                    var p = pos[b.id]; if (!p) continue;
+                    var ls = b.links[modId]; if (!ls) continue;
+                    for (var j = 0; j < ls.length; j++) {
+                        var L = ls[j], def = LINK[L.lt]; if (!def || !L.perConn) continue;
+                        total += L.perConn * Math.min(countLink(snap, g, p.x, p.y, def), L.max);
+                    }
+                }
+                return total;
+            }
+            // Full {Tib, Cry, Pow, Dol} production for a layout, used for baselines + the final
+            // "net change across all 4 resources" report shown in the UI.
+            function scoreAll(snap, pos, removed, prodLists) {
+                prodLists = prodLists || {};
+                return {
+                    Tib: scoreForMod(snap, pos, MOD.Tib, prodLists.Tib, removed),
+                    Cry: scoreForMod(snap, pos, MOD.Cry, prodLists.Cry, removed),
+                    Pow: scoreForMod(snap, pos, MOD.Pow, prodLists.Pow, removed),
+                    Dol: scoreForMod(snap, pos, MOD.Dol, prodLists.Dol, removed)
+                };
+            }
+            function buildProdLists(snap) {
+                return {
+                    Tib: producersForMod(snap, MOD.Tib),
+                    Cry: producersForMod(snap, MOD.Cry),
+                    Pow: producersForMod(snap, MOD.Pow),
+                    Dol: producersForMod(snap, MOD.Dol)
+                };
+            }
+            // The compound score function used when "allow reductions" is on:
+            //   targetGain - alpha * sum(max(0, baseline_other - thisOther))
+            // alpha defaults to 0.5 (target counts twice as much as non-target losses at the margin), so the
+            // optimizer is willing to take a -200 Tib loss for a +101 Crystal gain but NOT a +99 gain.
+            function makeMultiScoreFn(snap, targetResKey, baselines, alpha, prodLists) {
+                var targetMod = RES_CFG[targetResKey].mod;
+                return function (pos, removed) {
+                    var target = scoreForMod(snap, pos, targetMod, prodLists[targetResKey], removed);
+                    var penalty = 0;
+                    for (var k in MOD) {
+                        if (MOD[k] === targetMod) continue;
+                        var s = scoreForMod(snap, pos, MOD[k], prodLists[k], removed);
+                        var loss = baselines[k] - s;
+                        if (loss > 0) penalty += loss;
+                    }
+                    return target - alpha * penalty;
+                };
+            }
+            // Union of all 4 RES_CFG.movable sets - every building eligible for relocation in ANY resource
+            // optimizer. Used as the movable list when allowReductions is on.
+            function widenMovable(snap) {
+                var out = [], seen = {};
+                for (var k in RES_CFG) {
+                    var pred = RES_CFG[k].movable;
+                    for (var i = 0; i < snap.order.length; i++) {
+                        var id = snap.order[i];
+                        if (seen[id]) continue;
+                        if (pred(snap.buildings[id])) { seen[id] = 1; out.push(id); }
+                    }
+                }
+                return out;
+            }
+
             // ----- legality (geometric; the game's IsBuildingFreeToBePlaced validates final moves) -----
             function buildable(terr) { return terr === "NONE" || terr === "CRYSTAL" || terr === "TIBERIUM"; }
             // Can building b occupy (x,y) given occupancy grid g (ignoring b's own current cell)?
@@ -705,8 +790,11 @@
             function clonePos(pos) { var o = {}; for (var k in pos) o[k] = { x: pos[k].x, y: pos[k].y }; return o; }
             function emptyTiles(snap, g) { var out = []; for (var y = 0; y < GRID_H; y++) for (var x = 0; x < GRID_W; x++) { if (!g[y][x] && buildable(snap.terrain[y][x])) out.push({ x: x, y: y }); } return out; }
 
-            function climbStep(snap, pos, prod, mov, removed, maxN) {
-                var g = buildOcc(snap, pos, removed), base = score(snap, pos, prod, removed);
+            function climbStep(snap, pos, prod, mov, removed, maxN, scoreFn) {
+                // Default scoring = target-only (snap.modId). Allow-reductions mode passes a scoreFn that
+                // computes target - penalty across all 4 resources.
+                var sFn = scoreFn || function (p, rem) { return score(snap, p, prod, rem); };
+                var g = buildOcc(snap, pos, removed), base = sFn(pos, removed);
                 var bestGain = 1e-6, bestApply = null;
                 var empties = emptyTiles(snap, g);
                 for (var i = 0; i < mov.length; i++) {
@@ -716,7 +804,7 @@
                         if (!legalFor(snap, g, b, t.x, t.y)) continue;
                         if (++tried > maxN) break;
                         var old = pos[id]; pos[id] = { x: t.x, y: t.y };
-                        var s = score(snap, pos, prod, removed); pos[id] = old;
+                        var s = sFn(pos, removed); pos[id] = old;
                         if (s - base > bestGain) { bestGain = s - base; bestApply = { a: id, ax: t.x, ay: t.y }; }
                     }
                 }
@@ -725,7 +813,7 @@
                     var pa = pos[ida], pb = pos[idb];
                     if (!legalForSwap(snap, snap.buildings[ida], pb.x, pb.y) || !legalForSwap(snap, snap.buildings[idb], pa.x, pa.y)) continue;
                     pos[ida] = { x: pb.x, y: pb.y }; pos[idb] = { x: pa.x, y: pa.y };
-                    var s2 = score(snap, pos, prod, removed); pos[ida] = pa; pos[idb] = pb;
+                    var s2 = sFn(pos, removed); pos[ida] = pa; pos[idb] = pb;
                     if (s2 - base > bestGain) { bestGain = s2 - base; bestApply = { swap: true, a: ida, b: idb }; }
                 }
                 if (!bestApply) return false;
@@ -751,17 +839,22 @@
             // seed luck instead of getting stuck in whichever local optimum one chain happens to hit.
             function runSearch(snap, removed, opts, salt) {
                 var rounds = opts.rounds || 30, kicks = opts.kicks || 3, maxN = opts.maxNeighbors || 16, restarts = opts.restarts || 1;
-                var prod = filterIds(snap.producers, removed), mov = filterIds(snap.movable, removed);
+                var prod = filterIds(snap.producers, removed);
+                // Allow-reductions mode supplies opts.movableList (the widened union of all-resource
+                // movables) and opts.scoreFn (compound target-vs-penalty). Defaults match the original
+                // single-resource search.
+                var mov = filterIds(opts.movableList || snap.movable, removed);
                 var startPos = startPosFor(snap, removed);
-                var startScore = score(snap, startPos, prod, removed);
+                var scoreFn = opts.scoreFn || function (pos, rem) { return score(snap, pos, prod, rem); };
+                var startScore = scoreFn(startPos, removed);
                 var best = clonePos(startPos), bestScore = startScore;
                 for (var r = 0; r < restarts; r++) {
                     var rnd = mkRnd(snap, (salt || 0) * 131 + r * 977 + 1);
                     var work = clonePos(startPos);
                     for (var k = 0; k <= kicks; k++) {
                         var guard = 0;
-                        while (climbStep(snap, work, prod, mov, removed, maxN) && guard++ < rounds) {}
-                        var ws = score(snap, work, prod, removed);
+                        while (climbStep(snap, work, prod, mov, removed, maxN, scoreFn) && guard++ < rounds) {}
+                        var ws = scoreFn(work, removed);
                         if (ws > bestScore) { bestScore = ws; best = clonePos(work); }
                         work = clonePos(best);
                         if (k < kicks) kick(snap, work, mov, removed, rnd);
@@ -771,8 +864,10 @@
             }
 
             // Build the move list (buildings that actually moved) given start + best positions over `mov`.
-            function diffMoves(snap, startPos, bestPos, removed) {
-                var moves = [], mov = filterIds(snap.movable, removed);
+            // movableList override is used by allowReductions mode where the search ranged over a wider
+            // building set than snap.movable.
+            function diffMoves(snap, startPos, bestPos, removed, movableList) {
+                var moves = [], mov = filterIds(movableList || snap.movable, removed);
                 for (var m = 0; m < mov.length; m++) {
                     var id = mov[m], a = startPos[id], bp = bestPos[id]; if (!a || !bp) continue;
                     if (a.x !== bp.x || a.y !== bp.y) { var bb = snap.buildings[id]; moves.push({ id: id, techName: bb.techName, harvRes: bb.harvRes, level: bb.level, fromX: a.x, fromY: a.y, toX: bp.x, toY: bp.y }); }
@@ -781,15 +876,44 @@
             }
 
             // Run the optimizer for a city + resource (no selling). Returns the standard result object.
+            // opts.allowReductions = true:
+            //   - movable set widens to ALL resource buildings (union of every RES_CFG.movable)
+            //   - scoring switches to "target - alpha * sum_other_losses" so the optimizer can trade
+            //     small non-target losses for a larger target gain (alpha default 0.5)
+            //   - result includes startProd / bestProd: full {Tib, Cry, Pow, Dol} production at start
+            //     and projected, so the UI can show the user exactly what they're trading
             function optimize(city, resKey, opts) {
                 opts = opts || {};
                 var snap = snapshot(city, resKey);
                 if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
-                if (!snap.movable.length) return { ok: false, reason: "no movable buildings for this resource" };
-                var r = runSearch(snap, null, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5 }, 0);
-                var moves = diffMoves(snap, r.startPos, r.bestPos, null);
-                var gainPct = r.startScore > 0 ? ((r.bestScore - r.startScore) / r.startScore * 100) : 0;
-                return { ok: true, resKey: resKey, current: r.startScore, projected: r.bestScore, gainPct: gainPct, moves: moves, sells: [], snapshot: snap, bestPos: r.bestPos, startPos: r.startPos };
+
+                var allowReductions = !!opts.allowReductions;
+                var alpha = (typeof opts.alpha === "number") ? opts.alpha : 0.5;
+                var prodLists = buildProdLists(snap);
+                var startPos0 = startPosFor(snap, null);
+                var baselines = scoreAll(snap, startPos0, null, prodLists);
+
+                var searchOpts = { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5 };
+                if (allowReductions) {
+                    searchOpts.movableList = widenMovable(snap);
+                    searchOpts.scoreFn = makeMultiScoreFn(snap, resKey, baselines, alpha, prodLists);
+                } else {
+                    if (!snap.movable.length) return { ok: false, reason: "no movable buildings for this resource" };
+                }
+
+                var r = runSearch(snap, null, searchOpts, 0);
+                var moves = diffMoves(snap, r.startPos, r.bestPos, null, searchOpts.movableList);
+
+                // Final per-resource production at start + best (always computed - the UI uses it to
+                // show the full net-change table, even in strict mode).
+                var startProd = baselines;
+                var bestProd = scoreAll(snap, r.bestPos, null, prodLists);
+                var current = startProd[resKey], projected = bestProd[resKey];
+                var gainPct = current > 0 ? ((projected - current) / current * 100) : 0;
+
+                return { ok: true, resKey: resKey, current: current, projected: projected, gainPct: gainPct,
+                         moves: moves, sells: [], snapshot: snap, bestPos: r.bestPos, startPos: r.startPos,
+                         startProd: startProd, bestProd: bestProd, allowReductions: allowReductions, alpha: alpha };
             }
 
             // Resource buildings that may be demolished to free space (uniques/defense are never sold).
@@ -804,13 +928,29 @@
                 opts = opts || {};
                 var snap = snapshot(city, resKey);
                 if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
-                if (!snap.movable.length) return { ok: false, reason: "no movable buildings for this resource" };
-                var baseR = runSearch(snap, null, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 4 }, 0);
-                var current = baseR.startScore;                       // true current production (nothing sold)
+
+                var allowReductions = !!opts.allowReductions;
+                var alpha = (typeof opts.alpha === "number") ? opts.alpha : 0.5;
+                var prodLists = buildProdLists(snap);
+                var baselines = scoreAll(snap, startPosFor(snap, null), null, prodLists);
+
+                function mkSearchOpts(extra) {
+                    var o = { rounds: extra.rounds || opts.rounds, kicks: extra.kicks != null ? extra.kicks : opts.kicks,
+                              maxNeighbors: opts.maxNeighbors, restarts: extra.restarts };
+                    if (allowReductions) {
+                        o.movableList = widenMovable(snap);
+                        o.scoreFn = makeMultiScoreFn(snap, resKey, baselines, alpha, prodLists);
+                    } else if (!snap.movable.length) { return null; }
+                    return o;
+                }
+                var fullOpts = mkSearchOpts({ restarts: 4 });
+                if (!fullOpts) return { ok: false, reason: "no movable buildings for this resource" };
+
+                var baseR = runSearch(snap, null, fullOpts, 0);
+                var current = baselines[resKey];                      // true current target production
                 var bestRemoved = {}, bestR = baseR, bestScore = baseR.bestScore;
                 var sells = [];
-                // Inner sell-evaluation runs stay light (single start) since there are many of them.
-                var lightOpts = { rounds: Math.min(opts.rounds || 30, 20), kicks: 1, maxNeighbors: opts.maxNeighbors || 16, restarts: 1 };
+                var lightOpts = mkSearchOpts({ rounds: Math.min(opts.rounds || 30, 20), kicks: 1, restarts: 1 });
                 for (var k = 0; k < (sellN || 0); k++) {
                     var roundBest = null, roundBestId = -1, salt = 1;
                     for (var i = 0; i < snap.order.length; i++) {
@@ -821,18 +961,23 @@
                         delete bestRemoved[id];
                         if (!roundBest || r.bestScore > roundBest.bestScore) { roundBest = r; roundBestId = id; }
                     }
-                    // Only accept the sell if it improves the target beyond the current best (else stop).
                     if (roundBestId < 0 || roundBest.bestScore <= bestScore + 1e-6) break;
                     bestRemoved[roundBestId] = true;
                     var sb = snap.buildings[roundBestId];
                     sells.push({ id: roundBestId, techName: sb.techName, harvRes: sb.harvRes, level: sb.level, x: sb.x, y: sb.y });
                     bestScore = roundBest.bestScore;
                 }
-                // Final polish pass at full strength on the accepted demolition set.
-                bestR = runSearch(snap, bestRemoved, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5 }, 99);
-                var moves = diffMoves(snap, bestR.startPos, bestR.bestPos, bestRemoved);
-                var gainPct = current > 0 ? ((bestR.bestScore - current) / current * 100) : 0;
-                return { ok: true, resKey: resKey, current: current, projected: bestR.bestScore, gainPct: gainPct, moves: moves, sells: sells, removed: bestRemoved, snapshot: snap, bestPos: bestR.bestPos, startPos: bestR.startPos };
+                var polishOpts = mkSearchOpts({ restarts: 5 });
+                bestR = runSearch(snap, bestRemoved, polishOpts, 99);
+                var moves = diffMoves(snap, bestR.startPos, bestR.bestPos, bestRemoved, polishOpts.movableList);
+                var startProd = baselines;
+                var bestProd = scoreAll(snap, bestR.bestPos, bestRemoved, prodLists);
+                var projected = bestProd[resKey];
+                var gainPct = current > 0 ? ((projected - current) / current * 100) : 0;
+                return { ok: true, resKey: resKey, current: current, projected: projected, gainPct: gainPct,
+                         moves: moves, sells: sells, removed: bestRemoved, snapshot: snap,
+                         bestPos: bestR.bestPos, startPos: bestR.startPos,
+                         startProd: startProd, bestProd: bestProd, allowReductions: allowReductions, alpha: alpha };
             }
 
             // ===================== PHASE B: auto-apply ============================
@@ -1341,7 +1486,18 @@
                 ctrls.add(new qx.ui.basic.Label("Upgrade top").set({ alignY: "middle" }));
                 var spinTopN = new qx.ui.form.Spinner(1, MM.settings.get("BaseTools.UpgradeTopN", 5), 99).set({ width: 60 });
                 ctrls.add(spinTopN);
-                var btnUpgradeTop = new qx.ui.form.Button("Go").set({ toolTipText: "Upgrade the top N affordable rows in the list below (in the current sort order)" });
+                // "Transfer as needed" - when a row in the batch would otherwise fail because the
+                // local base is short on Tiberium, fall back to transfer-and-upgrade (cheapest sources
+                // first) if the player can afford the fee. Default OFF so transfers never happen
+                // unless the user explicitly opts in (transfers cost credits).
+                var cbTopXfer = new qx.ui.form.CheckBox("Transfer as needed").set({
+                    value: MM.settings.get("BaseTools.UpgradeTopXfer", false),
+                    alignY: "middle",
+                    toolTipText: "When a row in the batch would otherwise fail because the local base is short on Tiberium, transfer from your other bases (cheapest first) before upgrading. Skipped if no transfer plan covers the gap or you can't afford the transfer fee. Off by default - transfers cost credits."
+                });
+                cbTopXfer.addListener("changeValue", function (e) { MM.settings.set("BaseTools.UpgradeTopXfer", !!e.getData()); });
+                ctrls.add(cbTopXfer);
+                var btnUpgradeTop = new qx.ui.form.Button("Go").set({ toolTipText: "Upgrade the top N rows in the list below (in the current sort order). Re-validates each row before firing it so resource drains from earlier rows are accounted for; if 'Transfer as needed' is on, will transfer Tiberium in from other bases when the local base is short." });
                 ctrls.add(btnUpgradeTop);
                 page.add(ctrls);
 
@@ -1568,32 +1724,99 @@
                     return makeBadge(waitTxt, "#ffe08a", "#4a3814", waitTip);
                 }
 
-                // ---- batch upgrade: walk the visible, sorted, affordable rows ----
-                // Same "no reshuffle" rule: each row's button flips to "✓ Upgraded" in place. No table
-                // refresh until the user clicks Refresh, so you can see exactly what was done.
+                // ---- batch upgrade: walk the visible, sorted rows; re-validate each before firing ----
+                // Same "no reshuffle" rule for the table layout, but the QUEUE is RE-VALIDATED against
+                // live resources before each row fires. Reason: a successful upgrade drains the local
+                // base, so the next row in the snapshot may have become unaffordable - the old version
+                // captured states at start and fired blind, which is how rows that were "Upgrade"-state
+                // at snapshot time failed silently when their tiberium had already been spent by an
+                // earlier row.
+                //
+                // Per-row decision (liveEval): check local Power (can't transfer it); check local
+                // Tiberium; if short and "Transfer as needed" is ON, see if planTransfer() covers it
+                // within the player's credit budget; otherwise skip the row with a reason.
+                //
+                // Final summary names exactly what happened: "Done. Processed N of M, X via transfer,
+                // Y failed, Z skipped (<last skip reason>)." This is the feedback that was missing.
+
                 var batchRunning = false;
+
+                // Re-evaluate a candidate against live state. Returns one of:
+                //   { action: 'upgrade' }              -> local base has enough; just upgrade
+                //   { action: 'transfer-upgrade' }     -> local base short on Tib but a transfer plan
+                //                                         exists and the credit fee is affordable
+                //   { action: 'skip', reason: '...' }  -> can't proceed (caller surfaces the reason)
+                function liveEvalCandidate(cand, xferOn) {
+                    try {
+                        var city = getCityById(cand.cityId);
+                        if (!city) return { action: 'skip', reason: 'base unavailable' };
+                        var ERT = ClientLib.Base.EResourceType;
+                        if (city.get_IsLocked && city.get_IsLocked()) return { action: 'skip', reason: 'base is locked' };
+                        if (cand.costPow && city.GetResourceCount(ERT.Power) < cand.costPow) {
+                            return { action: 'skip', reason: 'not enough power' };
+                        }
+                        var tibHave = cand.costTib ? city.GetResourceCount(ERT.Tiberium) : Infinity;
+                        if (!cand.costTib || tibHave >= cand.costTib) return { action: 'upgrade' };
+                        // Local Tib short. Try transfer only if the user enabled it.
+                        if (!xferOn) return { action: 'skip', reason: 'not enough tiberium (enable "Transfer as needed" to pull from other bases)' };
+                        var pl = planTransfer(cand);
+                        if (!pl || !pl.feasible) return { action: 'skip', reason: 'no transfer plan can cover the gap' };
+                        if (playerCredits() < pl.totalCost) return { action: 'skip', reason: "can't afford transfer fee (" + MM.num.compact(Math.round(pl.totalCost), 1) + " credits)" };
+                        return { action: 'transfer-upgrade', plan: pl };
+                    } catch (e) { werr("liveEvalCandidate:", e); return { action: 'skip', reason: 'eval error - see console' }; }
+                }
+
                 function upgradeTopN(n) {
                     if (batchRunning) return;
-                    var queue = sortedData().filter(function (c) { return c.state === 1 && !doneState[c.id]; }).slice(0, n);
-                    if (!queue.length) { infoLbl.setValue("Nothing affordable to upgrade."); return; }
+                    // Snapshot the queue from the current sort order. We DON'T pre-filter by state
+                    // anymore - liveEvalCandidate revisits each row's state at execute time so resource
+                    // drains from earlier rows propagate.
+                    var queue = sortedData().filter(function (c) { return !doneState[c.id]; }).slice(0, n);
+                    if (!queue.length) { infoLbl.setValue("Nothing to upgrade."); return; }
+                    var xferOn = cbTopXfer.getValue();
                     batchRunning = true;
-                    var i = 0;
+                    var i = 0, processed = 0, transferred = 0, failed = 0, skipped = 0;
+                    var lastSkipReason = "";
+
+                    function finish() {
+                        batchRunning = false;
+                        if (!keepUpgraded) {
+                            data = data.filter(function (c) { return doneState[c.id] !== "done"; });
+                            queue.forEach(function (c) { if (doneState[c.id] === "done") delete doneState[c.id]; });
+                            renderRows();
+                        }
+                        var parts = ["Processed " + processed + " of " + queue.length];
+                        if (transferred) parts.push(transferred + " via transfer");
+                        if (failed)      parts.push(failed + " failed");
+                        if (skipped)     parts.push(skipped + " skipped" + (lastSkipReason ? " (last: " + lastSkipReason + ")" : ""));
+                        infoLbl.setValue("Done. " + parts.join(", ") + "." + (keepUpgraded ? " Click Refresh to recompute the list." : ""));
+                    }
                     function step() {
-                        if (i >= queue.length) {
-                            batchRunning = false;
-                            // Dismiss mode: pull all the successfully-upgraded rows out in one re-render.
-                            if (!keepUpgraded) {
-                                data = data.filter(function (c) { return doneState[c.id] !== "done"; });
-                                queue.forEach(function (c) { if (doneState[c.id] === "done") delete doneState[c.id]; });
-                                renderRows();
-                            }
-                            infoLbl.setValue("Done - upgraded " + queue.length + " building(s)." + (keepUpgraded ? " Click Refresh to recompute the list." : ""));
+                        if (i >= queue.length) { finish(); return; }
+                        var cand = queue[i++];
+                        if (doneState[cand.id]) { window.setTimeout(step, 0); return; }   // already acted on (single-row click during batch)
+                        if (cand._btn) { try { cand._btn.setEnabled(false); cand._btn.setLabel("..."); } catch (e) {} }
+                        var ev = liveEvalCandidate(cand, xferOn);
+                        if (ev.action === 'skip') {
+                            skipped++; lastSkipReason = ev.reason || lastSkipReason;
+                            markDone(cand, false);
+                            // Override the "✗ failed" label with the skip reason so the row is honest.
+                            if (cand._btn) { try { cand._btn.setLabel("⏭ " + ev.reason); cand._btn.setToolTipText(ev.reason); } catch (e) {} }
+                            infoLbl.setValue("Skipped " + i + "/" + queue.length + " (" + ev.reason + "): " + cand.typeName + " in " + cand.cityName);
+                            window.setTimeout(step, 50);
                             return;
                         }
-                        var cand = queue[i++];
-                        if (cand._btn) { try { cand._btn.setEnabled(false); cand._btn.setLabel("..."); } catch (e) {} }
-                        infoLbl.setValue("Upgrading " + i + "/" + queue.length + ": " + cand.typeName + " in " + cand.cityName + "...");
-                        sendUpgrade(cand, function (ok) { markDone(cand, ok); window.setTimeout(step, 150); });
+                        var viaTransfer = ev.action === 'transfer-upgrade';
+                        var fn = viaTransfer ? autoTransferAndUpgrade : sendUpgrade;
+                        infoLbl.setValue((viaTransfer ? "Transfer + upgrade " : "Upgrading ") + i + "/" + queue.length + ": " + cand.typeName + " in " + cand.cityName + "...");
+                        fn(cand, function (ok) {
+                            markDone(cand, ok);
+                            if (ok) { processed++; if (viaTransfer) transferred++; }
+                            else { failed++; }
+                            // Slightly longer settle after a transfer (the game needs a tick to credit the
+                            // tiberium before the next row's liveEval reads the new totals).
+                            window.setTimeout(step, viaTransfer ? 400 : 200);
+                        });
                     }
                     step();
                 }
@@ -1742,6 +1965,18 @@
                 var spNeigh = spinner("Neighbors:", "BaseTools.OptNeighbors", 16, 4, 72, "How many candidate destination tiles to test per building each pass. Higher = more thorough but slower.");
                 var spKicks = spinner("Kicks:", "BaseTools.OptKicks", 3, 0, 20, "Random shake-ups to escape a 'good but not best' layout and explore a different arrangement. More = explores more but slower.");
                 var spSell = spinner("Sell up to:", "BaseTools.OptSellN", 0, 0, 6, "Also recommend up to N least-impactful resource buildings to DEMOLISH (free up tiles) for a bigger gain. 0 = don't sell anything. It only suggests a sale if it actually increases the chosen resource.");
+                // "Allow reductions" - widen the search to consider moves that improve the target resource
+                // AT THE COST of other resources. Score = target_gain - 0.5*sum(other losses), so the
+                // optimizer is willing to take a -200 Tib loss for a +101 Crystal gain but NOT a +99 gain.
+                // OFF by default so the optimizer stays strict (only no-loss-in-others moves) unless the
+                // user explicitly opts in. The net-change table in the results shows what's been traded.
+                var cbAllowRed = new qx.ui.form.CheckBox("Allow reductions").set({
+                    value: !!MM.settings.get("BaseTools.OptAllowReductions", false),
+                    alignY: "middle",
+                    toolTipText: "OFF (default): only suggest moves that improve the chosen resource without hurting the others. Strict but limited - a swap that's blocked by, say, a Refinery in the way is never considered.\n\nON: widen the search to ALL resource buildings and let the optimizer trade small losses in other resources for a larger target gain (score = target_gain - 0.5 * sum_of_other_losses). The results panel shows the net change for all 4 resources so you can see exactly what's being traded."
+                });
+                cbAllowRed.addListener("changeValue", function (e) { MM.settings.set("BaseTools.OptAllowReductions", !!e.getData()); });
+                setRow.add(cbAllowRed);
                 page.add(setRow);
 
                 // ---- Apply row: one-click auto-apply of the proposed layout (Phase B) ----
@@ -1888,13 +2123,58 @@
                 function renderResultList(res) {
                     var box = ensureResultBox();
                     if (!res || !res.ok) { box.add(new qx.ui.basic.Label(res && res.reason ? ("Could not optimize: " + res.reason) : "").set({ textColor: "#ff8a8a" })); return; }
+
+                    // Net-change table across all 4 resources (always shown when we have startProd/bestProd,
+                    // which optimize/optimizeWithSell now always produce - independent of allowReductions).
+                    // In ALLOW REDUCTIONS mode this is the headline: it tells you what you're trading.
+                    if (res.startProd && res.bestProd) {
+                        var anyChange = false;
+                        var rows = [];
+                        var RES_ORDER = [["Tib", "Tiberium"], ["Cry", "Crystal"], ["Pow", "Power"], ["Dol", "Credits"]];
+                        for (var rr = 0; rr < RES_ORDER.length; rr++) {
+                            var rk = RES_ORDER[rr][0], lab = RES_ORDER[rr][1];
+                            var sBefore = +res.startProd[rk] || 0, sAfter = +res.bestProd[rk] || 0;
+                            var d = sAfter - sBefore;
+                            var pct = sBefore > 0 ? (d / sBefore * 100) : 0;
+                            if (Math.abs(d) > 0.5) anyChange = true;
+                            rows.push({ key: rk, label: lab, before: sBefore, after: sAfter, delta: d, pct: pct, isTarget: rk === res.resKey });
+                        }
+                        if (anyChange || res.allowReductions) {
+                            box.add(new qx.ui.basic.Label("<b>Net production change (continuous /h)</b>").set({ rich: true, textColor: "#ffffff" }));
+                            var tbl = new qx.ui.container.Composite(new qx.ui.layout.Grid(8, 2));
+                            tbl.add(new qx.ui.basic.Label("<b>Resource</b>").set({ rich: true, textColor: "#cfcfcf" }), { row: 0, column: 0 });
+                            tbl.add(new qx.ui.basic.Label("<b>Before</b>").set({ rich: true, textColor: "#cfcfcf", textAlign: "right" }), { row: 0, column: 1 });
+                            tbl.add(new qx.ui.basic.Label("<b>After</b>").set({ rich: true, textColor: "#cfcfcf", textAlign: "right" }), { row: 0, column: 2 });
+                            tbl.add(new qx.ui.basic.Label("<b>Delta</b>").set({ rich: true, textColor: "#cfcfcf", textAlign: "right" }), { row: 0, column: 3 });
+                            tbl.add(new qx.ui.basic.Label("<b>%</b>").set({ rich: true, textColor: "#cfcfcf", textAlign: "right" }), { row: 0, column: 4 });
+                            for (var ri = 0; ri < rows.length; ri++) {
+                                var row = rows[ri];
+                                var clr = row.delta > 0.5 ? "#7ee07e" : (row.delta < -0.5 ? "#ff8a8a" : "#cccccc");
+                                var rowName = row.label + (row.isTarget ? "  <span style='color:#ffe14d'>(target)</span>" : "");
+                                var sign = row.delta > 0 ? "+" : "";
+                                tbl.add(new qx.ui.basic.Label(rowName).set({ rich: true, textColor: row.isTarget ? "#ffe14d" : "#e6e6e6" }), { row: ri + 1, column: 0 });
+                                tbl.add(new qx.ui.basic.Label(MM.num.compact(Math.round(row.before), 1)).set({ textColor: "#e6e6e6", textAlign: "right" }), { row: ri + 1, column: 1 });
+                                tbl.add(new qx.ui.basic.Label(MM.num.compact(Math.round(row.after), 1)).set({ textColor: "#e6e6e6", textAlign: "right" }), { row: ri + 1, column: 2 });
+                                tbl.add(new qx.ui.basic.Label(sign + MM.num.compact(Math.round(row.delta), 1)).set({ textColor: clr, textAlign: "right" }), { row: ri + 1, column: 3 });
+                                tbl.add(new qx.ui.basic.Label(sign + row.pct.toFixed(1) + "%").set({ textColor: clr, textAlign: "right" }), { row: ri + 1, column: 4 });
+                            }
+                            box.add(tbl);
+                            box.add(new qx.ui.core.Spacer(null, 6));
+                        }
+                    }
+
                     if (res.sells && res.sells.length) {
                         box.add(new qx.ui.basic.Label("<b style='color:#ff8a8a'>Sell (" + res.sells.length + ")</b>").set({ rich: true }));
                         for (var s = 0; s < res.sells.length; s++) { var sl = res.sells[s]; box.add(new qx.ui.basic.Label("✕ <b>" + nameOf(sl) + "</b> L" + sl.level + " (at " + sl.x + ":" + sl.y + ")").set({ rich: true, textColor: "#ffc9c9" })); }
                         box.add(new qx.ui.core.Spacer(null, 4));
                     }
                     box.add(new qx.ui.basic.Label("<b>Moves (" + res.moves.length + ")</b>").set({ rich: true, textColor: "#ffffff" }));
-                    if (!res.moves.length) { box.add(new qx.ui.basic.Label("No moves improve " + OPT.RES_CFG[res.resKey].label + " on this base.").set({ rich: true, textColor: "#7ee07e" })); }
+                    if (!res.moves.length) {
+                        var noteMsg = res.allowReductions
+                            ? "No moves improve " + OPT.RES_CFG[res.resKey].label + " on this base, even when trading other resources."
+                            : "No moves improve " + OPT.RES_CFG[res.resKey].label + " on this base. Try <b>Allow reductions</b> to consider moves that trade other resources for a bigger target gain.";
+                        box.add(new qx.ui.basic.Label(noteMsg).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#7ee07e" }));
+                    }
                     for (var i = 0; i < res.moves.length; i++) {
                         var m = res.moves[i], dist = Math.max(Math.abs(m.toX - m.fromX), Math.abs(m.toY - m.fromY));
                         box.add(new qx.ui.basic.Label("<b>" + (i + 1) + "</b>. " + nameOf(m) + " L" + m.level + "  <b>" + dirArrow(m.toX - m.fromX, m.toY - m.fromY) + "</b> " + dist + (dist === 1 ? " tile" : " tiles")).set({ rich: true, textColor: "#e6e6e6", toolTipText: m.fromX + ":" + m.fromY + " -> " + m.toX + ":" + m.toY }));
@@ -2009,10 +2289,17 @@
                     if (!city) { summary.setValue("<span style='color:#ff8a8a'>Could not find that base. Open it in-game and use 'Current base'.</span>"); return; }
                     busy = true;
                     var sellN = spSell.getValue();
-                    summary.setValue("Optimizing " + OPT.RES_CFG[resKey].label + (sellN ? " (considering up to " + sellN + " sell" + (sellN > 1 ? "s" : "") + ")" : "") + "...");
+                    var allowReductions = !!cbAllowRed.getValue();
+                    summary.setValue("Optimizing " + OPT.RES_CFG[resKey].label
+                        + (sellN ? " (considering up to " + sellN + " sell" + (sellN > 1 ? "s" : "") + ")" : "")
+                        + (allowReductions ? " (allowing reductions in other resources)" : "")
+                        + "...");
                     MM.settings.set("BaseTools.OptResource", resKey);
                     window.setTimeout(function () {
-                        var res, opts = { rounds: spRounds.getValue(), maxNeighbors: spNeigh.getValue(), kicks: spKicks.getValue() };
+                        var res, opts = {
+                            rounds: spRounds.getValue(), maxNeighbors: spNeigh.getValue(), kicks: spKicks.getValue(),
+                            allowReductions: allowReductions
+                        };
                         try { res = sellN > 0 ? OPT.optimizeWithSell(city, resKey, opts, sellN) : OPT.optimize(city, resKey, opts); }
                         catch (e) { werr("OPT optimize threw:", e); res = { ok: false, reason: "internal error (see console)" }; }
                         try {
@@ -2021,7 +2308,8 @@
                                 var sign = res.gainPct >= 0 ? "+" : "";
                                 var changed = res.moves.length || (res.sells && res.sells.length);
                                 var col = changed ? "#ffe14d" : "#7ee07e";
-                                summary.setValue("<b style='color:" + col + "'>" + OPT.RES_CFG[resKey].label + "</b> (continuous /h): <b>" + cn + "</b> &rarr; <b>" + pn + "</b> (<b>" + sign + res.gainPct.toFixed(1) + "%</b>) via <b>" + res.moves.length + "</b> move(s)" + (res.sells && res.sells.length ? " + <b>" + res.sells.length + "</b> sell(s)" : "") + ". Figures are continuous production (packages aren't layout-dependent)." + (res.snapshot && res.snapshot.calibWarn ? " <span style='color:#ffb74d'>(" + res.snapshot.calibWarn + " link(s) uncalibrated)</span>" : ""));
+                                var modeNote = res.allowReductions ? " <span style='color:#ffb74d'>[allow reductions: ON]</span>" : "";
+                                summary.setValue("<b style='color:" + col + "'>" + OPT.RES_CFG[resKey].label + "</b> (continuous /h): <b>" + cn + "</b> &rarr; <b>" + pn + "</b> (<b>" + sign + res.gainPct.toFixed(1) + "%</b>) via <b>" + res.moves.length + "</b> move(s)" + (res.sells && res.sells.length ? " + <b>" + res.sells.length + "</b> sell(s)" : "") + ". Figures are continuous production (packages aren't layout-dependent)." + modeNote + (res.snapshot && res.snapshot.calibWarn ? " <span style='color:#ffb74d'>(" + res.snapshot.calibWarn + " link(s) uncalibrated)</span>" : ""));
                                 mapTitle.setValue("<b>Proposed layout</b>");
                                 renderLayout(res.snapshot, res.bestPos, res.moves, res.sells);
                                 lastRes = res; setApplyEnabled(!!changed);   // enable Apply only when there's something to apply
