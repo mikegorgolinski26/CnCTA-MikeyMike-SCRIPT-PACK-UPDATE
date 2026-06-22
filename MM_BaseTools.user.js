@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.3.0
+// @version         1.3.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -593,7 +593,13 @@
                                         var l = C[lt]; if (typeof l !== "object") continue;
                                         var ltid = N(l.LQJDCI), conns = N(l.NrOfLinkConnections), val = N(l.Value), max = N(l.MaxConnections);
                                         if (l.IconPath && iconByLink[ltid] == null) iconByLink[ltid] = l.IconPath; // building/field icon URL
-                                        arr.push({ lt: ltid, max: max, conns: conns, value: val, perConn: conns > 0 ? (val / conns) : null });
+                                        // perConn is only trustworthy when the link is ACTUALLY active. The
+                                        // game sometimes reports NrOfLinkConnections > 0 with Value=0 and
+                                        // IsConnected=false (e.g. a silo's link to crystal harvesters when
+                                        // no harvester is actually adjacent yet) - treat those as null so
+                                        // the calibration block fills them in from a connected sibling.
+                                        var activeConn = (conns > 0 && val > 0);
+                                        arr.push({ lt: ltid, max: max, conns: conns, value: val, perConn: activeConn ? (val / conns) : null });
                                     }
                                 }
                                 b.links[mid] = arr;
@@ -603,26 +609,75 @@
                     }
 
                     // Second pass: calibrate per-connection magnitude for links that currently have 0
-                    // connections (Value 0) by borrowing from a same-(tech,level,linkType) sibling that
-                    // does have connections. If a link type can't be calibrated anywhere, warn + drop it.
-                    var sib = {}; // tech|level|lt -> perConn
+                    // connections (Value 0). Three fallbacks, in order:
+                    //   (1) same (tech, level, linkType) sibling that has connections - exact match.
+                    //   (2) same (tech, linkType) ANY level - closest level wins. Scaled by an inferred
+                    //       level-growth factor when we have 2+ data points (perConn grows ~r^level for
+                    //       silos, harvesters, etc.); unscaled fallback when we only have one point.
+                    //   (3) give up: perConn = 0. (Building's link contribution silently zero.)
+                    //
+                    // Why this matters: if a base has e.g. ONE lvl-21 silo and it's currently NOT adjacent
+                    // to any crystal harvesters, MOD.Cry link perConn=null at snapshot time. The original
+                    // calibration only matched same-LEVEL siblings; with none, perConn defaulted to 0 and
+                    // the silo became invisible to the optimizer for swaps - it couldn't see that moving
+                    // the silo near crystal harvesters would help. Cross-level calibration fixes this.
+                    var sib = {};       // tech|level|lt -> perConn (per-level same-tech siblings, exact match)
+                    var sibAny = {};    // tech|lt -> [{level, perConn}, ...] (cross-level siblings sorted later)
                     for (var i = 0; i < order.length; i++) { var bb = buildings[order[i]];
                         for (var mk in bb.links) { var ls = bb.links[mk];
-                            for (var j = 0; j < ls.length; j++) { if (ls[j].perConn != null) { var key = bb.techName + "|" + bb.level + "|" + ls[j].lt; if (sib[key] == null) sib[key] = ls[j].perConn; } }
+                            for (var j = 0; j < ls.length; j++) {
+                                if (ls[j].perConn != null) {
+                                    var key = bb.techName + "|" + bb.level + "|" + ls[j].lt;
+                                    if (sib[key] == null) sib[key] = ls[j].perConn;
+                                    var akey = bb.techName + "|" + ls[j].lt;
+                                    (sibAny[akey] = sibAny[akey] || []).push({ level: bb.level, perConn: ls[j].perConn });
+                                }
+                            }
                         }
                     }
-                    var calibWarn = 0;
+                    // Per-(tech, linkType) growth factor: if we have 2+ samples at different levels,
+                    // infer r so perConn(level) ~ perConn(L0) * r^(level - L0). For 1 sample, r=1 (use as-is).
+                    function inferGrowth(samples) {
+                        if (!samples || samples.length < 2) return 1;
+                        var a = samples[0], b = samples[samples.length - 1];
+                        for (var k = 1; k < samples.length; k++) {
+                            if (samples[k].level > b.level) b = samples[k];
+                            if (samples[k].level < a.level) a = samples[k];
+                        }
+                        if (a.level === b.level || a.perConn <= 0 || b.perConn <= 0) return 1;
+                        var r = Math.pow(b.perConn / a.perConn, 1 / (b.level - a.level));
+                        // sanity-bound (silos / harvesters grow ~25%/level; reject obvious garbage)
+                        if (!isFinite(r) || r < 0.5 || r > 2.5) return 1;
+                        return r;
+                    }
+                    function calibrateAcrossLevels(tech, level, lt) {
+                        var akey = tech + "|" + lt;
+                        var samples = sibAny[akey];
+                        if (!samples || !samples.length) return null;
+                        // Find closest level sample.
+                        var best = samples[0];
+                        for (var k = 1; k < samples.length; k++) {
+                            if (Math.abs(samples[k].level - level) < Math.abs(best.level - level)) best = samples[k];
+                        }
+                        var r = inferGrowth(samples);
+                        return best.perConn * Math.pow(r, level - best.level);
+                    }
+                    var calibWarn = 0, calibCross = 0;
                     for (var i2 = 0; i2 < order.length; i2++) { var b2 = buildings[order[i2]];
                         for (var mk2 in b2.links) { var ls2 = b2.links[mk2];
                             for (var j2 = 0; j2 < ls2.length; j2++) {
                                 if (ls2[j2].perConn == null) {
                                     var key2 = b2.techName + "|" + b2.level + "|" + ls2[j2].lt;
-                                    if (sib[key2] != null) ls2[j2].perConn = sib[key2]; else { ls2[j2].perConn = 0; calibWarn++; }
+                                    if (sib[key2] != null) { ls2[j2].perConn = sib[key2]; continue; }
+                                    var cross = calibrateAcrossLevels(b2.techName, b2.level, ls2[j2].lt);
+                                    if (cross != null && cross > 0) { ls2[j2].perConn = cross; calibCross++; continue; }
+                                    ls2[j2].perConn = 0; calibWarn++;
                                 }
                             }
                         }
                     }
-                    if (calibWarn) wwarn("OPT: " + calibWarn + " link(s) could not be calibrated (no connected sibling) - excluded from scoring");
+                    if (calibCross) wlog("OPT: calibrated " + calibCross + " link(s) via cross-level fallback (no same-level sibling existed)");
+                    if (calibWarn) wwarn("OPT: " + calibWarn + " link(s) could not be calibrated (no connected sibling at any level) - excluded from scoring");
 
                     // Classify producers (have this mod) and movable buildings (this resource's set).
                     var producers = [], movable = [];
@@ -740,6 +795,23 @@
                         if (loss > 0) penalty += loss;
                     }
                     return target - alpha * penalty;
+                };
+            }
+            // Strict mode score: maximise target, but REJECT any layout that drops a non-target resource
+            // below its baseline (more than a small tolerance). This honours the user's spec for the
+            // default ("OFF" reductions) mode: "only pick layouts that improve whatever you are trying to
+            // improve without hurting anything else". A constraint violation returns -Infinity so the
+            // hill-climb never picks it (climbStep compares scores; -Inf is always rejected).
+            function makeStrictScoreFn(snap, targetResKey, baselines, prodLists) {
+                var targetMod = RES_CFG[targetResKey].mod;
+                var TOL = 0.5; // ignore sub-1 production rounding noise
+                return function (pos, removed) {
+                    for (var k in MOD) {
+                        if (MOD[k] === targetMod) continue;
+                        var s = scoreForMod(snap, pos, MOD[k], prodLists[k], removed);
+                        if (s < baselines[k] - TOL) return -Infinity;
+                    }
+                    return scoreForMod(snap, pos, targetMod, prodLists[targetResKey], removed);
                 };
             }
             // Union of all 4 RES_CFG.movable sets - every building eligible for relocation in ANY resource
@@ -893,12 +965,18 @@
                 var startPos0 = startPosFor(snap, null);
                 var baselines = scoreAll(snap, startPos0, null, prodLists);
 
+                // Both modes widen the movable set to ALL resource buildings now - strict mode just
+                // uses the no-harm constraint to reject layouts that hurt non-target resources, so
+                // widening lets swaps with refineries / power plants be tried (the constraint filters
+                // out harmful ones). This is what makes the silo<->refinery-in-the-way scenario visible
+                // to strict mode in the first place.
                 var searchOpts = { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5 };
+                searchOpts.movableList = widenMovable(snap);
                 if (allowReductions) {
-                    searchOpts.movableList = widenMovable(snap);
                     searchOpts.scoreFn = makeMultiScoreFn(snap, resKey, baselines, alpha, prodLists);
                 } else {
-                    if (!snap.movable.length) return { ok: false, reason: "no movable buildings for this resource" };
+                    searchOpts.scoreFn = makeStrictScoreFn(snap, resKey, baselines, prodLists);
+                    if (!searchOpts.movableList.length) return { ok: false, reason: "no movable buildings on this base" };
                 }
 
                 var r = runSearch(snap, null, searchOpts, 0);
@@ -937,10 +1015,14 @@
                 function mkSearchOpts(extra) {
                     var o = { rounds: extra.rounds || opts.rounds, kicks: extra.kicks != null ? extra.kicks : opts.kicks,
                               maxNeighbors: opts.maxNeighbors, restarts: extra.restarts };
+                    // Both modes widen the movable set; strict mode uses the no-harm constraint to filter.
+                    o.movableList = widenMovable(snap);
                     if (allowReductions) {
-                        o.movableList = widenMovable(snap);
                         o.scoreFn = makeMultiScoreFn(snap, resKey, baselines, alpha, prodLists);
-                    } else if (!snap.movable.length) { return null; }
+                    } else {
+                        o.scoreFn = makeStrictScoreFn(snap, resKey, baselines, prodLists);
+                        if (!o.movableList.length) return null;
+                    }
                     return o;
                 }
                 var fullOpts = mkSearchOpts({ restarts: 4 });
