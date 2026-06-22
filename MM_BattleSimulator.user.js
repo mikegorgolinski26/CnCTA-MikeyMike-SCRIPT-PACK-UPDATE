@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.1
+// @version         1.1.2
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -3190,8 +3190,18 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         __onSimComplete: function (cand, data) {
                             try {
                                 if (cand && data && data.d) {
-                                    var merged = TABS.UTIL.Formation.Merge(this.__clone(cand), data.d.a),
-                                        cache = TABS.CACHE.getInstance().check(merged, data.d.di, data.d.ai);
+                                    // KEY the cached result by the PRE-BATTLE input layout (what we
+                                    // actually simulated), NOT the post-battle "merged" layout.
+                                    // calcUnitsHash only hashes surviving (h>0) units, so a post-battle
+                                    // key silently drops casualties and never matches the pre-battle
+                                    // candidate the optimizer searches by -> the "already tried" dedup
+                                    // missed ~every result (so re-clicks re-explored the same layouts
+                                    // instead of new ones) and the round diagnostic undercounted.
+                                    // `cand` is the live pre-battle formation (full health) that was set
+                                    // before the sim, so its hash matches the candidate keys we look up.
+                                    var preBattle = this.__clone(cand),
+                                        merged = TABS.UTIL.Formation.Merge(this.__clone(cand), data.d.a),
+                                        cache = TABS.CACHE.getInstance().check(preBattle, data.d.di, data.d.ai);
                                     if (cache.result === null) {
                                         cache.result = {
                                             stats: TABS.UTIL.Stats.get_Stats(data).getAny(),
