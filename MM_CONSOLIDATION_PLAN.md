@@ -239,8 +239,49 @@ Priority order (high → low), with the new MM name and the one-line reason:
   Range / move-info. Its range scan is the inferior dup of Wavy/scan.inRange.
 
 **Maps**
-- **TA_Map** → salvage whole-region scan→canvas **paint loop** → new "MM - Region Minimap" on `map.grid/
-  worldToScreen`; POI min/max-level filter UI; two-point "border line" overlay concept.
+- ~~**TA_Map**~~ → **RETIRED 2026-06-21** (id 10040, cut from initial release; Mike: not pursuing the rebuild).
+  Was a 1765-line standalone qx singleton `TAMap` (chain: Nolana Kane 1.8 → DR01 1.6.9 → KSX → 777lexa777
+  → Profuter → Eistee 13.08.25) that opened a scrollable whole-region mini-map canvas via its own
+  "POI Map" → "Show POI Map" entry under the game's native Scripts button — would have **clashed with
+  the CnC Pack menu** in MMCommon (both call into `bntScript.Add` / `setMenu` on the same button), so
+  retiring it also removes a latent conflict if someone toggled it on. **Salvage spec (if "MM - Region
+  Minimap" is ever built):**
+  - **Paint loop** = walk `world.<obfSectors>.d` × 32×32 tiles via `s.ConvertToWorldX/Y(x,y)`, classify
+    each cell with `world.GetObjectFromPosition(cx,cy).Type`: 1=player, 2=forgotten, 3=camp/outpost
+    (`rgObj.get_CampType()===3` → outpost), 4=POI/Tunnel (`wObj[obfPOIType]===0` → tunnel). Empty tile
+    → `world.GetTerritoryTypeByCoordinates(cx,cy)` → 0=Own / 1=Alliance / 2=Neutral / 3=Enemy
+    background shade. Region overlay info via `vm.get_Region().GetObjectFromPosition(cx*gw, cy*gh)`.
+  - **Enemy bases**: `alliance.GetAllianceRelationshipsByType(ERelationTypeEnemy, true).l` →
+    `{OtherAllianceId}` set; on the region pass for each tile check `rgObj.get_VisObjectType()===4 &&
+    rgObj.get_Type()===2` (a player city) and `enemiesById[rgObj.get_AllianceId()]`; draw red dot +
+    `arc(cx*zf, cy*zf, zf*20, 0, 2π)` faint red attack-range circle.
+  - **Own bases**: `md.get_Cities().get_AllCities().d` → each city's `get_PosX/Y`, draw 20-tile + 40-tile
+    range rings.
+  - **POI highlighting**: dynamic obf member resolve via `getNameByIdx` / `getMemberNameByType` on the
+    first POI wObj (POIType=idx4, OwnerAllianceId=idx2, Level=idx3, AllianceName=first string field) —
+    today's Wrapper already publishes `get_POIType`/`get_Level` so an MM rebuild can skip the regex
+    entirely. POI min/max-level filter (`settingsPanel.minPoiLevel/maxPoiLevel`) + POI-type select
+    (`WorldObjectPointOfInterest.EPOIType`) + "alliance POIs only" toggle gated on a selected alliance.
+  - **Viewport frame**: `vm.get_Region().get_PosX/Y / get_GridWidth/Height` → top-left tile;
+    `get_ViewWidth/Height / get_ZoomFactor / get_GridWidth/Height` → tile dims. Kept live via
+    `phe.cnc.Util.attachNetEvent(Region, "PositionChange", ClientLib.Vis.PositionChange, ...)`.
+  - **Click to teleport**: `mapCanvas.mousedown` → `VisMain.GetInstance().CenterGridPosition(mouseX/zf,
+    mouseY/zf)` then re-scroll the mini-map to re-center the new viewport.
+  - **Alliance enumeration** (for the alliance-pick dropdown): scan every sector's alliance list
+    (auto-detected via the "12-prop object with exactly 1 string field" heuristic at line 1393) and
+    sort by name — explicitly tagged "expensive operation" in the original. If rebuilt, prefer
+    `RankingGetData` (per [[offdef-batch-fetch-idea]]) over the sector scan.
+  - **Border-line overlay**: two configurable `(x1:y1)→(x2:y2)` lines with their own color, drawn
+    after the main paint — handy for marking alliance borders. Coord-pick button reuses
+    `VisMain.get_SelectedObject().get_RawX/Y()` (or current city fallback).
+  - **Bug to NOT carry over**: `init_settingsWnd`'s `var alliance = md.get_Alliance()` is shadowed by
+    `var alliance = s.GetAlliance(player.Alliance)` inside the player-tile branch — masked today only
+    because relations are computed before the loop. `populateAllianceSelect` also references
+    undefined `selectedItem`/`tempItem`. `findAllianceById` hard-codes stale obf `a.FGTNFZ`.
+  - **MMCommon roadmap (already noted in §7)**: when the rebuild happens, the region-scan→canvas
+    paint helper lands in `MMCommon.map.*` alongside the world→screen marker projection
+    (consolidating the 3 copies in Tunnel Info / Attack Range / Player Base Info).
+  Original lives in git history if a full restore is ever wanted.
 - ~~**TA_CD_PvP_Quick_Map**~~ → **RETIRED 2026-06-21** (Mike: not pursuing it; file + bg row gone). Nothing
   salvaged into MMCommon now, but nothing lost: the bulk-fetch path it used is documented in §1.1 and still
   lives in keeper script Real POI Bonus when `base.fetch*` is built. Its radar/canvas view + alliance-picker
