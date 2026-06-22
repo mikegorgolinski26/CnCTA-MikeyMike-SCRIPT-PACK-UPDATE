@@ -109,7 +109,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | Script | What it does | Status |
 |---|---|---|
 | TA_Report_Stats | Multi-report select → loot/CP/RT totals + loot/CP ratio | ✅🔁 |
-| TA_Report_Summary | Combat reports grouped by base/date/type → totals (minified) | ✅🔁 |
+| ~~TA_Report_Summary~~ | Combat reports grouped by base/date/type → totals (minified) | ❌ RETIRED 2026-06-21 (cut from initial release; salvage spec — bulk reports scanAll pipeline + per-report cost/loot extraction + per-base × per-date matrix — captured in MM_CONSOLIDATION_PLAN §5 Report_Summary entry; closes the reports cluster with §4 entry 6 Report_Stats) |
 | TA_Wavy | Forgotten attack-wave count + level breakdown on hover | ✅ |
 
 ### Combat / army / map-range

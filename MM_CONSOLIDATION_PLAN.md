@@ -249,9 +249,50 @@ Priority order (high → low), with the new MM name and the one-line reason:
   - POI tier/rank/bonus simulator math itself is NOT re-documented here — already captured in §4 entry 4
     (POIs_Analyser retirement) since this was a duplicate.
   Full original is in git history at SCRIPT-PACK `908bf48` if either piece is ever rebuilt.
-- **TA_Report_Summary** → salvage the **bulk report-scan pipeline** (`GetReportCount`→
-  `RequestReportHeaderDataAll`→per-report `RequestReportData`, grouped by base/date via `MergeResourceCosts`)
-  → `reports.scanAll(type)`, consumed by MM - Report Stats.
+- ~~**TA_Report_Summary**~~ (Nogrod/DLwarez, 22.05.04, ~283 LOC) — **RETIRED 2026-06-21** (file + bg
+  row id 10051 gone). Was a movable qx window (top:230, left:LeftBar.width+5) docked to the desktop:
+  pick a `EPlayerReportType` (Forgotten Attacks / Offense / Defense), click Scan, the script bulk-
+  fetches every report of that type and renders per-base × per-day Loot vs Repair-Cost summaries
+  (each cell shows totals for the 8 resource types, with the timespan-typed ones — repair time —
+  rendered via `getTimespanString` instead of `formatNumbersCompact`). Cut from initial release —
+  same call as Report_Stats (§4 entry 6, deferred); the reports cluster as a whole is post-release.
+  **Salvage spec for a future MMCommon.reports.* module + MM - Report Stats (post-release; closes
+  the reports cluster with §4 entry 6 Report_Stats spec):**
+  - **Bulk report-scan pipeline** (`reports.scanAll(playerReportType) → Promise<list of CombatReport>`):
+    1. `reports = MainData.GetInstance().get_Reports()`. Bind once:
+       `reports.add_ReportDelivered(phe.cnc.Util.createEventDelegate(ClientLib.Data.Reports.ReportDelivered, ctx, onReport))`
+       where `onReport(report)` receives a fully-loaded `ClientLib.Data.Reports.CombatReport` (called
+       once per report whose `RequestReportData` resolves).
+    2. `CommunicationManager.GetInstance().SendSimpleCommand("GetReportCount", { playerReportType }, createEventDelegate(CommandResult, ctx, onCount), null)`
+       → server returns `count`.
+    3. `reports.RequestReportHeaderDataAll(playerReportType, 0, count, ClientLib.Data.Reports.ESortColumn.Time, true)`
+       → game fires its own header-loaded callback (the original wires `add_ReportHeaderDataLoaded` →
+       array of headers); iterate `headers[i].get_Id()` and call `reports.RequestReportData(id)` per
+       header. Each completion fires `ReportDelivered`.
+    4. Caller counts deliveries vs `count` to know when the scan is complete.
+  - **Per-report cost/loot extraction** (per `EReportType` branch):
+    - Loot row = per `EResourceType` skipping `[0]` (None): use `report.GetDefenderTotalResourceCosts(ert)`
+      when `EReportType.NPCPlayerCombat` (forgotten ATTACKING you), else `report.GetAttackerTotalResourceReceived(ert)`.
+    - Repair row = `EReportType.NPCPlayerCombat` → `report.GetDefenderRepairCosts(ert)` per ert; else
+      flatten `report.GetAttacker{Infantry,Vehicle,Air}RepairCosts().d` into `[{Type, Count}, ...]`
+      and merge.
+    - Group key = `NPCPlayerCombat ? report.get_DefenderBaseId() : report.get_AttackerBaseName()`
+      (asymmetric — the donor uses ID for the defender case and name for the attacker case; on the
+      MM rebuild, normalize to ID via `get_AttackerBaseId()` if available).
+  - **Per-base × per-date matrix with "All" totals on both axes:** for each delivered report, call
+    `accum(base, date)` plus three corner-sum variants (`(base, "All")`, `("All", date)`,
+    `("All", "All")`) so the totals row/column drop out for free. Cells carry
+    `{ count, totalLoot: [{Type,Count}], totalRepair: [{Type,Count}] }`. Merging uses
+    `ClientLib.API.Util.MergeResourceCosts(prev, newArray)` (the public combinator the donor relies on).
+  - **Resource-type-aware label formatting:** `ClientLib.Base.Resource.IsResourceTypeTimeValue(type)`
+    → `phe.cnc.Util.getTimespanString(MainData.get_Time().GetTimeSpan(count, true))`; else
+    `phe.cnc.gui.util.Numbers.formatNumbersCompact(count)`. Belongs in `MMCommon.num.byResourceType`
+    (or stays in the consumer — trivial).
+  - **Date bucket:** `phe.cnc.Util.getDateTimeString(new Date(report.get_Time()))` — the donor uses
+    raw datetime; on the MM rebuild prefer YYYY-MM-DD so cells aggregate per-day instead of per-tick.
+  - The UI itself (resource-icon grid + base/date dropdowns) is small and rebuildable on the
+    MMCommon dockable-window pattern; reuse the cost/loot table renderer Report_Stats §4 spec
+    described. Full original is in git history at SCRIPT-PACK `fc5866d` for a full restore.
 - ~~**TA_Formation_Saver**~~ — **RETIRED 2026-06-21** (file + bg row id 10009 gone). Was a small qx
   panel injected into the in-base move-battle PlayArea: collapse/expand header + a "Save" button +
   a list of named-saved formations per (attacker base, target base) pair, each with Load and Delete.
@@ -448,10 +489,11 @@ RETIRED (POI window was a POIs_Analyser dup; scanner/upgrade already commented; 
 RETIRED (priority + ROI + per-building CanRepair/Repair lifted INTO MM - Base Tools 1.4.0 + Framework Wrapper 1.2.0; §5 Auto_Repair entry): Auto_Repair.
 RETIRED (cut from initial release; salvage spec — schema + Save/Load API — in §5 Formation_Saver entry): Formation_Saver.
 RETIRED (cut from initial release; salvage spec — canTrade / cost / selfTrade / plan-and-queue, plus dedup target for 2 live consumers — in §5 Transfer_All_resources entry): Transfer_All_resources.
+RETIRED (cut from initial release; salvage spec — bulk reports scanAll pipeline + per-report cost/loot extraction + per-base × per-date matrix — in §5 Report_Summary entry; closes the reports cluster with §4 entry 6 Report_Stats): Report_Summary.
 RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 entry on Info_Sticker): Info_Sticker.
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
-CityMoveInfoExtend, Map, Report_Summary,
+CityMoveInfoExtend, Map,
 View_Player_Base, CnCTAOpt_Link_Button,
 New_Resource_Trade_Window.
 KEEP-PENDING-REVIEW: xTrim_Base_Overlay_DR_4_3, MovableMenuOverlay, Supplies_Mod,
