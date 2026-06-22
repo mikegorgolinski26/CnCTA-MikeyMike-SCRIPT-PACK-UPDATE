@@ -252,8 +252,35 @@ Priority order (high → low), with the new MM name and the one-line reason:
 - **TA_Report_Summary** → salvage the **bulk report-scan pipeline** (`GetReportCount`→
   `RequestReportHeaderDataAll`→per-report `RequestReportData`, grouped by base/date via `MergeResourceCosts`)
   → `reports.scanAll(type)`, consumed by MM - Report Stats.
-- **TA_Formation_Saver** → fold the per-base/per-own-city **formation save/load** schema + load-via-
-  `MoveBattleUnit` round-trip into **MM - Battle Simulator** (store via `settings`, not raw localStorage).
+- ~~**TA_Formation_Saver**~~ — **RETIRED 2026-06-21** (file + bg row id 10009 gone). Was a small qx
+  panel injected into the in-base move-battle PlayArea: collapse/expand header + a "Save" button +
+  a list of named-saved formations per (attacker base, target base) pair, each with Load and Delete.
+  Cut from initial release — no consumer in the pack yet; same don't-ship-inert-code call as
+  Report_Stats / POIs_Analyser / POI_ExporterTools / The_Green_Cross_Tools.
+  **Salvage spec for a future MM - Battle Simulator formation save feature (post-release):**
+  - **Storage schema** (plain JSON in `localStorage.formations`):
+    ```js
+    formations[targetCityId][ownCityId] = [count, { n: "Save 1", l: [{x,y,e}, ...] }, ...]
+    ```
+    where index `0` of the per-pair array is the running save-count (used to mint `"Save N"` names);
+    subsequent entries are saved formations. Each `l[i]` carries `x` (grid X), `y` (grid Y), and `e`
+    (enabled flag) for the army unit at slot `i`. When migrating, store via
+    `MMCommon.settings.set("BattleSim.Formations", ...)` (per player+world) instead of raw localStorage.
+  - **Save path:** `ownCity = MainData.get_Cities().get_CurrentOwnCity()`;
+    `targetId = MainData.get_Cities().get_CurrentCity().get_Id()`;
+    `formation = ownCity.get_CityArmyFormationsManager().GetFormationByTargetBaseId(targetId)`;
+    walk `formation.get_ArmyUnits().l[]` and capture `unit.get_CoordX() / get_CoordY() / get_Enabled()`.
+    Guard: `armyUnits == null` → user hasn't entered the move-battle setup yet, abort.
+  - **Load path:** same resolution as save, then for each saved unit slot:
+    `armyUnits[i].MoveBattleUnit(unitData.x, unitData.y);`
+    `armyUnits[i].set_Enabled(unitData.e)` (with `set_Enabled_Original` fallback for older clients).
+    **Fragility note:** uses unit-index, not unit-id — so a saved formation breaks if the army roster
+    changes (different units, reordered slots). A robust rebuild should key by unit `get_UnitId()` or
+    `get_MdbUnitId()` instead, and skip slots that don't match.
+  - **Delete-slot bookkeeping:** when the per-pair array shrinks to `length <= 1` (just the counter)
+    delete the pair; when the per-target object has no pairs left, delete the target.
+  - UI was per-target inline; a future build could surface it as a Battle Sim tab. Full original is
+    in git history at SCRIPT-PACK `493c3c9` for a full restore.
 
 **Player info / links**
 - ~~**TA_PvP_PvE_Ranking…**~~ → **RETIRED 2026-06-21** (Mike: retire it; file + bg row id 10002 gone). Both
@@ -387,10 +414,11 @@ RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6):
 RETIRED (cut from initial release; salvage spec captured in §4 entry 5): POI_ExporterTools.
 RETIRED (POI window was a POIs_Analyser dup; scanner/upgrade already commented; salvage spec in §5 The_Green_Cross_Tools entry): The_Green_Cross_Tools.
 RETIRED (priority + ROI + per-building CanRepair/Repair lifted INTO MM - Base Tools 1.4.0 + Framework Wrapper 1.2.0; §5 Auto_Repair entry): Auto_Repair.
+RETIRED (cut from initial release; salvage spec — schema + Save/Load API — in §5 Formation_Saver entry): Formation_Saver.
 RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 entry on Info_Sticker): Info_Sticker.
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
-CityMoveInfoExtend, Map, Report_Summary, Formation_Saver,
+CityMoveInfoExtend, Map, Report_Summary,
 View_Player_Base, CnCTAOpt_Link_Button,
 New_Resource_Trade_Window, Transfer_All_resources.
 KEEP-PENDING-REVIEW: xTrim_Base_Overlay_DR_4_3, MovableMenuOverlay, Supplies_Mod,

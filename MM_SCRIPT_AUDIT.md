@@ -115,7 +115,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 ### Combat / army / map-range
 | Script | What it does | Status |
 |---|---|---|
-| TA_Formation_Saver | Save/load attack formations per city-pair (sim has its own too) | ✅🔁 |
+| ~~TA_Formation_Saver~~ | Save/load attack formations per city-pair (sim has its own too) | ❌ RETIRED 2026-06-21 (cut from initial release; salvage spec — storage schema + Save/Load API + MoveBattleUnit round-trip — captured in MM_CONSOLIDATION_PLAN §5 Formation_Saver entry, for a future MM - Battle Simulator formation tab) |
 | TA_Attack_Range → **MM - Attack Range** | Highlights bases in range while moving a base | ✅ MM-ified 2026-06-20 (1.0.0; on MMCommon map/coords/base; dead offense-panel dropped; options + HUD button) |
 | ~~TA_Tunnel_Info~~ → **MM - Tunnel Info** | Tunnel block/activate overlays + required offense level | ✅ MM-ified 2026-06-21 + verified (1.0.0, id 10205; on MMCommon map/coords/net/ui/buttons; green=activate/red=blocked + move-panel offense/required readout). Original RETIRED. |
 | TA_PvP_PvE_Ranking_POI_Holding_Split_Base_Kill_Score | Alliance PvP/PvE + POI holdings tabs in player info | ✅ |
