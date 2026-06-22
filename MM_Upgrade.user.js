@@ -5,7 +5,7 @@
 // @contributor     NetquiK (https://github.com/netquik)
 // @translator      ES: Nefrontheone
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.2
+// @version         1.0.3
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
@@ -691,9 +691,37 @@
             if (!win) { werr("could not create window"); return; }
             win.add(content);
 
-            // ---- docked side panel: built lazily on first pin. Anchored to the LEFT edge of the desktop.
-            // Mirror of the Info Sticker frame: caps unflipped (face left naturally); the gray strip sits
-            // on the RIGHT edge of the body (marginRight) so it points INTO the base view.
+            // ---- docked side panel: built lazily on first pin. Anchored just LEFT of the central base
+            // widget (the qx PlayArea), NOT the absolute left edge of the screen - otherwise it sits
+            // behind the game's permanent left-column UI (player info, resources, Add Funds, alerts).
+            // The PlayArea is the centered ~1266x858 frame that holds the base view + its HUD; its
+            // position depends on viewport size, so we compute the dock position dynamically from
+            // PlayArea.getContentLocation() and reposition on resize. Mirror of the Info Sticker frame:
+            // caps unflipped (face left naturally); gray strip on the RIGHT of the body (marginRight)
+            // so it points INTO the base widget.
+            var DOCK_WIDTH_EST = 260;   // upper-bound estimate for layout math (holder.maxWidth = 280 minus a smidge)
+            var DOCK_GAP       = 5;     // px breathing room between dock and PlayArea
+            var DOCK_FALLBACK_LEFT = 130;
+            var DOCK_FALLBACK_TOP  = 130;
+            function dockAnchor() {
+                try {
+                    var pa = qx.core.Init.getApplication().getPlayArea();
+                    var loc = pa && pa.getContentLocation && pa.getContentLocation();
+                    if (loc && loc.left != null) {
+                        return {
+                            left: Math.max(0, loc.left - DOCK_WIDTH_EST - DOCK_GAP),
+                            top: Math.max(0, loc.top || 0)
+                        };
+                    }
+                } catch (e) { /* PlayArea not laid out yet - fall through */ }
+                return { left: DOCK_FALLBACK_LEFT, top: DOCK_FALLBACK_TOP };
+            }
+            function repositionDock() {
+                if (!sp.panel) return;
+                try { sp.panel.setLayoutProperties(dockAnchor()); }
+                catch (e) { werr("repositionDock:", e); }
+            }
+
             var sp = { panel: null, body: null, built: false };
             function buildSidePanel() {
                 if (sp.built) return sp.panel;
@@ -717,10 +745,22 @@
                     holder.add(botCap);
                     sp.panel = holder;
                     sp.body = body;
-                    // {left:0, top:130} = LEFT edge of the screen, just below the top bar (matches the
-                    // Member Status {right:128, top:130} on the opposite side).
-                    app.getDesktop().add(holder, { left: 0, top: 130 });
+                    // Anchor dynamically to just LEFT of the PlayArea (the central base widget). The
+                    // initial add uses computed coords; repositionDock() handles viewport-resize updates.
+                    app.getDesktop().add(holder, dockAnchor());
                     sp.built = true;
+                    // Track PlayArea position changes - on window resize the centered PlayArea shifts,
+                    // and we need to follow it. The PlayArea itself fires "resize" when its bounds change.
+                    try {
+                        var pa = app.getPlayArea();
+                        if (pa && pa.addListener) {
+                            pa.addListener("resize", repositionDock);
+                            pa.addListener("appear", repositionDock);
+                        }
+                    } catch (e) { wwarn("attach PlayArea resize:", e); }
+                    // Belt + braces: also re-anchor on a native window resize (covers the rare case where
+                    // qx didn't propagate a resize event to PlayArea, e.g. zoom changes).
+                    try { window.addEventListener("resize", repositionDock); } catch (e) {}
                 } catch (e) { werr("buildSidePanel:", e); sp.panel = null; }
                 return sp.panel;
             }
@@ -745,7 +785,7 @@
                 try {
                     if (menuOn()) {
                         buildSidePanel(); placeContent();
-                        if (sp.panel) sp.panel.show();
+                        if (sp.panel) { sp.panel.show(); repositionDock(); }
                     } else {
                         placeContent();
                         win.open();
@@ -766,7 +806,7 @@
                     updatePin();
                     if (on) {
                         buildSidePanel(); placeContent();
-                        if (sp.panel) sp.panel.show();
+                        if (sp.panel) { sp.panel.show(); repositionDock(); }
                         try { win.close(); } catch (e) {}
                     } else {
                         if (sp.panel) sp.panel.exclude();
@@ -808,7 +848,7 @@
                     // When pinned, the docked panel "follows" you into the base - auto-show it on enter.
                     // (Float mode stays closed until the user clicks the trigger button - matches original.)
                     if (menuOn()) {
-                        try { buildSidePanel(); placeContent(); if (sp.panel) sp.panel.show(); } catch (e) { werr("auto-show on enter:", e); }
+                        try { buildSidePanel(); placeContent(); if (sp.panel) { sp.panel.show(); repositionDock(); } } catch (e) { werr("auto-show on enter:", e); }
                     }
                 } catch (e) { werr("onViewModeChanged:", e); }
             }
@@ -861,35 +901,37 @@
                 });
             } catch (e) { werr("lifecycle.watch:", e); }
 
-            // Make sure the side panel auto-restores on reload when pinned AND when the user is
-            // currently in a base view. If they're on the region map at load time, we leave the docked
-            // panel hidden - it'll auto-show the next time they enter a base (handled by
-            // onViewModeChanged above). This avoids firing the section onAppear handlers (which call
-            // ClientLib.API.City.GetUpgradeCostsForAllBuildingsToLevel etc.) while get_CurrentOwnCity()
-            // is null and crashes the game's obfuscated UPFMQL accessor.
+            // Side panel auto-restores on reload ONLY when pinned AND the user is already in a base
+            // view at load time. On the region map we don't even build the side panel yet - that
+            // happens lazily when the user enters a base (onViewModeChanged handler above). This
+            // avoids both (a) the side panel being visible behind the resource UI on the region map,
+            // and (b) firing the section onAppear handlers when get_CurrentOwnCity() is null and the
+            // obfuscated upgrade API would crash.
             updatePin();
-            placeContent();
             var currentMode;
             try { currentMode = ClientLib.Vis.VisMain.GetInstance().get_Mode(); } catch (e) { currentMode = null; }
             if (menuOn() && inBaseMode(currentMode)) {
-                if (sp.panel) sp.panel.show();
-                // The desktop should be ready, but keep a short retry in case the menu bar lags behind nav-ready.
+                placeContent();   // builds side panel + reparents content into it
+                if (sp.panel) { sp.panel.show(); repositionDock(); }
+                // Keep a short retry in case the desktop/menu bar lags behind nav-ready.
                 if (!sp.built) {
                     var mTries = 0;
                     (function tryDock() {
                         try {
                             if (!menuOn() || !inBaseMode(ClientLib.Vis.VisMain.GetInstance().get_Mode())) return;
-                            if (buildSidePanel()) { placeContent(); if (sp.panel) sp.panel.show(); return; }
+                            if (buildSidePanel()) { placeContent(); if (sp.panel) { sp.panel.show(); repositionDock(); } return; }
                         } catch (e) {}
                         if (++mTries < 60) window.setTimeout(tryDock, 500);
                     })();
                 }
-            } else {
-                // Floating mode (or pinned but not in a base): panel stays closed until the user clicks
-                // the trigger button (float) / enters a base view (pinned). Don't auto-open here -
-                // restoreOpen is intentionally false for the same reason.
+            } else if (!menuOn()) {
+                // Floating mode: content stays in the float window; window stays closed until the
+                // user clicks the in-game Upgrade trigger button (restoreOpen is intentionally false).
+                placeContent();
                 try { win.close(); } catch (e) {}
             }
+            // else (pinned but in Region/World/None): leave content in `win` until the user enters
+            // a base view; onViewModeChanged will then build the side panel and reparent the content.
 
             wlog("ready (pinned =", menuOn(), ")");
         }
