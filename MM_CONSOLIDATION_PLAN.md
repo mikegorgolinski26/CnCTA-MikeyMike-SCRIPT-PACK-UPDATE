@@ -193,7 +193,9 @@ Priority order (high → low), with the new MM name and the one-line reason:
   info surfaces are covered by Base Info + Member Status. Salvage recipes NOT mined now but documented here for
   if `base.fetch*`/`base.status` get built: (1) per-member `GetPublicPlayerInfoByName` fan-out (pairs with
   §1.1); (2) support-building Ion→Art→Air detection; (3) the 2-tile (corner-excluded) POI-on-base predicate.
-- **TA_PvP_PvE_Player_Info_Mod** (subset) → salvage only the 2-tile POI-on-base predicate; else superseded.
+- ~~**TA_PvP_PvE_Player_Info_Mod**~~ (subset) → **RETIRED 2026-06-21** (Mike: dump it; file + bg row id 10083
+  gone). Strict subset of the already-retired TA_PvP_PvE_Ranking…; the only salvage (2-tile POI-on-base
+  predicate) was already captured from that one's retirement.
 - **TA_View_Player_Base** → target site **cncopt.com is dead**; encoder superseded by the cnctaopt one (do
   NOT mix keymaps). Salvage only the alliance-`get_POI*Bonus()` getters → base/layout bonus model.
 - ~~**TA_CnCTAOpt_Link_Button**~~ → ✅ DONE + VERIFIED 2026-06-21: encoder lifted into `MMCommon.cnctaopt`
@@ -314,7 +316,7 @@ RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 en
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Auto_Repair, Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
 CityMoveInfoExtend, Map, The_Green_Cross_Tools, Report_Summary, Formation_Saver,
-PvP_PvE_Player_Info_Mod, View_Player_Base, CnCTAOpt_Link_Button,
+View_Player_Base, CnCTAOpt_Link_Button,
 New_Resource_Trade_Window, Transfer_All_resources.
 KEEP-PENDING-REVIEW: xTrim_Base_Overlay_DR_4_3, MovableMenuOverlay, Supplies_Mod,
 Multissesion_MOD. (TheMovement → MM-IFIED 2026-06-21, MM - The Movement id 10209.)
