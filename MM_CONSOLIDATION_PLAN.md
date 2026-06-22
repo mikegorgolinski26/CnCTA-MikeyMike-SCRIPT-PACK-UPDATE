@@ -437,9 +437,19 @@ Priority order (high → low), with the new MM name and the one-line reason:
   (1.0.8), reissued as **MM - CnCTAOpt Link** (id 10204), original RETIRED. (View_Player_Base also retired.)
 
 **Economy**
-- **TA_New_Resource_Trade_Window** → salvage `SelfTrade` send primitive + per-base cost math
-  (`CalculateTradeCostToCoord`/`CanTrade`) → `MMCommon.trade.selfTrade`. Class-replacement UI is too fragile
-  to keep; Base Tools owns transfer.
+- ~~**TA_New_Resource_Trade_Window**~~ → **RETIRED 2026-06-21** (Chiantii, id 10007, 793 LOC, cut from
+  initial release; Mike: not interested). Was a wholesale **class replacement** of
+  `webfrontend.gui.trade.TradeOverlay` (via `qx.Class.undefine` + redefine on the same name) that
+  hijacked the game's existing Trade button to open a multi-source transfer window: qx table of every
+  other own base (Distance / Credits-per-1000 / Amount / Max), multi-row select + Select-All toggle,
+  Tib/Cry resource pick, min-amount + distance filters, 10/25/50/75/100% quick-% buttons (per-base
+  scaling), live total-cost label via `phe.cnc.base.Timer.uiTick`, and a `TradeWithBases` execute
+  loop firing N parallel `SendCommand("SelfTrade", ...)` calls with optimistic local AddCredits /
+  AddResources updates. Class-replacement UI was the fragility point (no teardown — sticky until
+  page reload). Trade primitives (SelfTrade send, CanTrade, CalculateTradeCostToCoord) are NOT
+  lost: salvage spec already lives in §5 Transfer_All_resources RETIRED entry and §7 MMCommon
+  trade.* roadmap (the dedup target — Base Tools and MM - Upgrade both carry inline copies of
+  planResourceTransfer/runTransferPlan; this would have been a third). Original in git history.
 - ~~**TA_Transfer_All_resources**~~ (KRS_L, 1.6.2, ~161 LOC) — **RETIRED 2026-06-21** (file + bg row id
   10079 gone). Was a single "Transfer All" button injected into the game's TradeOverlay window: select
   a target base + a resource (Tib/Cry toggle), tick the confirm checkbox to compute total credit fee,
@@ -448,8 +458,8 @@ Priority order (high → low), with the new MM name and the one-line reason:
   right now (same don't-ship-inert-code call as Report_Stats / Formation_Saver / etc).
   **Salvage spec for a future MMCommon.trade.* module (long overdue per §7) — TWO live consumers
   already duplicate this pattern inline (MM - Base Tools `planTransfer`+`autoTransferAndUpgrade`,
-  MM - Upgrade `planResourceTransfer`+`runTransferPlan`), and a THIRD will be added when
-  TA_New_Resource_Trade_Window retires. Lift opportunity:**
+  MM - Upgrade `planResourceTransfer`+`runTransferPlan`). Lift opportunity** (a third copy lived
+  in the now-retired TA_New_Resource_Trade_Window, never refactored — UI was dropped):
   - `MMCommon.trade.canTrade(city)` → `(city.CanTrade && city.CanTrade() === ClientLib.Data.ETradeError.None)`.
     Used in all 3 consumers; centralizes the ETradeError enum dependency.
   - `MMCommon.trade.cost(srcCity, dstCity, amount)` → `srcCity.CalculateTradeCostToCoord(dstCity.get_PosX(), dstCity.get_PosY(), amount)`
@@ -499,9 +509,10 @@ Priority order (high → low), with the new MM name and the one-line reason:
 - `trade.selfTrade(src,dst,resType,amount)` + `canTrade(city)` + `cost(src,dst,amount)` + plan/queue
   helpers. **High-value dedup target — TWO live consumers (MM - Base Tools, MM - Upgrade) currently
   carry near-identical inline copies of `planResourceTransfer` / `runTransferPlan` (cheapest-per-unit
-  source ordering + serial SelfTrade + effect-poll for arrival) and a THIRD copy is in
-  TA_New_Resource_Trade_Window pending retirement.** Full spec captured in §5 Transfer_All_resources
-  RETIRED entry. Refactor the two consumers when a touch-working-code pass is wanted.
+  source ordering + serial SelfTrade + effect-poll for arrival).** A third copy in
+  TA_New_Resource_Trade_Window is now retired (UI dropped); full spec captured in §5
+  Transfer_All_resources RETIRED entry. Refactor the two remaining consumers when a
+  touch-working-code pass is wanted.
 - `export.csv(rows[][]) / download(blob, filename)` — RETIRED salvage spec in §5 (POI_ExporterTools);
   reusable by Base Scanner, Reports, POI export when first consumer lands.
 - `reports.scanAll(type)` + combined cost/loot model — from Report_Summary + Report_Stats.
@@ -596,7 +607,7 @@ RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 en
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
 CityMoveInfoExtend, Map,
-View_Player_Base, CnCTAOpt_Link_Button,
-New_Resource_Trade_Window.
+View_Player_Base, CnCTAOpt_Link_Button.
+(New_Resource_Trade_Window → RETIRED 2026-06-21.)
 KEEP-PENDING-REVIEW: MovableMenuOverlay,
 Multissesion_MOD. (TheMovement → MM-IFIED 2026-06-21, MM - The Movement id 10209; Supplies_Mod → RETIRED 2026-06-21.)
