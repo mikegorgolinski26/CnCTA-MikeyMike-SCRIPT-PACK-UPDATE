@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.2
+// @version         1.1.3
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -5591,6 +5591,26 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 var r = {
                                     row: 0
                                 };
+                                // Render a control's help text as a VISIBLE description row (not just a
+                                // hover-only tooltip) so every option is self-explanatory in the dialog.
+                                var addDesc = function (tip) {
+                                    if (!tip) return;
+                                    var d = new qx.ui.basic.Label(tip).set({
+                                        rich: true,
+                                        wrap: true,
+                                        textColor: "#9fb3c8",
+                                        maxWidth: 360,
+                                        marginTop: -2,
+                                        marginBottom: 8
+                                    });
+                                    try { d.setFont("font_size_11"); } catch (e) {}
+                                    page.add(d, {
+                                        row: r.row,
+                                        column: 0,
+                                        colSpan: 2
+                                    });
+                                    r.row++;
+                                };
                                 return {
                                     spinner: function (label, key, def, min, max, tip) {
                                         var lbl = new qx.ui.basic.Label(label).set({
@@ -5618,6 +5638,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                             column: 1
                                         });
                                         r.row++;
+                                        addDesc(tip);
                                     },
                                     number: function (label, key, def, tip) {
                                         var lbl = new qx.ui.basic.Label(label).set({
@@ -5644,6 +5665,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                             column: 1
                                         });
                                         r.row++;
+                                        addDesc(tip);
                                     },
                                     check: function (label, key, def, tip) {
                                         var cb = new qx.ui.form.CheckBox(label);
@@ -5660,6 +5682,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                             colSpan: 2
                                         });
                                         r.row++;
+                                        addDesc(tip);
                                     }
                                 };
                             };
