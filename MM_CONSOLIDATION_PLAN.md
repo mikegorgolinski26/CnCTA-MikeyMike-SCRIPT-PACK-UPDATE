@@ -395,7 +395,7 @@ Priority order (high → low), with the new MM name and the one-line reason:
 | Script | The decision |
 |---|---|
 | ~~**TA_TheMovement**~~ | **MM-IFIED 2026-06-21 → MM - The Movement 1.0.0 (id 10209); original retired.** Engine preserved verbatim; the ~15 NOEVIL de-obf lookups now routed through guarded `reMember()/reMatch()` (named errors naming exactly which lookup a game update broke), menu/click handlers wrapped, `MMCommon.lifecycle` wired (disable scrubs simulated changes + restores patched methods, no reload). Its de-obf recipes + base-0x5b hash are still un-mined into `MMCommon.deobf` — future refactor (see §4). |
-| **TA_xTrim_Base_Overlay_DR_4_3** | CTRL-hold in-base **upgrade gain/cost heat-map**. Unique UX, but answers the same question as Base Tools' upgrade-priority. MM-IFY as a Base Tools overlay, or retire? |
+| ~~**TA_xTrim_Base_Overlay_DR_4_3**~~ | **RETIRED 2026-06-21 — UX salvaged INTO MM - Base Tools 1.4.0 → 1.4.1.** File + bg row id 10047 gone. UX (hold Ctrl in your own base → translucent colored boxes on each resource-producing tile showing the next-level gain/cost ratio, green→red ramp, ratio printed) ported into Base Tools as a Ctrl-hold listener gated on the `BaseTools.UpgradeOverlay` setting (default ON; toggle via the "On-grid overlay (Ctrl-hold)" checkbox on the Upgrade Priority tab). Per-tile math is the same model: 4 (resource, building-set) groups (Tib/Cry → Harvester+Silo; Power → PowerPlant+Accumulator; Credits → Refinery+PowerPlant), PackageSize branch normalizes by `MainModifierType.TotalValue / StepsPerHour` so package-rate-vs-delay nets correctly, Production branch is straight `NewLvlDelta`. Gain across groups is summed per tile before computing ratio (so a PowerPlant correctly shows combined Power+Credits value). Tile-keyed `posY*100 + posX` (the original used `*10`, but base grids can run wider than 10 — the `*100` keying is safer with no downside). Cost = sum of next-level resource-requirement `Count` for non-zero, non-Type-0 entries. Restricted to own-base view (additionally checks `currentCity.get_Id() === ownCity.get_Id()` so it doesn't fire when looking at someone else's base). Full original is in git history at SCRIPT-PACK `f796faa` for a full restore. |
 | **TA_MovableMenuOverlay** | Makes **native** Mail/Forum overlays draggable. Niche; **highest blast radius** (globally overrides core app methods). Want native-overlay dragging at all? If no → retire. |
 | **TA_Supplies_Mod** | Shop "disable funds display" convenience + auto-Supplies-tab. No MM overlap. Light MM-IFY or drop? |
 | **TA_Multissesion_MOD** | Portal-side "New Session" cookie-clear (multi-account). Runs on the portal, not in-game. Needs jQuery `.live()→.on()` + selector re-validation. Keep? |
@@ -509,11 +509,12 @@ RETIRED (cut from initial release; salvage spec — schema + Save/Load API — i
 RETIRED (cut from initial release; salvage spec — canTrade / cost / selfTrade / plan-and-queue, plus dedup target for 2 live consumers — in §5 Transfer_All_resources entry): Transfer_All_resources.
 RETIRED (cut from initial release; salvage spec — bulk reports scanAll pipeline + per-report cost/loot extraction + per-base × per-date matrix — in §5 Report_Summary entry; closes the reports cluster with §4 entry 6 Report_Stats): Report_Summary.
 RETIRED (cut from initial release; was §4 MM-IFY candidate; salvage spec — repair.offenseAtDeath(city) 3-line helper — in §4 entry 11 Repair_Time_Of_Death): Repair_Time_Of_Death.
+RETIRED (UX salvaged INTO MM - Base Tools 1.4.1 as Ctrl-hold On-grid Upgrade Overlay, toggleable from Upgrade Priority tab; §6 xTrim_Base_Overlay_DR_4_3 entry): xTrim_Base_Overlay_DR_4_3.
 RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 entry on Info_Sticker): Info_Sticker.
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
 CityMoveInfoExtend, Map,
 View_Player_Base, CnCTAOpt_Link_Button,
 New_Resource_Trade_Window.
-KEEP-PENDING-REVIEW: xTrim_Base_Overlay_DR_4_3, MovableMenuOverlay, Supplies_Mod,
+KEEP-PENDING-REVIEW: MovableMenuOverlay, Supplies_Mod,
 Multissesion_MOD. (TheMovement → MM-IFIED 2026-06-21, MM - The Movement id 10209.)

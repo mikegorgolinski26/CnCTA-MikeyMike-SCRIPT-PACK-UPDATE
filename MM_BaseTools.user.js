@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.0
+// @version         1.4.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -26,6 +26,10 @@
    Upgrade Priority   - one unified, sortable table across all bases and resource
                         types; per-base/resource/availability filters (all
                         persisted); one-click upgrade and transfer-then-upgrade.
+                        Bonus: hold Ctrl in-base to overlay each resource tile
+                        with its next-level gain/cost ratio (green=best, red=
+                        worst). Toggle via "On-grid overlay (Ctrl-hold)" on
+                        this tab. Salvaged from xTr1m's Base Overlay (retired).
    Layout Optimizer   - one-click optimize for tiberium / crystal / power /
                         credits via building rearrangement. PHASE A:
                         recommend-only overlay (icons, on-grid move markers,
@@ -258,6 +262,210 @@
                 werr("repairAllPrioritized failed; falling back to RepairAll(City):", e);
                 return repairAll(ClientLib.Vis.Mode.City);
             }
+        }
+
+        // ===== On-grid Upgrade Overlay (Ctrl-hold) ======================================
+        // Salvaged from xTr1m's Base Overlay (DR 4:3), retired 2026-06-21. Hold Ctrl while
+        // viewing your own base -> translucent colored boxes appear on each resource-producing
+        // building (Harvester, Silo, PowerPlant, Accumulator, Refinery) showing the gain/cost
+        // ratio if you upgrade that tile to the next level. Best=green, worst=red, label is
+        // the ratio. Release Ctrl (or alt-tab away) -> overlay disappears. The package-vs-
+        // production math matches MM - Base Tools' own Upgrade Priority engine: PackageSize
+        // entries factor in BOTH package-size growth AND package-delay change; flat Production
+        // entries are NewLvlDelta direct. Per-tile gains across the 4 (resource, building-set)
+        // groups are summed so a PowerPlant correctly shows the combined Power+Credits value.
+        function computeUpgradeOverlayTiles(ownCity) {
+            try {
+                var ETN = ClientLib.Base.ETechName, EMT = ClientLib.Base.EModifierType;
+                var GROUPS = [
+                    { types: [ETN.Harvester, ETN.Silo],         ps: EMT.TiberiumPackageSize, pr: EMT.TiberiumProduction },
+                    { types: [ETN.Harvester, ETN.Silo],         ps: EMT.CrystalPackageSize,  pr: EMT.CrystalProduction },
+                    { types: [ETN.PowerPlant, ETN.Accumulator], ps: EMT.PowerPackageSize,    pr: EMT.PowerProduction },
+                    { types: [ETN.Refinery, ETN.PowerPlant],    ps: EMT.CreditsPackageSize,  pr: EMT.CreditsProduction }
+                ];
+                var sph = ClientLib.Data.MainData.GetInstance().get_Time().get_StepsPerHour();
+                var bldData = ownCity.get_Buildings && ownCity.get_Buildings();
+                if (!bldData) return [];
+                var d = bldData.d || {};
+                var tiles = {};
+                for (var k in d) {
+                    var b = d[k]; if (!b) continue;
+                    var techName;
+                    try { techName = b.get_TechName(); } catch (e) { continue; }
+                    var totalGain = 0, matched = false;
+                    for (var gi = 0; gi < GROUPS.length; gi++) {
+                        var g = GROUPS[gi];
+                        var inGroup = false;
+                        for (var ti = 0; ti < g.types.length; ti++) { if (g.types[ti] === techName) { inGroup = true; break; } }
+                        if (!inGroup) continue;
+                        matched = true;
+                        var info; try { info = ownCity.GetBuildingDetailViewInfo(b); } catch (e) { continue; }
+                        if (!info || !info.OwnProdModifiers) continue;
+                        var mods = info.OwnProdModifiers.d;
+                        for (var mt in mods) {
+                            var mtInt = parseInt(mt, 10);
+                            if (mtInt === g.ps) {
+                                try {
+                                    var main = mods[b.get_MainModifierTypeId()];
+                                    if (!main) continue;
+                                    var curDelay = main.TotalValue / sph;
+                                    var nextDelay = (main.TotalValue + main.NewLvlDelta) / sph;
+                                    if (!curDelay || !nextDelay) continue;
+                                    var prod = mods[mt];
+                                    var curRate = prod.TotalValue / curDelay;
+                                    var nextRate = (prod.TotalValue + prod.NewLvlDelta) / nextDelay;
+                                    totalGain += nextRate - curRate;
+                                } catch (e) {}
+                            } else if (mtInt === g.pr) {
+                                try { totalGain += mods[mt].NewLvlDelta; } catch (e) {}
+                            }
+                        }
+                    }
+                    if (!matched) continue;
+                    var cost = 0;
+                    try {
+                        var reqs = ClientLib.Base.Util.GetTechLevelResourceRequirements_Obj(b.get_CurrentLevel() + 1, b.get_TechGameData_Obj());
+                        for (var ct in reqs) {
+                            var entry = reqs[ct];
+                            if (typeof entry === "function") continue;
+                            if (!entry || entry.Type == 0) continue;
+                            var cnt = parseInt(entry.Count);
+                            if (!(cnt > 0)) continue;
+                            cost += cnt;
+                        }
+                    } catch (e) {}
+                    if (cost <= 0) continue;
+                    var px, py;
+                    try { px = b.get_CoordX(); py = b.get_CoordY(); } catch (e) { continue; }
+                    var key = py * 100 + px;
+                    if (!tiles[key]) tiles[key] = { posX: px, posY: py, gain: 0, cost: cost };
+                    tiles[key].gain += totalGain;
+                }
+                var out = [];
+                for (var kk in tiles) {
+                    var t = tiles[kk];
+                    if (t.gain <= 0) continue;
+                    t.ratio = t.gain / t.cost;
+                    out.push(t);
+                }
+                return out;
+            } catch (e) { werr("computeUpgradeOverlayTiles failed:", e); return []; }
+        }
+
+        // Lifecycle controller for the Ctrl-hold overlay. Returns { destroy } - call destroy
+        // on script disable (MMCommon.lifecycle) to detach the keydown listeners.
+        function installUpgradeOverlay() {
+            var MM = window.MMCommon;
+            var overlay = null;
+            var isOpen = false;
+
+            function openOverlay() {
+                if (isOpen) return;
+                try {
+                    var app = qx.core.Init.getApplication();
+                    var mainOverlay = app.getMainOverlay();
+                    var bounds = mainOverlay && mainOverlay.getBounds && mainOverlay.getBounds();
+                    if (!bounds) return;
+                    var ownCity = ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity();
+                    if (!ownCity) return;
+                    var visCity = ClientLib.Vis.VisMain.GetInstance().get_City();
+                    if (!visCity) return;
+
+                    var tiles = computeUpgradeOverlayTiles(ownCity);
+                    if (!tiles.length) return;
+
+                    var zoom = visCity.get_ZoomFactor();
+                    var tw = visCity.get_GridWidth() * zoom;
+                    var th = visCity.get_GridHeight() * zoom;
+                    var ox = visCity.get_MinXPosition() * zoom;
+                    var oy = visCity.get_MinYPosition() * zoom;
+
+                    var minR = Infinity, maxR = -Infinity;
+                    for (var i = 0; i < tiles.length; i++) {
+                        if (tiles[i].ratio < minR) minR = tiles[i].ratio;
+                        if (tiles[i].ratio > maxR) maxR = tiles[i].ratio;
+                    }
+                    var delta = maxR - minR;
+
+                    overlay = new qx.ui.container.Composite(new qx.ui.layout.Canvas()).set({
+                        width: mainOverlay.getWidth(),
+                        height: mainOverlay.getHeight(),
+                        allowGrowX: true, allowGrowY: true
+                    });
+                    overlay.setThemedBackgroundColor("#00000080");
+
+                    for (var t = 0; t < tiles.length; t++) {
+                        var tile = tiles[t];
+                        // 0..15 step on a red->green ramp. With only one tile, default to full green.
+                        var rel = (delta > 0) ? ((tile.ratio - minR) / delta) : 1;
+                        var step = Math.round(rel * 15);
+                        var red = (15 - step).toString(16);
+                        var grn = step.toString(16);
+                        var box = new qx.ui.container.Composite(new qx.ui.layout.HBox()).set({
+                            decorator: new qx.ui.decoration.Decorator(1, "solid", "#000000").set({ backgroundColor: "#" + red + grn + "0" }),
+                            opacity: 0.55,
+                            width: Math.max(1, tw - 2),
+                            height: Math.max(1, th - 2)
+                        });
+                        box.setAlignX && box.setAlignX("center");
+                        box.setAlignY && box.setAlignY("middle");
+                        box.add(new qx.ui.basic.Label(tile.ratio.toFixed(6)).set({
+                            allowGrowX: false, allowGrowY: false,
+                            textColor: "black", font: "font_size_16_bold"
+                        }));
+                        overlay.add(box, {
+                            left: (tile.posX * tw) - ox + Math.round(5 * zoom),
+                            top:  (tile.posY * th) - oy + Math.round(10 * zoom)
+                        });
+                    }
+
+                    app.getDesktop().add(overlay, { left: bounds.left, top: bounds.top });
+                    isOpen = true;
+                    wlog("upgrade overlay open: " + tiles.length + " tiles, ratio range " + minR.toFixed(4) + ".." + maxR.toFixed(4));
+                } catch (e) { werr("openOverlay failed:", e); try { closeOverlay(); } catch (e2) {} }
+            }
+
+            function closeOverlay() {
+                if (!isOpen) return;
+                try { qx.core.Init.getApplication().getDesktop().remove(overlay); } catch (e) {}
+                overlay = null;
+                isOpen = false;
+            }
+
+            function inOwnBaseView() {
+                try {
+                    if (ClientLib.Vis.VisMain.GetInstance().get_Mode() !== ClientLib.Vis.Mode.City) return false;
+                    var ownCity = ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity();
+                    var curCity = ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentCity();
+                    return !!(ownCity && curCity && ownCity.get_Id() === curCity.get_Id());
+                } catch (e) { return false; }
+            }
+
+            function onKeyDown(e) {
+                if (!MM.settings.get("BaseTools.UpgradeOverlay", true)) return;
+                if (!e.ctrlKey) return;
+                if (isOpen) return;
+                if (!inOwnBaseView()) return;
+                openOverlay();
+            }
+            function onKeyUp(e) {
+                if (!isOpen) return;
+                if (!e.ctrlKey) closeOverlay();
+            }
+            function onBlur() { if (isOpen) closeOverlay(); }
+
+            document.addEventListener("keydown", onKeyDown, true);
+            document.addEventListener("keyup", onKeyUp, true);
+            window.addEventListener("blur", onBlur, true);
+
+            return {
+                destroy: function () {
+                    try { document.removeEventListener("keydown", onKeyDown, true); } catch (e) {}
+                    try { document.removeEventListener("keyup", onKeyUp, true); } catch (e) {}
+                    try { window.removeEventListener("blur", onBlur, true); } catch (e) {}
+                    closeOverlay();
+                }
+            };
         }
 
         // ===== Upgrade Priority engine (faithful port of HuffyTools.UpgradePriority) ====
@@ -1795,6 +2003,17 @@
                 });
                 cbTopXfer.addListener("changeValue", function (e) { MM.settings.set("BaseTools.UpgradeTopXfer", !!e.getData()); });
                 ctrls.add(cbTopXfer);
+
+                // On-grid overlay (Ctrl-hold). Default ON. Salvaged from xTr1m's Base Overlay
+                // (DR 4:3), retired 2026-06-21. Just toggles the BaseTools.UpgradeOverlay
+                // setting - the listeners are always installed but no-op when this is off.
+                var cbOverlay = new qx.ui.form.CheckBox("On-grid overlay (Ctrl-hold)").set({
+                    value: MM.settings.get("BaseTools.UpgradeOverlay", true),
+                    alignY: "middle",
+                    toolTipText: "When on, hold Ctrl while viewing your own base to see a translucent gain/cost overlay on each resource-producing tile (Harvester, Silo, PowerPlant, Accumulator, Refinery). Best = green, worst = red, label is the ratio. Release Ctrl to hide. Salvaged from xTr1m's Base Overlay (retired)."
+                });
+                cbOverlay.addListener("changeValue", function (e) { MM.settings.set("BaseTools.UpgradeOverlay", !!e.getData()); });
+                ctrls.add(cbOverlay);
                 var btnUpgradeTop = new qx.ui.form.Button("Go").set({ toolTipText: "Upgrade the top N rows in the list below (in the current sort order). Re-validates each row before firing it so resource drains from earlier rows are accounted for; if 'Transfer as needed' is on, will transfer Tiberium in from other bases when the local base is short." });
                 ctrls.add(btnUpgradeTop);
                 page.add(ctrls);
@@ -2776,7 +2995,11 @@
             // Initial REFRESH happens right away so the HUD buttons show up immediately if needed.
             refresh();
 
-            LOG.log("ready (" + AUTO_TIMER_MIN + " min auto cycle, autoCollect=" + AUTO_COLLECT + ", autoRepBldg=" + AUTO_REP_BLDG + ", autoRepUnits=" + AUTO_REP_UNITS + ", repPriority=" + REP_PRIORITY + ")");
+            // Install the Ctrl-hold on-grid Upgrade Overlay listeners. Always installed; gated
+            // at-runtime on the BaseTools.UpgradeOverlay setting (Upgrade Priority tab checkbox).
+            try { installUpgradeOverlay(); } catch (e) { werr("installUpgradeOverlay failed:", e); }
+
+            LOG.log("ready (" + AUTO_TIMER_MIN + " min auto cycle, autoCollect=" + AUTO_COLLECT + ", autoRepBldg=" + AUTO_REP_BLDG + ", autoRepUnits=" + AUTO_REP_UNITS + ", repPriority=" + REP_PRIORITY + ", upgOverlay=" + MM.settings.get("BaseTools.UpgradeOverlay", true) + ")");
         }
 
         // Wait until the game UI and MMCommon are both ready, then build once.

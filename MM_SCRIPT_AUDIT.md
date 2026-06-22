@@ -101,7 +101,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 | TA_Flunik_Tools_reloaded | Upgrade tracker + POI scanner (huge, 7× duplicated tab handlers) | ⚠️🔁 |
 | TA_Upgrade_Top_ModButtonPos | Upgrade highest-level building per type on interval (logging bug) | ⚠️🔁 |
 | TA_Warchief_Upgrade_Base_Defense_Army | Bulk upgrade all buildings/def/army to target level + cost/time | ✅ |
-| TA_xTrim_Base_Overlay_DR_4_3 | Ctrl-hold heat-map of building upgrade cost/gain efficiency | ✅ |
+| ~~TA_xTrim_Base_Overlay_DR_4_3~~ | Ctrl-hold heat-map of building upgrade cost/gain efficiency | ❌ RETIRED 2026-06-21 (UX salvaged INTO MM - Base Tools 1.4.1 as Ctrl-hold On-grid Upgrade Overlay, gated on BaseTools.UpgradeOverlay setting + checkbox on the Upgrade Priority tab; see MM_CONSOLIDATION_PLAN §6 xTrim_Base_Overlay_DR_4_3 entry) |
 | TA_MaelstromTools_Dev_Mod_MCV | Big toolkit: auto-collect/repair, MCV calc, loot, upgrade priority | ⚠️ |
 | ~~TA_Auto_Repair~~ | Auto-repair buildings by ROI/priority on interval | ❌ RETIRED 2026-06-21 (priority + ROI + per-building CanRepair/Repair salvaged INTO MM - Base Tools 1.4.0 + Framework Wrapper 1.2.0; see MM_CONSOLIDATION_PLAN §5 Auto_Repair entry) |
 
