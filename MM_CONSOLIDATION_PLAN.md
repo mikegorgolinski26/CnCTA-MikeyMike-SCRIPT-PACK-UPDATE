@@ -70,7 +70,7 @@ confirm no legacy file was bundled verbatim, and a build-wide grep for `fetch(`/
 |---|---|---|
 | ~~**TA_leoStats**~~ | Self-described **encrypted** payload, `@updateURL` auto-updates from `cnc.indyserver.info`, remote `@require` jQuery, and **POSTs full account/base/alliance + report data** to indyserver.info (+ legacy 000webhostapp.com) on load + hourly. Responses are upload-dedup bookkeeping + a self-whisper link to the external site — **no in-game value comes back**. | ✅ REMOVED 2026-06-21 |
 | ~~**TA_BaseShare**~~ | **POSTs your reachable-base dataset + player/alliance identity** to `project-exception.net` on every scan; cross-script-coupled (`typeof leoStats`/`typeof BaseInfo`). | ✅ REMOVED 2026-06-21 |
-| **TA_Hotkeys** | Shipped a **plaintext email/password table for up to 9 accounts** + auto-submit login. (Local credential-storage risk, NOT exfiltration.) | ✅ CREDENTIAL CODE STRIPPED 2026-06-21 (→2.2.5): removed the `Logins` table, `Login()`, and the Alt+1-9/Alt+0 login/logout handlers + fixed the dead-`link` bug. Kept Alt+Y (signature) + Alt+I (per-base dump) for later salvage → MM - Base Info via `base.ownCities`+`coords.insertIntoChat`. Still `enabled:false`; the file retires once Alt+I/Alt+Y are salvaged. |
+| ~~**TA_Hotkeys**~~ | Shipped a **plaintext email/password table for up to 9 accounts** + auto-submit login. (Local credential-storage risk, NOT exfiltration.) | ✅ FULLY RETIRED 2026-06-21: (1) credential code stripped 2026-06-21 →2.2.5 (removed `Logins` table, `Login()`, Alt+1-9/Alt+0 handlers + fixed dead-`link` bug); (2) **Alt+Y (signature) + Alt+I (per-base dump) salvaged into MM - Player Bases 1.0.2** (file + bg row gone in both repos). Insert preserves the original "focused field, else chat" behaviour. |
 
 ---
 
@@ -311,7 +311,7 @@ Wrapper + Common Library, zero third-party update/exfiltration, ready to publish
 ## 9. Per-script index (quick lookup)
 
 RETIRE: Count_Forgotten_Bases_Range, New_Custom_Flunik_Tools.
-QUARANTINE: leoStats, BaseShare, Hotkeys.
+QUARANTINE: leoStats, BaseShare. (Hotkeys salvaged + retired 2026-06-21.)
 MM-IFY: Tunnel_Info, CD_PvP_Alert_Status, Real_POI_Bonus, POI_ExporterTools,
 Warchief_Upgrade_Base_Defense_Army, Warchief_Sector_HUD, Zoom, ADDON_City_Online_Status_Colorer_SC,
 Repair_Time_Of_Death.

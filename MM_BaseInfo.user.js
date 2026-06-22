@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name           MM - Player Bases
-// @version        1.0.1
+// @version        1.0.2
 // @author         Dirk Kántor (NurIcke)
 // @contributor    leo7044 (https://github.com/leo7044)
+// @contributor    Gryphon / MrHIDEn (CnC: TA Hotkeys - salvaged hotkeys)
 // @contributor    MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @description    BaseInfo panel for CnCTA: per-player overview of all bases (levels, BH/CC/VE/VZ, support, production, credits) in a click-sortable table, plus a side-by-side summary of player stats / total production / first & second offense. MM edition: ships in the shared HUD tray, position + open-state persist across refresh, removed the external scriptarea.net POST + map link.
+// @description    BaseInfo panel for CnCTA: per-player overview of all bases (levels, BH/CC/VE/VZ, support, production, credits) in a click-sortable table, plus a side-by-side summary of player stats / total production / first & second offense. Also two chat/forum hotkeys salvaged from the retired "CnC: TA Hotkeys": Alt+Y inserts your player/role/alliance signature, Alt+I inserts a full dump of all your bases. MM edition: ships in the shared HUD tray, position + open-state persist across refresh, removed the external scriptarea.net POST + map link.
 // @downloadURL    https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseInfo.user.js
 // @updateURL      https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseInfo.user.js
 // @include        http*://prodgame*.alliances.commandandconquer.com/*/index.aspx*
@@ -1918,7 +1919,7 @@
               window.addEventListener("click", this.onClick, false);
               window.addEventListener("keyup", this.onKey, false);
               window.addEventListener("mouseover", this.onMouseOver, false);
-              BIVERSION = "1.0.0";
+              BIVERSION = "1.0.2";
               BICLASS = "MM - Player Bases";
               BIUSERLANGUAGE = qx.locale.Manager.getInstance()
                 .getLocale()
@@ -1929,6 +1930,91 @@
                 "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAB3RJTUUH3QMQDho5kHvXxwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAARnQU1BAACxjwv8YQUAAAQ+SURBVHjarVRbTFxVFF33MQ9eAzNQWmmFgRKgUBIYWmkxov0g0Vh/bKImxvghavnQGLQxMSZNjTF8IIlJNTHaBORDPxoSP0icKjFUISRCYnF4KCIdBMprZu4M987jvo77jAPWqEk/nNx1z51z9l1n7b3XucD//BP+a2FkZMTn9XqfCwQCnaIo+XmsbVubc3NzN6empr7o7e29fc+7TExMPK7EE2OqqrFkMkVQCFFCkqlakinxvR+CwRvd96RwenrmSkNj01uCvitLmVlI0g5EIUMrDMwWYdkeWHILWH4VNtbWPrt27dOLfX19qX8lnJycfLMl0NZn74bgio9A9pUCkoe4GGCbFGERTNjKFjLSaeD+x7C4uPhJoLX1pX0Ocf9hbGzsgcaTzZfNzUU4Z69Alp2AQsp+3wKW1oGdYsB1DkwrI8X5cC9/DHNxFDW1tS9STZ/6B2Fdff1rtpHME75+Hw6LprfjwK+bhB0iXIUt+GF5G2EpPmA5DEGuhmv0dbDdMI5UHH27p6fHzXkkfgsGg5XlR+77UArPyp4v34BwrJ7UGUA0CahKFixqgW1uQAgFIe4lAF2HFPoeKUcDHM1nDpV5vd8NDQ39llXIGDvjLihwsdAtiCpNrISB3QgRrtJaEYzOS8AzvdQWA9LGOBChTZbJNSReXgiBmZqoKPEA55L5TdO0wzaYIKlJ3kzgDtWsxAArrUHSVwNZcoLluWE4ZDhsIlLzqCQb2ZbK69NQYxGIsqP0oIa2bcOyKCWR2PJ476kZ6QWyRwLO6DcQyw/D0E2IkZ+AYnKIuUoxtHk+DS4ZNrmATP9XU9Lp1B1LN5lRUkidpIlC2rrUA9kxDuHEw9DLqqCvhSCz94CjtFauAz4hG6tXnaL4EuiZdOSAsKWldSqp7Wl6dRNsXoQCmvaQWrKgUdkB2zLhVGeAmhdgeSgFajS8QjabVHUDZSeT69nMAWFzc/Oalti7blXUIXryIuURA5wWbFrLFLdkfZ1xeJBKUWdBqTq4OgWpQ01InTiLpJq4FYvFvv2bD5ltXVW1VCLR8Tz2HI+AoiCkqVwbPyO9NAHn8jiKtodJUhHVKA6DeLcfugzd7UVCUd4lH1p3Hz0+suHh4VfbOx78QIyvwzv5EXza5386ldeVN4tL1uiyT2On7RJMfztuL/1ytaur65V9YVIOTl65lZWVhRJPkV5xvPGsUdspJfLbYTCqq1UN3WyA6noUkWPPQjn1MtLFlfhxenp4YGDgnXA4zCRJEsnPTMjtXSAIQgn95+V2d3d3nzt//omn/cdr62WXQxTtNPcWmOyGSQdoiz4zN4JfXe/v7x+leIXeVehdhevnhIWckFBGKCdwg/JzWXDhwpN1gUCb3+srLRIFUUgklOT8/Pza4ODgPCfijiNECduE3X1Cd06lh5shN+bn5lmucsg9C3eBfySpNaCDjVhuTP0BKVPnFst9kFQAAAAASUVORK5CYII=";
             },
             members: {
+              // --- Chat/forum hotkeys, salvaged from the retired "CnC: TA Hotkeys" (Gryphon, based on
+              // MrHIDEn). The keyup listener is wired in construct() (window.addEventListener "keyup",
+              // this.onKey). Alt+Y inserts your player/role/alliance signature; Alt+I inserts a full dump
+              // of all your bases. Both insert at the cursor of the currently-focused input/textarea
+              // (message, forum post, or chat), falling back to the game chat widget when nothing is
+              // focused. NOTE: the original script's plaintext multi-account password table + auto-login
+              // (Alt+1-9 / Alt+0) were dropped for security and are NOT carried over.
+              onKey: function (e) {
+                try {
+                  // ALT only (not AltGr/Ctrl/Shift), letter Y or I.
+                  if (!e || !e.altKey || e.altGraphKey || e.ctrlKey || e.shiftKey) return;
+                  var s = String.fromCharCode(e.keyCode);
+                  if (s !== "Y" && s !== "I") return;
+
+                  // Insert text at the cursor of the focused input/textarea; else into the game chat.
+                  function insertText(text) {
+                    try {
+                      var el = document.querySelector("input:focus, textarea:focus");
+                      if (el && typeof el.value === "string") {
+                        var a = el.selectionStart, b = el.selectionEnd;
+                        if (typeof a === "number" && typeof b === "number") {
+                          el.value = el.value.substring(0, a) + text + el.value.substring(b);
+                          el.selectionStart = el.selectionEnd = a + text.length;
+                        } else {
+                          el.value += text;
+                        }
+                        return true;
+                      }
+                    } catch (ie) { wwarn("hotkey insert (focused field) failed:", ie); }
+                    try {
+                      if (window.MMCommon && MMCommon.coords && MMCommon.coords.insertIntoChat) {
+                        return MMCommon.coords.insertIntoChat(text);
+                      }
+                    } catch (ce) { wwarn("hotkey insert (chat) failed:", ce); }
+                    return false;
+                  }
+
+                  if (s === "Y") {
+                    // Signature: [player]Name[/player] / Role / [alliance]Alliance[/alliance].
+                    var apc = ClientLib.Data.MainData.GetInstance().get_Cities();
+                    var own = apc.get_CurrentOwnCity();
+                    var roleName = ClientLib.Data.MainData.GetInstance().get_Alliance()
+                      .get_CurrentMemberRoleInfo().Name;
+                    var role = roleName === "Leader" ? "CiC"
+                      : (roleName === "Second Commander" ? "SiC" : roleName);
+                    var sig = "[player]" + own.get_PlayerName() + "[/player]\r\n" + role + "\r\n"
+                      + "[alliance]" + own.get_AllianceName() + "[/alliance]";
+                    if (insertText(sig)) wlog("inserted signature (Alt+Y)");
+                  } else if (s === "I") {
+                    // Full dump of all your bases.
+                    var md = ClientLib.Data.MainData.GetInstance();
+                    var playerName = md.get_Cities().get_CurrentOwnCity().get_PlayerName();
+                    var cx = md.get_Server().get_ContinentWidth() / 2;
+                    var cy = md.get_Server().get_ContinentHeight() / 2;
+                    var txt = "[b]Player: " + playerName + "[/b]\r\n"
+                      + "----------------------------------\r\n";
+                    var cities = (window.MMCommon && MMCommon.base && MMCommon.base.ownCities)
+                      ? MMCommon.base.ownCities() : [];
+                    for (var i = 0; i < cities.length; i++) {
+                      var c = cities[i];
+                      try {
+                        var sd = c.get_SupportData();
+                        var sn = "--", sl = "--";
+                        if (sd !== null) {
+                          sl = sd.get_Level().toString();
+                          sn = c.get_SupportWeapon().dn;
+                        }
+                        txt += "Base '" + c.get_Name() + "' info:\r\n";
+                        txt += "Base       lvl: " + c.get_LvlBase().toFixed(2).toString() + "\r\n";
+                        txt += "Defense lvl: " + c.get_LvlDefense().toFixed(2).toString() + "\r\n";
+                        txt += "Offense  lvl: " + c.get_LvlOffense().toFixed(2).toString() + "\r\n";
+                        txt += "Support  lvl: " + sl + " - " + sn + "\r\n";
+                        txt += "Distance to center: "
+                          + Math.round(ClientLib.Base.Util.CalculateDistance(cx, cy, c.get_PosX(), c.get_PosY()))
+                          + "\r\n";
+                        txt += "[coords]" + c.get_PosX() + ":" + c.get_PosY() + "[/coords]\r\n";
+                      } catch (be) {
+                        wwarn("base dump exception:", be);
+                      }
+                      txt += "----------------------------------\r\n";
+                    }
+                    if (insertText(txt)) wlog("inserted bases dump (Alt+I, " + cities.length + " bases)");
+                  }
+                } catch (ke) { wwarn("onKey hotkey handler failed:", ke); }
+              },
               BaseinfoFenster: null,
               BaseinfoTab: null,
               BaseinfoGeneralPage: null,
