@@ -160,8 +160,32 @@ Priority order (high → low), with the new MM name and the one-line reason:
    No HUD tray button; lifecycle.watch live-disable wired. NetquiK no-grow-Infinity + MaxLevelCap fixes
    preserved. Original retired (file + bg row gone).
 7b. **(decide)** could instead become a **new tab in MM - Base Tools** rather than its own script — Mike's call.
-8. **TA_Warchief_Sector_HUD → MM - Sector HUD** — thinnest case; ~20 lines of glue over
-   `map.viewCenter/track` + `coords.sector/insertIntoChat/goTo`. Or fold into an existing MM HUD.
+8. ~~**TA_Warchief_Sector_HUD**~~ → **RETIRED 2026-06-21** (id 10036, cut from initial release;
+   Mike: not interested). Eistee + NetquiK right-click fix, 166 LOC. Was a small HUD label pinned
+   at `{left:128, top:0}` on `getApplication().getDesktop()` (just past the LeftBarsGroup, same anchor MM -
+   Member Status uses) showing the current map-view center coordinates + 8-ring sector compass abbr
+   (e.g. `456:512 [NW]`). Updated live on `phe.cnc.Util.attachNetEvent(VisMain.get_Region(),
+   "PositionChange", ...)` debounced 500ms. Left-click pasted `[coords]X:Y[/coords]` into the chat
+   editable; right-click `prompt()`ed for coords then `Region.CenterGridPosition(x, y)`-teleported.
+   **Salvage spec (lift if any consumer ever needs these primitives):**
+   - **View-center coords** (the math): `floor((Region.get_PosX() + Region.get_ViewWidth()/2 /
+     Region.get_ZoomFactor()) / Region.get_GridWidth() - 0.5)`, same for Y. Lives in `MMCommon.map.*`
+     when the second consumer (Real POI Bonus / Tunnel Info / Player Bases survey) wants it.
+   - **8-ring sector math** (atan2 → `tnf:* abbr` i18n): IDENTICAL to the formula already queued for
+     `MMCommon.coords.worldSector(x,y)` / `worldSectorLabel(i)` (POI_ExporterTools salvage spec, §4
+     entry 5). Lift when the first consumer in MM lands; this script's `get_SectorNo` is the
+     reference implementation (works on `Server.get_WorldWidth/Height` + `get_SectorCount` — no
+     hard-coded "8").
+   - **PositionChange subscription helper**: the 500ms-debounced attachNetEvent pattern → potential
+     `MMCommon.map.track(cb, opts={debounceMs})` helper. Same dispatch used by TA_Map (RETIRED) and
+     others; lift if a future Region Minimap or live-status HUD needs it.
+   - **Chat-coords paste** + **map-jump prompt** are already covered by `MMCommon.coords.insertIntoChat`
+     and `Region.CenterGridPosition()` direct calls.
+   Sloppy bits to NOT carry over: globals leak in `get_Coords` (missing `var` on `GridWidth`,
+   `GridHeight`, `RegionPosX`, `RegionPosY`, `ViewWidth`, `ViewHeight`, `ZoomFactor`, `ViewCoordX`,
+   `ViewCoordY`); sloppy `text.join(' ')` adds extra spaces in the chat paste; blocking `prompt()`
+   for the right-click jump.
+   Original in git history.
 9. **TA_Zoom → MM - Zoom** — extend map zoom range; tiny QoL. Route constants through `settings`.
 10. **TA_ADDON_City_Online_Status_Colorer_SC → MM - Online Status Colorer** — on-map member-online
     coloring (a delivery mode Member Status doesn't have). Highest fragility (patches a render hot-path);
@@ -541,7 +565,7 @@ RETIRE: Count_Forgotten_Bases_Range, New_Custom_Flunik_Tools.
 QUARANTINE: leoStats, BaseShare. (Hotkeys salvaged + retired 2026-06-21.)
 MM-IFY: Tunnel_Info ✅, CD_PvP_Alert_Status ✅, Real_POI_Bonus ✅,
 Warchief_Upgrade_Base_Defense_Army ✅,
-Warchief_Sector_HUD, Zoom, ADDON_City_Online_Status_Colorer_SC.
+Zoom, ADDON_City_Online_Status_Colorer_SC. (Warchief_Sector_HUD → RETIRED 2026-06-21.)
 RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6): Report_Stats.
 RETIRED (cut from initial release; salvage spec captured in §4 entry 5): POI_ExporterTools.
 RETIRED (POI window was a POIs_Analyser dup; scanner/upgrade already commented; salvage spec in §5 The_Green_Cross_Tools entry): The_Green_Cross_Tools.
