@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.20
+// @version         1.0.21
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.19"
+            version: "1.0.21"
         };
 
         // -------------------------------------------------------------------
@@ -1615,6 +1615,7 @@
         NS.menubar = (function () {
             var items = [];   // { widget, getPos(), enabled() , last }
             var timer = null;
+            var moAttached = false;   // bar-rebuild MutationObserver wired yet?
 
             // The qx list-container inside the base navigation bar (or null if not reachable).
             function getBar() {
@@ -1665,11 +1666,38 @@
                         var on = it.enabled ? (it.enabled() === true) : true;
                         var cur = bar.indexOf(it.widget);
                         if (!on) { if (cur >= 0) bar.remove(it.widget); continue; }
-                        var want = clampPos(bar, it.getPos ? it.getPos() : null);
-                        if (cur < 0) bar.addAt(it.widget, want);
-                        else if (cur !== want) { bar.remove(it.widget); bar.addAt(it.widget, clampPos(bar, it.getPos ? it.getPos() : null)); }
+                        var rawPos = it.getPos ? it.getPos() : null;
+                        if (cur < 0) {
+                            // absent (first insert, or the game rebuilt the bar) -> add it.
+                            bar.addAt(it.widget, clampPos(bar, rawPos));
+                        } else if (rawPos != null) {
+                            // Explicit target index: only move when genuinely out of place. The widget is
+                            // already a child, so its valid in-place range is [0, count-1]; comparing cur to
+                            // clampPos's append index (count) would never match and churn every tick.
+                            var target = Math.max(0, Math.min(rawPos, bar.getChildren().length - 1));
+                            if (cur !== target) { bar.remove(it.widget); bar.addAt(it.widget, clampPos(bar, rawPos)); }
+                        }
+                        // else: append mode (rawPos == null) and already present -> leave as-is. Re-adding
+                        // every 1.5s was the cause of anchored buttons flickering (remove+addAt each tick).
                     } catch (e) { /* never let one item break the bar */ }
                 }
+                attachObserver();   // wire (or retry wiring) the bar-rebuild watcher once the bar DOM exists
+            }
+            // When the game rebuilds the base-navigation bar (clicking "collect resources" re-sorts the bases
+            // and wipes the list), our docked panel is dropped and only the 1.5s timer would bring it back - a
+            // visible "buttons vanish then return" gap. Watch the bar's DOM for child changes and re-assert on
+            // the next frame. reinsertAll is idempotent (no-op when our items are present) so this can't loop.
+            function attachObserver() {
+                if (moAttached || typeof MutationObserver === "undefined") return;
+                try {
+                    var bar = getBar();
+                    var dom = bar && bar.getContentElement && bar.getContentElement().getDomElement();
+                    if (!dom) return;   // bar not rendered yet - reinsertAll retries this each 1.5s tick
+                    new MutationObserver(function () {
+                        try { window.requestAnimationFrame(reinsertAll); } catch (e) { reinsertAll(); }
+                    }).observe(dom, { childList: true });
+                    moAttached = true;
+                } catch (e) {}
             }
             function ensureTimer() { if (!timer) { try { timer = window.setInterval(reinsertAll, 1500); } catch (e) {} } }
 

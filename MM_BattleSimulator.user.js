@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.4
+// @version         1.1.5
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -2612,12 +2612,20 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         }
                     },
                     members: {
+                        // Transient pause used by the optimizer while it drives its own simulations.
+                        // Unlike setEnabled(), this does NOT persist to settings - so a stopped or
+                        // interrupted optimizer run can never leave the user's auto-simulate preference
+                        // stuck OFF across reloads (the bug that made manual placement stop auto-updating).
+                        __paused: false,
+                        pause: function () { this.__paused = true; },
+                        resume: function () { this.__paused = false; },
                         _applyEnabled: function (newValue) {
                             TABS.SETTINGS.set("PreArmyUnits.AutoSimulate", newValue);
                             if (newValue === true) TABS.PreArmyUnits.getInstance().addListener("OnCityPreArmyUnitsChanged", this.SimulateBattle, this);
                             else TABS.PreArmyUnits.getInstance().removeListener("OnCityPreArmyUnitsChanged", this.SimulateBattle, this);
                         },
                         SimulateBattle: function () {
+                            if (this.__paused) return;
                             var formation = TABS.UTIL.Formation.Get();
                             if (formation !== null && formation.length > 0) {
                                 var cache = TABS.CACHE.getInstance().check(formation);
@@ -3036,13 +3044,11 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.__tabuEnabled = gi("Optimizer.TabuLastCell", true) !== false;
                             this.__prevCell = {};
                             // Avoid interference: pause auto-simulate while we drive simulations ourselves.
+                            // Use the TRANSIENT pause (not setEnabled) so a stopped/interrupted run can never
+                            // persist auto-simulate OFF into the user's settings across reloads.
                             try {
-                                var auto = TABS.PreArmyUnits.AutoSimulate.getInstance();
-                                this.__prevAuto = auto.getEnabled();
-                                auto.setEnabled(false);
-                            } catch (e) {
-                                this.__prevAuto = null;
-                            }
+                                TABS.PreArmyUnits.AutoSimulate.getInstance().pause();
+                            } catch (e) {}
                             this.__log("Optimizing (" + (this.__presetNum === 7 ? "best DF=0" : "best win") + "): step " + this.__maxStep + " cell(s), climb within " + String.fromCharCode(177) + this.__maxRowDelta + " row(s) of start, kicks may go further if it helps...");
                             // Step 1: ensure the starting layout is simulated, then begin tweak rounds.
                             this.__evalList([this.__clone(this.__current)], this.__startRound);
@@ -3299,12 +3305,11 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             try { this.fireDataEvent("OnOptimizeEnd", this.__presetNum); } catch (e) {} // lets the UI restore the optimize buttons
                             clearTimeout(this.__stepT);
                             clearTimeout(this.__safetyT);
-                            // Restore auto-simulate to its previous state.
-                            if (this.__prevAuto !== null) {
-                                try {
-                                    TABS.PreArmyUnits.AutoSimulate.getInstance().setEnabled(this.__prevAuto);
-                                } catch (e) {}
-                            }
+                            // Resume auto-simulate (transient - the user's persisted on/off preference is
+                            // never touched, so it can't get stuck OFF if a run is interrupted).
+                            try {
+                                TABS.PreArmyUnits.AutoSimulate.getInstance().resume();
+                            } catch (e) {}
                             // Rank all simulated layouts by this mode's preset:
                             //   #6 Best Win  -> lowest remaining enemy TOTAL health, then lowest max repair time.
                             //   #7 Best DF 0 -> lowest remaining DEFENSE FACILITY health, then lowest max repair time.
