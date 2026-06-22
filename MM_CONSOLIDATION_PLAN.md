@@ -92,8 +92,12 @@ Priority order (high → low), with the new MM name and the one-line reason:
    readout, `[tir]` range (default 6) + override, HUD button. **Original TA_Tunnel_Info RETIRED.**
 2. **TA_CD_PvP_Alert_Status → MM - Attack Alert** — incoming-attack title/favicon/siren alarm; no MM
    equivalent. Most robust legacy script. Event-drive via `net.attach` instead of the 5s poll; `enable_sound`→`settings`.
-3. **TA_Real_POI_Bonus → MM - Real POI Bonus** — rank-corrected POI gain/loss; also yields the
-   `RankingGetData` bulk path. Convert its `getObject` hack → `deobf.objectMemberOfSetter`.
+3. ~~**TA_Real_POI_Bonus → MM - Real POI Bonus**~~ — **DONE 2026-06-21 (MM - Real POI Bonus 1.0.0, KEPT id
+   10023; original retired).** Rank-correction math preserved verbatim; `getObject` hack now routed through
+   `deobf.ensureGetObject` (inline regex kept as guarded fallback); [MM] logging, POI-bubble handler hardened,
+   `lifecycle.watch` wired (disable hides the readout, no reload); no HUD button / options (passive bubble
+   augment). NOTE: it's still the live reference for the `RankingGetData` bulk path (used inline, NOT yet
+   lifted into `MMCommon.base.fetch*`/`poi.*` — do that when that module is built).
 4. ~~**TA_POIs_Analyser → MM - POI Analyser**~~ — **RETIRED 2026-06-21** (Mike: skipping it; file + bg row
    id 10014 gone). Nothing salvaged into MMCommon as live code (per the don't-ship-unused-code rule): its POI
    score/tier/rank/bonus math was thin passthrough to `ClientLib.Base.PointOfInterestTypes` (a future

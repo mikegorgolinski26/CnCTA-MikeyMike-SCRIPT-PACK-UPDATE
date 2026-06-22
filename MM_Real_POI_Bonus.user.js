@@ -1,21 +1,78 @@
 // ==UserScript==
-// @name           Tiberium Alliances Real POI Bonus
-// @version        1.0.4
-// @namespace      https://openuserjs.org/users/petui
+// @name           MM - Real POI Bonus
+// @namespace      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
+// @include        https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
+// @description    When you select a POI on the region map, shows the REAL gain/loss to your alliance's bonus if you took or lost it - correctly accounting for the alliance rank multiplier (which the game's own POI display ignores).
+// @version        1.0.0
 // @license        GPL version 3 or any later version; http://www.gnu.org/copyleft/gpl.html
-// @author         petui (POI factor Fix AlkalyneD4) - NetquiK (regex update)
-// @description    Displays actual gain/loss for POIs by taking rank multiplier properly into account
+// @author         MikeyMike (rework of petui's "Real POI Bonus")
+// @contributor    petui
+// @contributor    AlkalyneD4 (POI factor fix)
+// @contributor    NetquiK (https://github.com/netquik) (regex update)
 // @match          https://*.alliances.commandandconquer.com/*/index.aspx*
-// @updateURL      https://raw.githubusercontent.com/netquik/CnCTA-SoO-SCRIPT-PACK/master/TA_Real_POI_Bonus.user.js
+// @downloadURL    https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Real_POI_Bonus.user.js
+// @updateURL      https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Real_POI_Bonus.user.js
 // ==/UserScript==
+
+/*
+ * MM - Real POI Bonus
+ * -------------------
+ * WHAT IT DOES
+ *   Select a POI on the region map and this adds a "Real gain:" / "Real loss:" line to the POI's info
+ *   bubble showing the ACTUAL change to your alliance's bonus if you captured (or gave up) that POI.
+ *
+ * WHY IT'S NEEDED
+ *   POI bonuses are not simply additive: your alliance's total bonus for a POI type is a function of
+ *   (rank, accumulated score, global factor). Capturing a POI adds score that can also change your RANK
+ *   (overtaking / falling behind other alliances), which changes the multiplier - so the naive "this POI
+ *   is worth +X" the game implies is wrong near rank boundaries. This computes the true delta: the fast
+ *   path when rank can't change, and - when it can (overtaking the next alliance, falling behind the
+ *   previous, or the current owner losing score) - by fetching the live alliance rankings (RankingGetData)
+ *   and recomputing where your new score lands. Ranking data is cached 10 minutes.
+ *
+ * HOW IT'S BUILT (vs petui / AlkalyneD4 / NetquiK's "Real POI Bonus")
+ *   The original rank-correction math is PRESERVED verbatim (it's the value and it's correct). The MM rework
+ *   is housekeeping: [MM] gated logging, the one de-obfuscation hack (deriving getObject from setObject)
+ *   routed through the shared MMCommon.deobf.ensureGetObject (with the original inline regex as a guarded
+ *   fallback), the POI-bubble handler wrapped so a failure can't break the bubble, and MMCommon.lifecycle
+ *   wired so toggling the script off in the CnC Pack menu hides the readout without a reload.
+ *
+ * UX: passive - it only augments the POI info bubble. No HUD button, no options panel (nothing to configure).
+ *
+ * DEPENDENCIES (pack rule: wrapper + Common Library only)
+ *   MMCommon.makeLogger / .deobf / .net / .lifecycle (all optional - degrades gracefully if absent)
+ *   ClientLib / qx / webfrontend / phe (game page context)
+ *
+ * Debug: window.REALPOIBONUS_DEBUG = true (or window.MM_DEBUG = true). Warnings/errors are always on.
+ */
 'use strict';
 
 (function () {
 	var main = function () {
 		'use strict';
 
+		var OPTIONS_ID = 10023; // MM - Real POI Bonus (CnC Pack registry id; kept from the original)
+
+		// ---- logger ----------------------------------------------------------------
+		var LOG = (window.MMCommon && window.MMCommon.makeLogger)
+			? window.MMCommon.makeLogger("Real POI Bonus")
+			: {
+				log: function () {},
+				warn: function () { try { console.warn.apply(console, ["[MM Real POI Bonus]"].concat([].slice.call(arguments))); } catch (e) {} },
+				err: function () { try { console.error.apply(console, ["[MM Real POI Bonus]"].concat([].slice.call(arguments))); } catch (e) {} }
+			};
+		if (typeof window.REALPOIBONUS_DEBUG === "undefined") {
+			try { window.REALPOIBONUS_DEBUG = (window.localStorage.getItem("REALPOIBONUS_DEBUG") === "1"); } catch (e) { window.REALPOIBONUS_DEBUG = false; }
+		}
+		var wlog = function () { if (!(window.REALPOIBONUS_DEBUG || window.MM_DEBUG)) return; LOG.log.apply(LOG, arguments); };
+		var wwarn = function () { LOG.warn.apply(LOG, arguments); };
+		var werr = function () { LOG.err.apply(LOG, arguments); };
+
+		var MM = window.MMCommon || null;
+		var scriptEnabled = true; // flipped by MMCommon.lifecycle; gates the POI-bubble readout
+
 		function createRealPOIBonus() {
-			console.log('RealPOIBonus loaded');
+			wlog('engine class defined');
 
 			qx.Class.define('RealPOIBonus', {
 				type: 'singleton',
@@ -62,24 +119,32 @@
 						poiStatusInfo.getChildren()[0].addAt(this.container, 4);
 						poiStatusInfo.addListener('appear', this.onStatusInfoAppear, this);
 
-						phe.cnc.Util.attachNetEvent(ClientLib.Data.MainData.GetInstance().get_Alliance(), 'Change', ClientLib.Data.AllianceChange, this, this.onAllianceChange);
+						// Alliance change -> invalidate the rank cache. Route through the Common Library's
+						// net helper (phe.cnc.Util / gui.Util fallback); fall back to phe directly if absent.
+						var attach = (MM && MM.net && MM.net.attach)
+							? function (o, en, et, ctx, cb) { return MM.net.attach(o, en, et, ctx, cb); }
+							: function (o, en, et, ctx, cb) { return phe.cnc.Util.attachNetEvent(o, en, et, ctx, cb); };
+						attach(ClientLib.Data.MainData.GetInstance().get_Alliance(), 'Change', ClientLib.Data.AllianceChange, this, this.onAllianceChange);
 						this.onAllianceChange();
 					},
 
 					initializeHacks: function () {
-						// MOD regex mod by NetquiK
-						if (typeof webfrontend.gui.region.RegionPointOfInterestStatusInfo.prototype.getObject !== 'function') {
-							var source = webfrontend.gui.region.RegionPointOfInterestStatusInfo.prototype.setObject.toString();
-							//source = source.replace("function(", "function (");
-							var objectMemberName = source.match(/^function\s?\(([A-Za-z]+)\)\{this\.([A-Za-z_]+)=\1;/)[2];
-
+						try {
+							var proto = webfrontend.gui.region.RegionPointOfInterestStatusInfo.prototype;
+							if (typeof proto.getObject === 'function') return;
+							// Prefer the shared Common Library helper (derives getObject from setObject).
+							if (MM && MM.deobf && MM.deobf.ensureGetObject && MM.deobf.ensureGetObject(proto)) return;
+							// Fallback: the original inline NOEVIL regex (NetquiK's).
+							var m = proto.setObject.toString().match(/^function\s?\(([A-Za-z]+)\)\{this\.([A-Za-z_]+)=\1;/);
+							if (!m) { wwarn('could not locate RegionPointOfInterestStatusInfo.getObject member (game may have updated); real gain/loss disabled'); return; }
+							var objectMemberName = m[2];
 							/**
 							 * @returns {ClientLib.Vis.Region.RegionPointOfInterest}
 							 */
-							webfrontend.gui.region.RegionPointOfInterestStatusInfo.prototype.getObject = function () {
+							proto.getObject = function () {
 								return this[objectMemberName];
 							};
-						}
+						} catch (e) { werr('initializeHacks:', e); }
 					},
 
 					onAllianceChange: function () {
@@ -96,6 +161,8 @@
 					 * @param {qx.event.type.Event} event
 					 */
 					onStatusInfoAppear: function (event) {
+						try {
+						if (!scriptEnabled) { this.container.setVisibility('excluded'); return; }
 						var visObject = event.getTarget().getObject();
 						var allianceId = ClientLib.Data.MainData.GetInstance().get_Alliance().get_Id();
 
@@ -156,6 +223,7 @@
 						} else {
 							this.container.setVisibility('excluded');
 						}
+						} catch (e) { werr('onStatusInfoAppear:', e); }
 					},
 
 					/**
@@ -305,12 +373,31 @@
 			try {
 				if (typeof qx !== 'undefined' && qx.core.Init.getApplication() && qx.core.Init.getApplication().initDone) {
 					createRealPOIBonus();
-					RealPOIBonus.getInstance().initialize();
+					var inst = RealPOIBonus.getInstance();
+					inst.initialize();
+
+					// Live enable/disable from the CnC Pack menu (no reload). On disable we just hide the
+					// readout; the listeners stay attached and the scriptEnabled gate suppresses output.
+					try {
+						if (MM && MM.lifecycle && typeof MM.lifecycle.watch === 'function') {
+							MM.lifecycle.watch(OPTIONS_ID, {
+								onEnable: function () { scriptEnabled = true; },
+								onDisable: function () {
+									scriptEnabled = false;
+									try { if (inst.container) inst.container.setVisibility('excluded'); } catch (e) {}
+								}
+							});
+							if (typeof MM.lifecycle.isEnabled === 'function') {
+								scriptEnabled = (MM.lifecycle.isEnabled(OPTIONS_ID) !== false);
+							}
+						}
+					} catch (e) { werr('lifecycle.watch failed:', e); }
+					wlog('ready (options id ' + OPTIONS_ID + ')');
 				} else {
 					setTimeout(waitForGame, 1000);
 				}
 			} catch (e) {
-				console.log('RealPOIBonus: ', e.toString());
+				werr('init failed:', (e && e.toString) ? e.toString() : e);
 			}
 		}
 
