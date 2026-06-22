@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.2
+// @version         1.4.3
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -24,7 +24,8 @@
                         (default), clicking a non-own base on the region map
                         appends a "Possible attacks from this base / Lootable /
                         per CP / 2nd run / 3rd run" block to the game's own
-                        info popup. Salvaged from MaelstromTools Dev (retired).
+                        info popup so you can compare farm/attack targets at
+                        a glance.
    Production         - per-base + grand-total production (Package / Continuous /
                         Alliance Bonus / Total per h). Killed bases excluded
                         from totals.
@@ -486,20 +487,24 @@
         // defense units). Out-of-range bases show "Target out of range".
         function computeAttackLoot(visCity) {
             try {
-                if (!visCity || typeof visCity.get_X !== "function") return { loadState: 0 };
-                if (visCity.get_X() < 0 || visCity.get_Y() < 0) return { loadState: 0 };
+                if (!visCity || typeof visCity.get_X !== "function") return { loadState: 0, reason: "no-visCity" };
+                if (visCity.get_X() < 0 || visCity.get_Y() < 0) return { loadState: 0, reason: "neg-coords" };
                 var MD = ClientLib.Data.MainData.GetInstance();
                 var currentOwnCity = MD.get_Cities().get_CurrentOwnCity();
-                if (!currentOwnCity) return { loadState: 0 };
+                if (!currentOwnCity) return { loadState: 0, reason: "no-current-city" };
                 var dist = ClientLib.Base.Util.CalculateDistance(
                     currentOwnCity.get_X(), currentOwnCity.get_Y(),
                     visCity.get_RawX(), visCity.get_RawY()
                 );
                 var maxDist = MD.get_Server().get_MaxAttackDistance();
                 if (dist > maxDist) return { loadState: -1 };
+                // GetCity() triggers the server fetch the popup also relies on; before the
+                // round-trip lands the returned ncity has version <= 0 (game returns -1 first,
+                // sometimes 0). Treat both as "still loading" and let the caller poll.
                 var ncity = MD.get_Cities().GetCity(visCity.get_Id());
-                if (!ncity || (typeof ncity.get_Version === "function" && ncity.get_Version() === 0)) {
-                    return { loadState: 0 };
+                var ver = (ncity && typeof ncity.get_Version === "function") ? ncity.get_Version() : -1;
+                if (!ncity || ver <= 0) {
+                    return { loadState: 0, reason: "ncity-ver=" + ver };
                 }
                 var byRes = window.MMCommon.loot.ofCity(ncity);
                 var ERT = ClientLib.Base.EResourceType;
@@ -508,19 +513,42 @@
                 var dol = byRes[ERT.Gold] || 0;
                 var res = byRes[ERT.ResearchPoints] || 0;
                 var total = tib + cry + dol + res;
-                if (total <= 0) return { loadState: 0 };
                 var cp = 0;
                 try { cp = currentOwnCity.CalculateAttackCommandPointCostToCoord(ncity.get_X(), ncity.get_Y()) || 0; } catch (e) {}
+                // ncity loaded but buildings/units list is empty (no loot extractable). Could
+                // be a freshly-cleared ghost, a never-attackable base, or a sparse cache. Show
+                // the rows with zeros rather than getting stuck on "Calculating..." forever.
                 return { loadState: 1, CPNeeded: cp, tib: tib, cry: cry, dol: dol, res: res, total: total };
-            } catch (e) { werr("computeAttackLoot:", e); return { loadState: 0 }; }
+            } catch (e) { werr("computeAttackLoot:", e); return { loadState: 0, reason: "exception" }; }
         }
 
         // Build (or refresh) the 5-row loot grid on a region status-info widget. The composite
         // is attached once (stored on widget.__MM_BT_lootComp) and cleared+repopulated on each
-        // call - matches Maelstrom's pattern so the native panel's own rebuilds don't lose us.
+        // call so the native panel's own rebuilds don't lose us.
+        //
+        // The game's onCitiesChange may NOT re-fire once per-base data lands after the popup
+        // opens (it lights up for any-city-changed events, not always for our specific target).
+        // So when computeAttackLoot returns loadState=0 (data not in yet) we install a 250ms
+        // self-poll on the widget, capped at MAX_POLLS, and give up cleanly with an
+        // "Attack loot data unavailable" message rather than leaving "Calculating..." forever.
+        var LOOT_POLL_INTERVAL_MS = 250;
+        var LOOT_POLL_MAX = 20;  // 20 * 250ms ~= 5s before giving up
         function renderAttackLootPanel(widget, visCity) {
             try {
                 if (!widget || !visCity) return;
+                // Cancel any pending poll - a fresh render call (new selection or re-fire)
+                // supersedes the prior poll cycle.
+                if (widget.__MM_BT_lootPoll) {
+                    try { clearTimeout(widget.__MM_BT_lootPoll); } catch (e) {}
+                    widget.__MM_BT_lootPoll = null;
+                }
+                var selId = (typeof visCity.get_Id === "function") ? visCity.get_Id() : 0;
+                // Reset poll counter when selection changes (each base gets a fresh 5s budget).
+                if (widget.__MM_BT_lootSelId !== selId) {
+                    widget.__MM_BT_lootSelId = selId;
+                    widget.__MM_BT_lootPollCount = 0;
+                }
+
                 var data = computeAttackLoot(visCity);
                 var comp = widget.__MM_BT_lootComp;
                 if (!comp) {
@@ -540,12 +568,36 @@
                     return;
                 }
                 if (data.loadState !== 1) {
-                    var lblCalc = new qx.ui.basic.Label("Calculating attack loot...").set({
-                        textColor: "#aaaaaa", font: "font_size_13_bold"
-                    });
-                    comp.add(lblCalc, { row: 0, column: 0, colSpan: 11 });
+                    var n = widget.__MM_BT_lootPollCount || 0;
+                    if (n < LOOT_POLL_MAX) {
+                        widget.__MM_BT_lootPollCount = n + 1;
+                        var lblCalc = new qx.ui.basic.Label("Calculating attack loot... (" + (n + 1) + "/" + LOOT_POLL_MAX + ")").set({
+                            textColor: "#aaaaaa", font: "font_size_13_bold"
+                        });
+                        comp.add(lblCalc, { row: 0, column: 0, colSpan: 11 });
+                        wlog("attack-loot poll " + (n + 1) + "/" + LOOT_POLL_MAX + " selId=" + selId + " reason=" + (data.reason || "?"));
+                        widget.__MM_BT_lootPoll = setTimeout(function () {
+                            widget.__MM_BT_lootPoll = null;
+                            try {
+                                // Only re-render if the widget is still showing the same target.
+                                var stillSel = widget._selectedObject;
+                                var stillId = (stillSel && typeof stillSel.get_Id === "function") ? stillSel.get_Id() : 0;
+                                if (stillId !== selId) return;
+                                renderAttackLootPanel(widget, visCity);
+                            } catch (e) { werr("loot poll callback:", e); }
+                        }, LOOT_POLL_INTERVAL_MS);
+                    } else {
+                        var lblFail = new qx.ui.basic.Label("Attack loot data unavailable").set({
+                            textColor: "#ffb060", font: "font_size_13_bold"
+                        });
+                        comp.add(lblFail, { row: 0, column: 0, colSpan: 11 });
+                        wwarn("attack-loot: gave up polling for selId=" + selId + " (last reason=" + (data.reason || "?") + ")");
+                    }
                     return;
                 }
+                // Success - clear poll counter so a future re-fire on the same selection
+                // doesn't inherit an exhausted budget.
+                widget.__MM_BT_lootPollCount = 0;
 
                 var cp = data.CPNeeded || 0;
                 var playerCP = 0;
@@ -653,9 +705,15 @@
                         } catch (e) { werr("unpatch " + p.name + ":", e); }
                         try {
                             var inst = p.W && typeof p.W.getInstance === "function" ? p.W.getInstance() : null;
-                            if (inst && inst.__MM_BT_lootComp) {
-                                try { inst.remove(inst.__MM_BT_lootComp); } catch (e) {}
-                                inst.__MM_BT_lootComp = null;
+                            if (inst) {
+                                if (inst.__MM_BT_lootPoll) {
+                                    try { clearTimeout(inst.__MM_BT_lootPoll); } catch (e) {}
+                                    inst.__MM_BT_lootPoll = null;
+                                }
+                                if (inst.__MM_BT_lootComp) {
+                                    try { inst.remove(inst.__MM_BT_lootComp); } catch (e) {}
+                                    inst.__MM_BT_lootComp = null;
+                                }
                             }
                         } catch (e) {}
                     }
@@ -1907,15 +1965,15 @@
                 wlog("RepairPriority =", REP_PRIORITY);
             });
 
-            // Attack-loot panel (salvaged from MaelstromTools Dev, retired 2026-06-20). Toggles
-            // whether the region-map base info popups get our "Possible attacks / Lootable /
-            // per CP / 2nd run / 3rd run" block appended. Default ON. The widget patches are
-            // always installed; the wrapper no-ops when this setting is off.
+            // Attack-loot panel toggle. Controls whether the region-map base info popups get
+            // our "Possible attacks / Lootable / per CP / 2nd run / 3rd run" block appended.
+            // Default ON. The widget patches are always installed; the wrapper no-ops when
+            // this setting is off.
             tabCR.add(new qx.ui.core.Spacer(null, 6));
             tabCR.add(new qx.ui.basic.Label("<b>Region map</b>").set({ rich: true, textColor: "#ffffff" }));
             var cbAttackLoot = new qx.ui.form.CheckBox("Show attack loot summary in region base popups").set({
                 value: MM.settings.get("BaseTools.AttackLootPanel", true),
-                toolTipText: "When on, clicking a non-own base on the region map appends 'Possible attacks from this base (available CP)', 'Lootable resources', 'per CP', '2nd run', '3rd run' rows to the game's own info popup. Salvaged from MaelstromTools Dev (retired)."
+                toolTipText: "When on, opening the info popup for any non-own base on the region map (camp / outpost / forgotten / enemy player) appends a quick loot summary: 'Possible attacks (available CP)', 'Lootable resources', 'per CP', '2nd run' and '3rd run' breakdowns of Tiberium / Crystal / Credits / Research Points - so you can pick the best farm/attack target without opening each base's attack screen."
             });
             cbAttackLoot.addListener("changeValue", function (e) {
                 MM.settings.set("BaseTools.AttackLootPanel", !!e.getData());
