@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.1
+// @version         1.4.2
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -20,6 +20,11 @@
                         repair-all-buildings across every base; plus a
                         periodic auto-collect / auto-repair timer. Bottom-right
                         notification buttons appear only when there's work to do.
+                        Also hosts the "attack-loot panel" toggle: when on
+                        (default), clicking a non-own base on the region map
+                        appends a "Possible attacks from this base / Lootable /
+                        per CP / 2nd run / 3rd run" block to the game's own
+                        info popup. Salvaged from MaelstromTools Dev (retired).
    Production         - per-base + grand-total production (Package / Continuous /
                         Alliance Bonus / Total per h). Killed bases excluded
                         from totals.
@@ -464,6 +469,196 @@
                     try { document.removeEventListener("keyup", onKeyUp, true); } catch (e) {}
                     try { window.removeEventListener("blur", onBlur, true); } catch (e) {}
                     closeOverlay();
+                }
+            };
+        }
+
+        // ===== Region-panel Attack Loot injection ========================================
+        // Salvaged from MaelstromTools Dev (retired 2026-06-20). Patches the three region-map
+        // selection-info panels (RegionNPCCampStatusInfo / RegionNPCBaseStatusInfo /
+        // RegionCityStatusInfoEnemy) so that when you click a non-own base on the region map,
+        // a small "Possible attacks from this base (available CP): N" block is appended to the
+        // game's native info panel, followed by 4 loot rows (Lootable resources / per CP /
+        // 2nd run / 3rd run). CPNeeded comes from the public
+        // currentOwnCity.CalculateAttackCommandPointCostToCoord; loot comes from
+        // MMCommon.loot.ofCity (already salvaged from Maelstrom's per-entity model: sum of
+        // UnitLevelRepairRequirements scaled by current HitpointsPercent across buildings +
+        // defense units). Out-of-range bases show "Target out of range".
+        function computeAttackLoot(visCity) {
+            try {
+                if (!visCity || typeof visCity.get_X !== "function") return { loadState: 0 };
+                if (visCity.get_X() < 0 || visCity.get_Y() < 0) return { loadState: 0 };
+                var MD = ClientLib.Data.MainData.GetInstance();
+                var currentOwnCity = MD.get_Cities().get_CurrentOwnCity();
+                if (!currentOwnCity) return { loadState: 0 };
+                var dist = ClientLib.Base.Util.CalculateDistance(
+                    currentOwnCity.get_X(), currentOwnCity.get_Y(),
+                    visCity.get_RawX(), visCity.get_RawY()
+                );
+                var maxDist = MD.get_Server().get_MaxAttackDistance();
+                if (dist > maxDist) return { loadState: -1 };
+                var ncity = MD.get_Cities().GetCity(visCity.get_Id());
+                if (!ncity || (typeof ncity.get_Version === "function" && ncity.get_Version() === 0)) {
+                    return { loadState: 0 };
+                }
+                var byRes = window.MMCommon.loot.ofCity(ncity);
+                var ERT = ClientLib.Base.EResourceType;
+                var tib = byRes[ERT.Tiberium] || 0;
+                var cry = byRes[ERT.Crystal] || 0;
+                var dol = byRes[ERT.Gold] || 0;
+                var res = byRes[ERT.ResearchPoints] || 0;
+                var total = tib + cry + dol + res;
+                if (total <= 0) return { loadState: 0 };
+                var cp = 0;
+                try { cp = currentOwnCity.CalculateAttackCommandPointCostToCoord(ncity.get_X(), ncity.get_Y()) || 0; } catch (e) {}
+                return { loadState: 1, CPNeeded: cp, tib: tib, cry: cry, dol: dol, res: res, total: total };
+            } catch (e) { werr("computeAttackLoot:", e); return { loadState: 0 }; }
+        }
+
+        // Build (or refresh) the 5-row loot grid on a region status-info widget. The composite
+        // is attached once (stored on widget.__MM_BT_lootComp) and cleared+repopulated on each
+        // call - matches Maelstrom's pattern so the native panel's own rebuilds don't lose us.
+        function renderAttackLootPanel(widget, visCity) {
+            try {
+                if (!widget || !visCity) return;
+                var data = computeAttackLoot(visCity);
+                var comp = widget.__MM_BT_lootComp;
+                if (!comp) {
+                    comp = new qx.ui.container.Composite(new qx.ui.layout.Grid(5, 4));
+                    try { comp.setTextColor("white"); } catch (e) {}
+                    try { comp.setPadding(6); } catch (e) {}
+                    widget.__MM_BT_lootComp = comp;
+                    try { widget.add(comp); } catch (e) { werr("attach loot comp:", e); return; }
+                }
+                try { comp.removeAll(); } catch (e) {}
+
+                if (data.loadState === -1) {
+                    var lblOut = new qx.ui.basic.Label("Target out of range, no attack-loot calculation possible").set({
+                        textColor: "#ffb060", font: "font_size_13_bold", rich: true
+                    });
+                    comp.add(lblOut, { row: 0, column: 0, colSpan: 11 });
+                    return;
+                }
+                if (data.loadState !== 1) {
+                    var lblCalc = new qx.ui.basic.Label("Calculating attack loot...").set({
+                        textColor: "#aaaaaa", font: "font_size_13_bold"
+                    });
+                    comp.add(lblCalc, { row: 0, column: 0, colSpan: 11 });
+                    return;
+                }
+
+                var cp = data.CPNeeded || 0;
+                var playerCP = 0;
+                try { playerCP = ClientLib.Data.MainData.GetInstance().get_Player().GetCommandPointCount(); } catch (e) {}
+                var possible = (cp > 0) ? Math.floor(playerCP / cp) : 0;
+
+                function fmt(n) {
+                    try { return webfrontend.phe.cnc.gui.util.Numbers.formatNumbersCompact(n); }
+                    catch (e) { try { return phe.cnc.gui.util.Numbers.formatNumbersCompact(n); } catch (e2) { return String(Math.floor(n)); } }
+                }
+
+                var ICONS = {
+                    res: "FactionUI/icons/icon_attack_research_points.png",
+                    tib: "webfrontend/ui/common/icn_res_tiberium.png",
+                    cry: "webfrontend/ui/common/icn_res_chrystal.png",
+                    dol: "webfrontend/ui/common/icn_res_dollar.png"
+                };
+                function img(path) {
+                    return new qx.ui.basic.Image(path).set({ scale: true, width: 18, height: 18, alignY: "middle" });
+                }
+                function val(text, bold) {
+                    return new qx.ui.basic.Label(text == null ? "" : String(text)).set({
+                        textColor: "white", width: 70, textAlign: "right", alignY: "middle",
+                        font: bold ? "font_size_13_bold" : null
+                    });
+                }
+                function lbl(text, bold) {
+                    return new qx.ui.basic.Label(text == null ? "" : String(text)).set({
+                        textColor: "white", alignY: "middle",
+                        font: bold ? "font_size_13_bold" : null
+                    });
+                }
+
+                // Row 0: "Possible attacks from this base (available CP): N" — single bold header.
+                comp.add(lbl("Possible attacks from this base (available CP): " + possible, true), { row: 0, column: 0, colSpan: 11 });
+
+                // Rows 1..4: Lootable / per CP / 2nd run / 3rd run.
+                var rows = [
+                    { name: "Lootable resources",  div: 1,        bold: true  },
+                    { name: "per CP",              div: cp || 1,  bold: false },
+                    { name: "2nd run",             div: 2 * (cp || 1), bold: false },
+                    { name: "3rd run",             div: 3 * (cp || 1), bold: false }
+                ];
+                for (var ri = 0; ri < rows.length; ri++) {
+                    var r = rows[ri];
+                    var rIdx = ri + 1;
+                    comp.add(lbl(r.name + ":", r.bold),       { row: rIdx, column: 0 });
+                    comp.add(img(ICONS.res),                  { row: rIdx, column: 1 });
+                    comp.add(val(fmt(data.res / r.div), r.bold), { row: rIdx, column: 2 });
+                    comp.add(img(ICONS.tib),                  { row: rIdx, column: 3 });
+                    comp.add(val(fmt(data.tib / r.div), r.bold), { row: rIdx, column: 4 });
+                    comp.add(img(ICONS.cry),                  { row: rIdx, column: 5 });
+                    comp.add(val(fmt(data.cry / r.div), r.bold), { row: rIdx, column: 6 });
+                    comp.add(img(ICONS.dol),                  { row: rIdx, column: 7 });
+                    comp.add(val(fmt(data.dol / r.div), r.bold), { row: rIdx, column: 8 });
+                    comp.add(lbl("Σ", r.bold),                { row: rIdx, column: 9 });
+                    comp.add(val(fmt(data.total / r.div), r.bold), { row: rIdx, column: 10 });
+                }
+            } catch (e) { werr("renderAttackLootPanel:", e); }
+        }
+
+        // Patch the three region-map selection-info widgets' onCitiesChange method to call
+        // renderAttackLootPanel right before delegating to the original. Returns a destroy()
+        // that unpatches them and removes the injected composite (used by lifecycle teardown).
+        function installAttackLootPanels() {
+            var MM = window.MMCommon;
+            var WIDGET_NAMES = ["RegionNPCCampStatusInfo", "RegionNPCBaseStatusInfo", "RegionCityStatusInfoEnemy"];
+            var patched = [];
+
+            for (var i = 0; i < WIDGET_NAMES.length; i++) {
+                (function (name) {
+                    try {
+                        var W = webfrontend && webfrontend.gui && webfrontend.gui.region && webfrontend.gui.region[name];
+                        if (!W || !W.prototype || typeof W.prototype.onCitiesChange !== "function") {
+                            wwarn("attack-loot: " + name + " not present, skipping");
+                            return;
+                        }
+                        var proto = W.prototype;
+                        if (proto.__MM_BT_origOnCitiesChange) return; // already patched
+                        proto.__MM_BT_origOnCitiesChange = proto.onCitiesChange;
+                        proto.onCitiesChange = function () {
+                            try {
+                                if (MM.settings.get("BaseTools.AttackLootPanel", true)) {
+                                    var sel = this._selectedObject;
+                                    if (sel) renderAttackLootPanel(this, sel);
+                                }
+                            } catch (e) { werr("onCitiesChange wrapper (" + name + "):", e); }
+                            return this.__MM_BT_origOnCitiesChange.apply(this, arguments);
+                        };
+                        patched.push({ proto: proto, name: name, W: W });
+                        wlog("attack-loot panel: patched " + name);
+                    } catch (e) { werr("installAttackLootPanels(" + name + "):", e); }
+                })(WIDGET_NAMES[i]);
+            }
+
+            return {
+                destroy: function () {
+                    for (var i = 0; i < patched.length; i++) {
+                        var p = patched[i];
+                        try {
+                            if (p.proto.__MM_BT_origOnCitiesChange) {
+                                p.proto.onCitiesChange = p.proto.__MM_BT_origOnCitiesChange;
+                                delete p.proto.__MM_BT_origOnCitiesChange;
+                            }
+                        } catch (e) { werr("unpatch " + p.name + ":", e); }
+                        try {
+                            var inst = p.W && typeof p.W.getInstance === "function" ? p.W.getInstance() : null;
+                            if (inst && inst.__MM_BT_lootComp) {
+                                try { inst.remove(inst.__MM_BT_lootComp); } catch (e) {}
+                                inst.__MM_BT_lootComp = null;
+                            }
+                        } catch (e) {}
+                    }
                 }
             };
         }
@@ -1711,6 +1906,22 @@
                 prioGroup.setVisibility(REP_PRIORITY ? "visible" : "excluded");
                 wlog("RepairPriority =", REP_PRIORITY);
             });
+
+            // Attack-loot panel (salvaged from MaelstromTools Dev, retired 2026-06-20). Toggles
+            // whether the region-map base info popups get our "Possible attacks / Lootable /
+            // per CP / 2nd run / 3rd run" block appended. Default ON. The widget patches are
+            // always installed; the wrapper no-ops when this setting is off.
+            tabCR.add(new qx.ui.core.Spacer(null, 6));
+            tabCR.add(new qx.ui.basic.Label("<b>Region map</b>").set({ rich: true, textColor: "#ffffff" }));
+            var cbAttackLoot = new qx.ui.form.CheckBox("Show attack loot summary in region base popups").set({
+                value: MM.settings.get("BaseTools.AttackLootPanel", true),
+                toolTipText: "When on, clicking a non-own base on the region map appends 'Possible attacks from this base (available CP)', 'Lootable resources', 'per CP', '2nd run', '3rd run' rows to the game's own info popup. Salvaged from MaelstromTools Dev (retired)."
+            });
+            cbAttackLoot.addListener("changeValue", function (e) {
+                MM.settings.set("BaseTools.AttackLootPanel", !!e.getData());
+                wlog("AttackLootPanel =", !!e.getData());
+            });
+            tabCR.add(cbAttackLoot);
 
             // ---- Tabs 2-4 ----
             function placeholderTab(title, body) {
@@ -2999,7 +3210,12 @@
             // at-runtime on the BaseTools.UpgradeOverlay setting (Upgrade Priority tab checkbox).
             try { installUpgradeOverlay(); } catch (e) { werr("installUpgradeOverlay failed:", e); }
 
-            LOG.log("ready (" + AUTO_TIMER_MIN + " min auto cycle, autoCollect=" + AUTO_COLLECT + ", autoRepBldg=" + AUTO_REP_BLDG + ", autoRepUnits=" + AUTO_REP_UNITS + ", repPriority=" + REP_PRIORITY + ", upgOverlay=" + MM.settings.get("BaseTools.UpgradeOverlay", true) + ")");
+            // Install the region-map attack-loot panel injection. Patches the three native
+            // status-info widget classes' onCitiesChange method; runtime-gated on the
+            // BaseTools.AttackLootPanel setting (Collect & Repair tab checkbox).
+            try { installAttackLootPanels(); } catch (e) { werr("installAttackLootPanels failed:", e); }
+
+            LOG.log("ready (" + AUTO_TIMER_MIN + " min auto cycle, autoCollect=" + AUTO_COLLECT + ", autoRepBldg=" + AUTO_REP_BLDG + ", autoRepUnits=" + AUTO_REP_UNITS + ", repPriority=" + REP_PRIORITY + ", upgOverlay=" + MM.settings.get("BaseTools.UpgradeOverlay", true) + ", attackLoot=" + MM.settings.get("BaseTools.AttackLootPanel", true) + ")");
         }
 
         // Wait until the game UI and MMCommon are both ready, then build once.
