@@ -38,7 +38,7 @@ Status legend: ✅ keep/review · ⚠️ quality or fragility concern · 🔁 du
 |---|---|---|
 | TA_Tiberium_Alliances_Battle_Simulator_V2 | **DONE** — our main sim + optimizer + options panel | ✅ |
 | TA_Battle_Simulator_V2_OLD | Old (18.07.12) version of the above; deprecated, mostly base64 icon blobs | 🗑️🔁 |
-| TA_The_Green_Cross_Tools | POI tier/rank sim + message-list builder; ~500 lines of disabled BaseScanner/Upgrade dead code; FR/EN comments | ⚠️ |
+| ~~TA_The_Green_Cross_Tools~~ | POI tier/rank sim + message-list builder; ~500 lines of disabled BaseScanner/Upgrade dead code; FR/EN comments | ❌ RETIRED 2026-06-21 (POI window dup of POIs_Analyser; scanner/upgrade already commented; salvage spec — GPH-on-upgrade modifier walk — captured in MM_CONSOLIDATION_PLAN §5 The_Green_Cross_Tools entry) |
 | TA_POIs_Analyser | Alliance POI score/tier/rank tables + acquisition simulator | ✅ |
 
 ### Base scanners (heavy overlap)

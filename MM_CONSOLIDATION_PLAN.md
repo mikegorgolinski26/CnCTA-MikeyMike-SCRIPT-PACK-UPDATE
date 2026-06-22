@@ -216,8 +216,26 @@ Priority order (high → low), with the new MM name and the one-line reason:
   were not wanted.
 
 **POI / reports / combat**
-- **TA_The_Green_Cross_Tools** → POI window is a dup of POIs_Analyser; scanner is dead + covered by MM -
-  Base Scanner. Salvage only the commented per-field loot model as a `loot.ofCity` cross-check.
+- ~~**TA_The_Green_Cross_Tools**~~ — **RETIRED 2026-06-21** (file + bg row id 10038 gone). Was a
+  "Manager" button injected into the game's options bar opening a popup with one live entry —
+  `TGCTools.POIWindow`, a near-clone of the already-retired POIs_Analyser (same Total Score / Total
+  Quantity / Total Bonus headers, Tier table prev/curr/next with lower/upper/bonus/diff, Rank table
+  prev/curr/next with alliance/score/multiplier/diff, and a "gain N points → projected tier/rank/bonus"
+  Simulation column). ~2000 of its ~2680 lines were already commented-out: `TGCTools.BaseScanner`
+  (20-tile region scanner with City Type / Distance / CP Cost / Layout filters + qx table; covered by
+  MM - Base Scanner) and `TGCTools.UpgradeWindow` (UpgradeAllBuildingsToLevel + "+1" 9×8 grid walk +
+  "Maximize" picking gain/cost-best production building; covered by MM - Upgrade + MM - Base Tools
+  Top-N priority). **Salvage spec for a future MMCommon module:**
+  - **Per-building gain-per-hour-on-upgrade model** (commented `baseUpgradeMaximizeLevel`): for each
+    production candidate, sum `OwnProdModifiers.d[type].NewLvlDelta` across `{Tib/Cry/Pow/Credits}{Package
+    Size, Production}`; PackageSize entries normalize by `MainData.get_Time().get_StepsPerHour()` and by
+    the building's main-modifier `(TotalValue + NewLvlDelta)` (i.e. delta per package × packages per
+    hour); flat Production entries add straight. Production tech-name filter: `{1,2,10,11,15,16}`. Use as
+    a CROSS-CHECK against the calibrated Layout Optimizer's per-resource delta and `MMCommon.loot.ofCity` —
+    confirms the right way to read package-vs-flat production modifiers when first consumer needs it.
+  - POI tier/rank/bonus simulator math itself is NOT re-documented here — already captured in §4 entry 4
+    (POIs_Analyser retirement) since this was a duplicate.
+  Full original is in git history at SCRIPT-PACK `908bf48` if either piece is ever rebuilt.
 - **TA_Report_Summary** → salvage the **bulk report-scan pipeline** (`GetReportCount`→
   `RequestReportHeaderDataAll`→per-report `RequestReportData`, grouped by base/date via `MergeResourceCosts`)
   → `reports.scanAll(type)`, consumed by MM - Report Stats.
@@ -353,10 +371,11 @@ Warchief_Sector_HUD, Zoom, ADDON_City_Online_Status_Colorer_SC,
 Repair_Time_Of_Death.
 RETIRED (deferred out of initial release; salvage spec captured in §4 entry 6): Report_Stats.
 RETIRED (cut from initial release; salvage spec captured in §4 entry 5): POI_ExporterTools.
+RETIRED (POI window was a POIs_Analyser dup; scanner/upgrade already commented; salvage spec in §5 The_Green_Cross_Tools entry): The_Green_Cross_Tools.
 RETIRED (keeper feature rebuilt as MMCommon.menubar + Next MCV menu dock, §4 entry on Info_Sticker): Info_Sticker.
 SALVAGE-THEN-RETIRE: Shockr_…_Basescanner, PluginsLib_mhLoot, MHTools_Available_Loot_Summary_Info,
 Auto_Repair, Upgrade_Top_ModButtonPos, Autopilot, Flunik_Tools_reloaded, Wavy,
-CityMoveInfoExtend, Map, The_Green_Cross_Tools, Report_Summary, Formation_Saver,
+CityMoveInfoExtend, Map, Report_Summary, Formation_Saver,
 View_Player_Base, CnCTAOpt_Link_Button,
 New_Resource_Trade_Window, Transfer_All_resources.
 KEEP-PENDING-REVIEW: xTrim_Base_Overlay_DR_4_3, MovableMenuOverlay, Supplies_Mod,
