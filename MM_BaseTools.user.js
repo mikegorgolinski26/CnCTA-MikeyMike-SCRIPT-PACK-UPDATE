@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.4
+// @version         1.4.7
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -282,12 +282,17 @@
         // groups are summed so a PowerPlant correctly shows the combined Power+Credits value.
         function computeUpgradeOverlayTiles(ownCity) {
             try {
-                var ETN = ClientLib.Base.ETechName, EMT = ClientLib.Base.EModifierType;
+                var EMT = ClientLib.Base.EModifierType;
+                // Identify a resource producer by the (PackageSize, Production) modifier types it actually
+                // carries - NOT by get_TechName(). On the current client get_TechName() returns a different
+                // enum than ClientLib.Base.ETechName, so the old type-name gate matched nothing and the
+                // overlay drew ZERO tiles (Ctrl-hold showed nothing). Driving selection off the live
+                // production modifiers is patch-robust and matches the buildings the engine actually scores.
                 var GROUPS = [
-                    { types: [ETN.Harvester, ETN.Silo],         ps: EMT.TiberiumPackageSize, pr: EMT.TiberiumProduction },
-                    { types: [ETN.Harvester, ETN.Silo],         ps: EMT.CrystalPackageSize,  pr: EMT.CrystalProduction },
-                    { types: [ETN.PowerPlant, ETN.Accumulator], ps: EMT.PowerPackageSize,    pr: EMT.PowerProduction },
-                    { types: [ETN.Refinery, ETN.PowerPlant],    ps: EMT.CreditsPackageSize,  pr: EMT.CreditsProduction }
+                    { ps: EMT.TiberiumPackageSize, pr: EMT.TiberiumProduction },
+                    { ps: EMT.CrystalPackageSize,  pr: EMT.CrystalProduction },
+                    { ps: EMT.PowerPackageSize,    pr: EMT.PowerProduction },
+                    { ps: EMT.CreditsPackageSize,  pr: EMT.CreditsProduction }
                 ];
                 var sph = ClientLib.Data.MainData.GetInstance().get_Time().get_StepsPerHour();
                 var bldData = ownCity.get_Buildings && ownCity.get_Buildings();
@@ -296,18 +301,14 @@
                 var tiles = {};
                 for (var k in d) {
                     var b = d[k]; if (!b) continue;
-                    var techName;
-                    try { techName = b.get_TechName(); } catch (e) { continue; }
+                    var info; try { info = ownCity.GetBuildingDetailViewInfo(b); } catch (e) { continue; }
+                    if (!info || !info.OwnProdModifiers) continue;
+                    var mods = info.OwnProdModifiers.d || {};
                     var totalGain = 0, matched = false;
                     for (var gi = 0; gi < GROUPS.length; gi++) {
                         var g = GROUPS[gi];
-                        var inGroup = false;
-                        for (var ti = 0; ti < g.types.length; ti++) { if (g.types[ti] === techName) { inGroup = true; break; } }
-                        if (!inGroup) continue;
+                        if (mods[g.ps] === undefined && mods[g.pr] === undefined) continue;
                         matched = true;
-                        var info; try { info = ownCity.GetBuildingDetailViewInfo(b); } catch (e) { continue; }
-                        if (!info || !info.OwnProdModifiers) continue;
-                        var mods = info.OwnProdModifiers.d;
                         for (var mt in mods) {
                             var mtInt = parseInt(mt, 10);
                             if (mtInt === g.ps) {
@@ -933,18 +934,32 @@
         // (the original tool ignored it entirely), so verifying by effect is what lets us show
         // an honest "✓ Upgraded" vs "✗ failed".
         function sendUpgrade(cand, onDone) {
+            var settled = false;
+            function done(ok) { if (settled) return; settled = true; if (onDone) onDone(ok); }
             try {
                 ClientLib.Net.CommunicationManager.GetInstance().SendCommand(
                     "UpgradeBuilding", cand.buildingArg,
-                    webfrontend.phe.cnc.Util.createEventDelegate(ClientLib.Net.CommandResult, {}, function () {}),
+                    // The server's command RESULT is the reliable success signal (verified live): UpgradeBuilding
+                    // returns boolean true when the upgrade is ACCEPTED and starts building, false when REJECTED
+                    // (e.g. not enough resources). Crucially, get_CurrentLevel() does NOT change until the build
+                    // COMPLETES (seconds to minutes later) - so the old "did the level reach target within 4s"
+                    // check false-reported every slow-building upgrade as "failed" even though it went through.
+                    webfrontend.phe.cnc.Util.createEventDelegate(ClientLib.Net.CommandResult, {}, function (ctx, res) {
+                        var ok = (res === true || res === 0);
+                        try { wlog("UpgradeBuilding", cand.typeName, "@" + cand.posX + "," + cand.posY, "in", cand.cityName, "->", res, ok ? "(accepted)" : "(REJECTED)"); } catch (e) {}
+                        done(ok);
+                    }),
                     null, true);
-            } catch (e) { werr("sendUpgrade failed:", e); if (onDone) onDone(false); return; }
+            } catch (e) { werr("sendUpgrade failed:", e); done(false); return; }
+            // Safety net only: if the result delegate never fires (it normally does, fast), fall back to an
+            // effect check - success if the level has advanced, else give up after ~12s.
             var tries = 0;
             (function check() {
+                if (settled) return;
                 tries++;
                 var lvl = currentBuildingLevel(cand);
-                if (lvl != null && lvl >= cand.targetLevel) { if (onDone) onDone(true); return; }
-                if (tries >= 8) { wwarn("upgrade not confirmed (building stayed at level " + lvl + ", wanted " + cand.targetLevel + ")"); if (onDone) onDone(false); return; }
+                if (lvl != null && lvl >= cand.targetLevel) { done(true); return; }
+                if (tries >= 24) { wwarn("no UpgradeBuilding result received for " + cand.typeName + " in " + cand.cityName + " (level still " + lvl + ")"); done(false); return; }
                 window.setTimeout(check, 500);
             })();
         }
@@ -2204,6 +2219,9 @@
                     suppressBaseEvent = true;
                     try {
                         try { baseSelect.removeAll(); } catch (e) {}
+                        // "Current Base" tracks whichever base you're viewing - switch bases in-game and the
+                        // table follows. "All Bases" spans every base. Then each base by name.
+                        var curItem = new qx.ui.form.ListItem("Current Base"); curItem.setModel("current"); baseSelect.add(curItem);
                         var allItem = new qx.ui.form.ListItem("All Bases"); allItem.setModel("All"); baseSelect.add(allItem);
                         var list = [];
                         eachOwnCity(function (c) {
@@ -2213,7 +2231,7 @@
                             } catch (e) {}
                         });
                         list.sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
-                        var sel = allItem;
+                        var sel = (prev === "current") ? curItem : allItem;
                         for (var i = 0; i < list.length; i++) {
                             var it = new qx.ui.form.ListItem(list[i].name); it.setModel(list[i].id); baseSelect.add(it);
                             if (list[i].id === prev) sel = it;
@@ -2599,9 +2617,10 @@
                             markDone(cand, ok);
                             if (ok) { processed++; if (viaTransfer) transferred++; }
                             else { failed++; }
-                            // Slightly longer settle after a transfer (the game needs a tick to credit the
-                            // tiberium before the next row's liveEval reads the new totals).
-                            window.setTimeout(step, viaTransfer ? 400 : 200);
+                            // Settle before the next row so its liveEval reads accurate post-spend totals
+                            // (an upgrade's resource drain confirms a tick late; reading too soon over-
+                            // approves the next row and the server then rejects it). Longer after a transfer.
+                            window.setTimeout(step, viaTransfer ? 600 : 400);
                         });
                     }
                     step();
@@ -2635,6 +2654,13 @@
                 function applyBaseFilter(all) {
                     var bf = currentBaseFilter();
                     if (bf === "All") return all;
+                    if (bf === "current") {
+                        // Dynamic: always the base currently being viewed (follows base switches).
+                        var curId = null;
+                        try { var cc = ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity(); if (cc) curId = String(cc.get_Id()); } catch (e) {}
+                        if (!curId) return all;
+                        return all.filter(function (c) { return String(c.cityId) === curId; });
+                    }
                     return all.filter(function (c) { return String(c.cityId) === bf; });
                 }
 
@@ -2677,6 +2703,15 @@
                 spinTopN.addListener("changeValue", function (e) { MM.settings.set("BaseTools.UpgradeTopN", Number(e.getData()) || 5); });
                 btnUpgradeTop.addListener("execute", function () { upgradeTopN(spinTopN.getValue()); });
                 page.addListener("appear", refreshTab);
+                // "Current Base" follow: when the player switches bases in-game, re-render for the new base
+                // (only while this tab is actually visible, so it doesn't churn in the background).
+                try {
+                    webfrontend.phe.cnc.Util.attachNetEvent(
+                        ClientLib.Data.MainData.GetInstance().get_Cities(), "CurrentOwnChange",
+                        ClientLib.Data.CurrentOwnCityChange, {}, function () {
+                            try { if (currentBaseFilter() === "current" && page.isVisible && page.isVisible()) refreshTab(); } catch (e) {}
+                        });
+                } catch (e) { werr("current-base follow wiring failed:", e); }
                 return page;
             }
 

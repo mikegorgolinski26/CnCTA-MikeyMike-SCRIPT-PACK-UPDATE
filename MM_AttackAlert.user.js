@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Warns you when one of your bases is under attack: flashes the browser-tab title, swaps the tab favicon to a flashing siren icon, and plays an alarm sound. By default it only sounds the alarm while the game tab is in the BACKGROUND (so it never nags you while you are actively playing), and it clears itself the moment you come back to the tab or the attack ends. Title / favicon / sound are each individually toggleable, and a "Test alarm" button lets you preview the siren (and prime your browser's autoplay permission).
-// @version      1.0.0
+// @version      1.0.1
 // @author       MikeyMike (rework of der_flake / XDaast's "CENTER DRIVEN PvP Alert Status")
 // @contributor  der_flake
 // @contributor  XDaast
@@ -175,7 +175,11 @@
 				var all = cities.get_AllCities().d;
 				for (var key in all) {
 					var b = all[key];
-					try { if (b && b.get_isAlerted && b.get_isAlerted()) names.push(b.get_Name()); } catch (e) {}
+					// ONLY our own live bases. get_AllCities() also returns other players' bases and our
+					// own LOST/ghost bases, which can keep a stale isAlerted flag set - that falsely held
+					// the siren on after losing a base while not actually being attacked. IsOwnBase() is
+					// false for a base you no longer own, so lost bases drop out here.
+					try { if (b && b.IsOwnBase && b.IsOwnBase() && b.get_isAlerted && b.get_isAlerted()) names.push(b.get_Name()); } catch (e) {}
 				}
 			} catch (e) { werr("alertedBaseNames:", e); }
 			return names;
@@ -224,6 +228,11 @@
 			scanTimer = window.setInterval(scan, 4000);
 			scan();
 			wlog("watching for attacks (4s poll).");
+		}
+		function stopScanning() {
+			if (scanTimer) { window.clearInterval(scanTimer); scanTimer = null; }
+			if (alarmActive) clearAlarm();
+			wlog("stopped - poll cleared + alarm silenced (script disabled).");
 		}
 
 		// ---- options panel ---------------------------------------------------------
@@ -308,6 +317,16 @@
 				if (ready) {
 					buildOptions();
 					startScanning();
+					// Live enable/disable from the CnC Pack menu: on disable, kill the poll + silence the
+					// alarm immediately (no refresh needed); on re-enable, resume scanning.
+					try {
+						if (MM.lifecycle && MM.lifecycle.watch) {
+							MM.lifecycle.watch(10207, {
+								onDisable: function () { stopScanning(); },
+								onEnable: function () { startScanning(); }
+							});
+						}
+					} catch (e) { werr("lifecycle watch failed:", e); }
 					window.MM_ATTACKALERT_INSTALLED = true;
 					wlog("installed.");
 					return;
