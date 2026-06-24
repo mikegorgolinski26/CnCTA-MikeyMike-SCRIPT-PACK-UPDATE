@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.21
+// @version         1.0.22
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -1758,6 +1758,15 @@
             var DEFAULTS = { bottom: 40, right: 220 }; // initial parking spot, clear of game UI
             var KEY = "HUDTray";
 
+            // Order docked buttons alphabetically (ascending) by label. Used ONLY for the in-menu-bar
+            // ("docked") placement; the float tray keeps registration order.
+            function byLabelAsc(btnA, btnB) {
+                var la = "", lb = "";
+                try { la = (btnA.getLabel && btnA.getLabel()) || ""; } catch (e) {}
+                try { lb = (btnB.getLabel && btnB.getLabel()) || ""; } catch (e) {}
+                return String(la).toLowerCase().localeCompare(String(lb).toLowerCase());
+            }
+
             // Display mode: "float" (the draggable tray, default) or "menubar" (the buttons live inside the
             // game's base-navigation bar via NS.menubar). Read once at register time; changing it needs a reload.
             // IMPORTANT: stored in plain localStorage (a GLOBAL pref), NOT the pid-keyed NS.settings. register()
@@ -1785,6 +1794,7 @@
                 if (!pendingMenu.length) return;
                 var mp = ensureMenuPanel();
                 if (mp) {
+                    pendingMenu.sort(byLabelAsc); // docked buttons alphabetical (ascending)
                     for (var i = 0; i < pendingMenu.length; i++) { try { mp.add(pendingMenu[i]); } catch (e) {} }
                     pendingMenu = [];
                     return;
@@ -1798,11 +1808,17 @@
 
             // Move every registered button into `container` (re-parenting from wherever it currently lives).
             function moveButtonsTo(container) {
-                for (var i = 0; i < slots.length; i++) {
-                    var b = slots[i].btn;
+                // Docking into the in-game menu bar: place buttons alphabetically and re-add even those
+                // already present so the order is enforced. Float tray: keep registration order (skip
+                // buttons already parented there).
+                var sorted = (container === menuPanel);
+                var list = slots.slice();
+                if (sorted) list.sort(function (a, b) { return byLabelAsc(a.btn, b.btn); });
+                for (var i = 0; i < list.length; i++) {
+                    var b = list[i].btn;
                     try {
                         var p = b.getLayoutParent && b.getLayoutParent();
-                        if (p === container) continue;
+                        if (p === container && !sorted) continue;
                         if (p && p.remove) p.remove(b);
                         container.add(b);
                     } catch (e) {}

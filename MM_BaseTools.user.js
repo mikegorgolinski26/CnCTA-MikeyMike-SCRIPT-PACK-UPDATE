@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.7
+// @version         1.4.11
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -1018,42 +1018,64 @@
         // reflect current resources rather than the snapshot shown in the table.
         function autoTransferAndUpgrade(cand, onDone) {
             try {
+                var ERT = ClientLib.Base.EResourceType;
                 var pl = planTransfer(cand);
                 if (!pl.feasible) { wwarn("autoTransfer: no feasible plan at execution time"); if (onDone) onDone(false); return; }
                 if (playerCredits() < pl.totalCost) { wwarn("autoTransfer: not enough credits for the transfer fee"); if (onDone) onDone(false); return; }
                 if (!pl.plan.length) { sendUpgrade(cand, onDone); return; }
-                var ERT = ClientLib.Base.EResourceType;
                 wlog("autoTransfer:", pl.need, "tiberium to", cand.cityName, "in", pl.plan.length, "transfer(s), fee", pl.totalCost);
-                var idx = 0;
-                function nextTransfer() {
-                    if (idx >= pl.plan.length) { waitThenUpgrade(); return; }
-                    var p = pl.plan[idx++];
-                    try {
-                        ClientLib.Net.CommunicationManager.GetInstance().SendCommand("SelfTrade", {
-                            targetCityId: cand.cityId,
-                            sourceCityId: p.source.get_Id(),
-                            resourceType: ERT.Tiberium,
-                            amount: p.amount
-                        // Don't trust the result code here either - just pace the transfers and then
-                        // confirm by EFFECT that the tiberium arrived before upgrading.
-                        }, webfrontend.phe.cnc.Util.createEventDelegate(ClientLib.Net.CommandResult, {}, function () {
-                            window.setTimeout(nextTransfer, 200);
-                        }), null, true);
-                    } catch (e) { werr("SelfTrade failed:", e); if (onDone) onDone(false); }
-                }
-                // Transfers are async; wait until the target actually has enough tiberium, THEN upgrade.
-                function waitThenUpgrade() {
-                    var tries = 0;
-                    (function poll() {
-                        tries++;
-                        var t = getCityById(cand.cityId);
-                        var have = t ? t.GetResourceCount(ERT.Tiberium) : 0;
-                        if (have >= cand.costTib) { sendUpgrade(cand, onDone); return; }
-                        if (tries >= 12) { wwarn("autoTransfer: tiberium didn't arrive in time (have " + Math.floor(have) + " / need " + cand.costTib + ")"); if (onDone) onDone(false); return; }
-                        window.setTimeout(poll, 500);
+
+                function tibHave() { var t = getCityById(cand.cityId); return t ? t.GetResourceCount(ERT.Tiberium) : 0; }
+
+                // Fire a plan's SelfTrades sequentially (paced ~200ms), then call done().
+                function runTransfers(plan, done) {
+                    var idx = 0;
+                    (function step() {
+                        if (idx >= plan.length) { done(); return; }
+                        var p = plan[idx++];
+                        try {
+                            ClientLib.Net.CommunicationManager.GetInstance().SendCommand("SelfTrade", {
+                                targetCityId: cand.cityId,
+                                sourceCityId: p.source.get_Id(),
+                                resourceType: ERT.Tiberium,
+                                amount: p.amount
+                            // Don't trust the result code here - pace the transfers and confirm by EFFECT.
+                            }, webfrontend.phe.cnc.Util.createEventDelegate(ClientLib.Net.CommandResult, {}, function () {
+                                window.setTimeout(step, 200);
+                            }), null, true);
+                        } catch (e) { werr("SelfTrade failed:", e); done(); }
                     })();
                 }
-                nextTransfer();
+
+                // After the transfers, wait for the Tiberium to actually land, THEN upgrade. A transfer
+                // split across several source bases can land LATE or a hair SHORT (per-source server
+                // latency) - the old fixed 6s wait then timed out and marked the row "failed" even though
+                // the Tiberium was essentially there (the next row would succeed off it). So this is
+                // SELF-CORRECTING: if still short after a grace period, re-plan the REMAINING gap and top
+                // it up (up to a few times) rather than giving up. Overshoot from a late original transfer
+                // is harmless (it just stays in the base). Generous overall deadline (~24s).
+                function settleThenUpgrade() {
+                    var tries = 0, topUps = 0, topping = false;
+                    (function poll() {
+                        tries++;
+                        var have = tibHave();
+                        if (have >= cand.costTib) { sendUpgrade(cand, onDone); return; }
+                        // Still short, not mid-top-up: every ~2.8s re-plan and transfer just the gap.
+                        if (!topping && (tries % 7 === 0) && topUps < 3) {
+                            var gap = planTransfer(cand); // need = costTib - current have
+                            if (gap.feasible && gap.plan.length && playerCredits() >= gap.totalCost) {
+                                topUps++; topping = true;
+                                wlog("autoTransfer: still short (have " + Math.floor(have) + "/" + cand.costTib + "), topping up", gap.need, "- attempt", topUps);
+                                runTransfers(gap.plan, function () { topping = false; window.setTimeout(poll, 300); });
+                                return;
+                            }
+                        }
+                        if (tries >= 60) { wwarn("autoTransfer: tiberium didn't arrive in time (have " + Math.floor(have) + " / need " + cand.costTib + ")"); if (onDone) onDone(false); return; }
+                        window.setTimeout(poll, 400);
+                    })();
+                }
+
+                runTransfers(pl.plan, settleThenUpgrade);
             } catch (e) { werr("autoTransferAndUpgrade failed:", e); if (onDone) onDone(false); }
         }
 
@@ -2277,7 +2299,9 @@
                 ctrls.add(btnRefresh);
 
                 ctrls.add(new qx.ui.basic.Label("Upgrade top").set({ alignY: "middle" }));
-                var spinTopN = new qx.ui.form.Spinner(1, MM.settings.get("BaseTools.UpgradeTopN", 5), 99).set({ width: 60 });
+                var spinTopN = new qx.ui.form.Spinner(0, MM.settings.get("BaseTools.UpgradeTopN", 5), 99).set({ width: 60,
+                    toolTipText: "How many of the top rows Go will upgrade. Auto-capped to how many will actually succeed (a batch never fails), and reset to 5 (or fewer) on Refresh and whenever you toggle 'Transfer as needed'." });
+                var suppressSpinSave = false; // true while we set the spinner programmatically (don't persist it)
                 ctrls.add(spinTopN);
                 // "Transfer as needed" - when a row in the batch would otherwise fail because the
                 // local base is short on Tiberium, fall back to transfer-and-upgrade (cheapest sources
@@ -2288,7 +2312,12 @@
                     alignY: "middle",
                     toolTipText: "When a row in the batch would otherwise fail because the local base is short on Tiberium, transfer from your other bases (cheapest first) before upgrading. Skipped if no transfer plan covers the gap or you can't afford the transfer fee. Off by default - transfers cost credits."
                 });
-                cbTopXfer.addListener("changeValue", function (e) { MM.settings.set("BaseTools.UpgradeTopXfer", !!e.getData()); });
+                cbTopXfer.addListener("changeValue", function (e) {
+                    MM.settings.set("BaseTools.UpgradeTopXfer", !!e.getData());
+                    // Live-refresh (re-runs the dry-run so buttons + feasibility update) and reset the
+                    // top-N value, since toggling transfers changes how many rows will succeed.
+                    try { renderRows(); resetTopNToDefault(); } catch (err) {}
+                });
                 ctrls.add(cbTopXfer);
 
                 // On-grid overlay (Ctrl-hold). Default ON. Salvaged from xTr1m's Base Overlay
@@ -2303,6 +2332,9 @@
                 ctrls.add(cbOverlay);
                 var btnUpgradeTop = new qx.ui.form.Button("Go").set({ toolTipText: "Upgrade the top N rows in the list below (in the current sort order). Re-validates each row before firing it so resource drains from earlier rows are accounted for; if 'Transfer as needed' is on, will transfer Tiberium in from other bases when the local base is short." });
                 ctrls.add(btnUpgradeTop);
+                // Live feasibility hint next to Go: "N of M will succeed" - kept current by renderRows.
+                var feasHint = new qx.ui.basic.Label("").set({ alignY: "middle", textColor: "#9fd49f", paddingLeft: 4 });
+                ctrls.add(feasHint);
                 page.add(ctrls);
 
                 var infoLbl = new qx.ui.basic.Label("").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#aaaaaa" });
@@ -2437,6 +2469,8 @@
                         for (var ki = 0; ki < kids.length; ki++) { try { kids[ki].destroy(); } catch (e) {} }
                     } catch (e) {}
 
+                    computeFeasibility(); // cumulative dry-run -> each row's _feasible verdict (drives cells + Go)
+
                     // header
                     for (var c = 0; c < COLS.length; c++) grid.add(headerLabel(COLS[c], c), { row: 0, column: c });
                     grid.add(new qx.ui.basic.Label("<b>Action</b>").set({ rich: true, textColor: "#ffffff" }), { row: 0, column: ACTION_COL });
@@ -2444,6 +2478,7 @@
                     var rows = sortedData();
                     if (!rows.length) {
                         grid.add(new qx.ui.basic.Label("(nothing to show - try the 'Show' filter, e.g. 'All candidates')").set({ textColor: "#888888" }), { row: 1, column: 0, colSpan: ACTION_COL + 1 });
+                        updateTopNControls();
                         return;
                     }
                     for (var r = 0; r < rows.length; r++) {
@@ -2457,6 +2492,7 @@
                         }
                         grid.add(makeUpgradeCell(cand), { row: rowIdx, column: ACTION_COL });
                     }
+                    updateTopNControls();
                 }
 
                 // Mark a candidate done/failed so the indicator survives a re-sort, then update its live cell.
@@ -2491,41 +2527,182 @@
                     });
                 }
 
+                // ===== feasibility dry-run (cumulative) ==============================================
+                // Walk the SORTED list top-to-bottom against a simulated ledger of every base's Tiberium
+                // & Power plus the player's credits, deducting as each row "fires". Each row records a
+                // verdict in cand._feasible: "upgrade" (local), "transfer" (pull Tib in), or "blocked"
+                // (+reason). This is what makes the preview honest: a row that looks affordable on its own
+                // can still be blocked because the rows ABOVE it drain the base first.
+                var lastFeasibleCount = 0, lastActiveCount = 0;
+
+                // planTransfer against LEDGER balances, so two rows can't spend the same source Tiberium.
+                function simPlanTransfer(cand, tib) {
+                    try {
+                        var ERT = ClientLib.Base.EResourceType;
+                        var ETradeNone = ClientLib.Data.ETradeError.None;
+                        var target = getCityById(cand.cityId);
+                        if (!target) return { feasible: false };
+                        if (target.CanTrade && target.CanTrade() !== ETradeNone) return { feasible: false };
+                        var have = (tib[cand.cityId] != null) ? tib[cand.cityId] : 0;
+                        var need = Math.ceil((cand.costTib || 0) - have);
+                        if (need <= 0) return { feasible: true, plan: [], totalCost: 0, need: 0 };
+                        var tx = target.get_PosX(), ty = target.get_PosY(), sources = [];
+                        eachOwnCity(function (c) {
+                            var id = c.get_Id();
+                            if (id === cand.cityId) return;
+                            if (c.get_IsGhostMode && c.get_IsGhostMode()) return;
+                            if (c.CanTrade && c.CanTrade() !== ETradeNone) return;
+                            var avail = (tib[id] != null) ? Math.floor(tib[id]) : 0;
+                            if (avail <= 0) return;
+                            var perUnit = Infinity;
+                            try { var cf = c.CalculateTradeCostToCoord(tx, ty, avail); if (avail > 0) perUnit = cf / avail; } catch (e) {}
+                            sources.push({ id: id, avail: avail, perUnit: perUnit, city: c });
+                        });
+                        sources.sort(function (a, b) { return a.perUnit - b.perUnit; });
+                        var plan = [], remaining = need, totalCost = 0;
+                        for (var i = 0; i < sources.length && remaining > 0; i++) {
+                            var amt = Math.min(sources[i].avail, remaining);
+                            if (amt <= 0) continue;
+                            var cost = 0;
+                            try { cost = sources[i].city.CalculateTradeCostToCoord(tx, ty, amt); } catch (e) {}
+                            plan.push({ id: sources[i].id, amount: amt, cost: cost });
+                            totalCost += cost; remaining -= amt;
+                        }
+                        if (remaining > 0) return { feasible: false };
+                        return { feasible: true, plan: plan, totalCost: totalCost, need: need };
+                    } catch (e) { werr("simPlanTransfer:", e); return { feasible: false }; }
+                }
+
+                function computeFeasibility() {
+                    try {
+                        var ERT = ClientLib.Base.EResourceType;
+                        var xferOn = cbTopXfer.getValue();
+                        var tib = {}, pow = {}, credits = playerCredits();
+                        eachOwnCity(function (c) {
+                            var id = c.get_Id();
+                            try { tib[id] = c.GetResourceCount(ERT.Tiberium); pow[id] = c.GetResourceCount(ERT.Power); } catch (e) {}
+                        });
+                        // soLocal/soXfer = could this row be done on its OWN (full live resources)? Used to
+                        // tell a cumulative-drain block (works alone) from a genuinely-impossible one.
+                        function mkBlocked(cand, soLocal, soXfer, reason, xferoff, xcost) {
+                            cand._feasible = {
+                                kind: "blocked", reason: reason || null, xferoff: !!xferoff,
+                                drain: (soLocal || soXfer) && !xferoff,   // would work alone; the batch drains it
+                                viaTransfer: (!soLocal && soXfer),
+                                transferCost: xferoff ? (xcost != null ? xcost : null) : ((!soLocal && soXfer) ? cand.transferCost : null)
+                            };
+                        }
+                        var arr = sortedData(), feasible = 0, active = 0;
+                        for (var i = 0; i < arr.length; i++) {
+                            var cand = arr[i];
+                            if (doneState[cand.id]) { cand._feasible = null; continue; }
+                            active++;
+                            var cid = cand.cityId, costTib = cand.costTib || 0, costPow = cand.costPow || 0;
+                            var powHave = (pow[cid] != null) ? pow[cid] : Infinity;
+                            var tibHave = (tib[cid] != null) ? tib[cid] : 0;
+                            var soLocal = (cand.state === 1), soXfer = (cand.state === 2 && cand.transferQualified);
+                            if (costPow && powHave < costPow) { mkBlocked(cand, soLocal, soXfer, "not enough power"); continue; }
+                            if (!costTib || tibHave >= costTib) {
+                                cand._feasible = { kind: "upgrade" };
+                                tib[cid] = tibHave - costTib; pow[cid] = powHave - costPow; feasible++; continue;
+                            }
+                            if (!xferOn) {
+                                if (soLocal) { mkBlocked(cand, soLocal, soXfer, "base drained by the upgrades above"); }
+                                else {
+                                    var p0 = simPlanTransfer(cand, tib);
+                                    if (p0 && p0.feasible) mkBlocked(cand, soLocal, soXfer, null, true, p0.totalCost);
+                                    else mkBlocked(cand, soLocal, soXfer, "no base can transfer enough Tiberium");
+                                }
+                                continue;
+                            }
+                            var pl = simPlanTransfer(cand, tib);
+                            if (!pl.feasible) { mkBlocked(cand, soLocal, soXfer, "no base can transfer enough Tiberium"); continue; }
+                            if (credits < pl.totalCost) { mkBlocked(cand, soLocal, soXfer, "can't afford transfer fee (" + MM.num.compact(Math.round(pl.totalCost), 1) + ")"); continue; }
+                            cand._feasible = { kind: "transfer", transferCost: pl.totalCost };
+                            for (var k = 0; k < pl.plan.length; k++) tib[pl.plan[k].id] = (tib[pl.plan[k].id] || 0) - pl.plan[k].amount;
+                            tib[cid] = (tibHave + pl.need) - costTib; pow[cid] = powHave - costPow; credits -= pl.totalCost; feasible++;
+                        }
+                        lastFeasibleCount = feasible; lastActiveCount = active;
+                    } catch (e) { werr("computeFeasibility:", e); }
+                    return lastFeasibleCount;
+                }
+
+                // Reflect the dry-run in the top-N controls: max never exceeds what will succeed, the hint
+                // shows the count, and Go is disabled when nothing is feasible.
+                function updateTopNControls() {
+                    try {
+                        var fc = lastFeasibleCount;
+                        suppressSpinSave = true;
+                        spinTopN.setMaximum(Math.max(0, fc));
+                        if (spinTopN.getValue() > fc) spinTopN.setValue(Math.max(0, fc));
+                        suppressSpinSave = false;
+                        if (feasHint) {
+                            // Only show the hint when something IS feasible; "0 will succeed" is just noise
+                            // (Go is already disabled), and it was the hard-to-read yellow line.
+                            feasHint.setValue(fc > 0
+                                ? (fc + " of " + lastActiveCount + " will succeed" + (cbTopXfer.getValue() ? " (via transfers)" : ""))
+                                : "");
+                            feasHint.setTextColor("#9fd49f");
+                        }
+                        if (btnUpgradeTop) btnUpgradeTop.setEnabled(fc > 0);
+                    } catch (e) {}
+                }
+
+                // Reset the spinner to the user's default ceiling (5), capped at what's feasible. Called on
+                // Refresh and when "Transfer as needed" is toggled (per the requested behaviour).
+                function resetTopNToDefault() {
+                    try {
+                        var fc = lastFeasibleCount, ceiling = MM.settings.get("BaseTools.UpgradeTopN", 5);
+                        suppressSpinSave = true;
+                        spinTopN.setMaximum(Math.max(0, fc));
+                        spinTopN.setValue(Math.min(ceiling, Math.max(0, fc)));
+                        suppressSpinSave = false;
+                    } catch (e) {}
+                }
+
+                // A clickable action button (⬆ Upgrade / ⇄ Transfer & Upgrade). `warn` flags a row that
+                // works on its own but would fail inside a batch (drained by the rows above).
+                function makeActionButton(cand, viaTransfer, fee, warn) {
+                    var label = viaTransfer ? ("⇄ Transfer & Upgrade" + (fee != null ? " (" + fmtNum(fee) + ")" : "")) : "⬆ Upgrade";
+                    var tip = viaTransfer
+                        ? ("Pull the missing Tiberium from your other bases (cheapest first), then upgrade.\nTransfer fee: " + fmtNum(fee || 0) + " credits.")
+                        : "Upgrade this building now";
+                    if (warn) {
+                        // Colour ONLY the warning glyph (rich label); the rest of the button stays as-is.
+                        // Red = it will fail if batched. (Swap #ff5b5b for #ffd23f to make it yellow.)
+                        label = "<span style='color:#ff5b5b'>⚠</span> " + label;
+                        tip = "Works on its OWN, but the upgrades above drain this base first - it will FAIL if you batch them with Go. Lower 'Upgrade top', or click this row by itself.\n\n" + tip;
+                    }
+                    var btn = new qx.ui.form.Button(label).set({ appearance: "button-text-small", rich: !!warn, toolTipText: tip });
+                    cand._btn = btn;
+                    btn.addListener("execute", function () { doUpgrade(cand, viaTransfer); });
+                    return btn;
+                }
+
                 function makeUpgradeCell(cand) {
                     // Already acted on this render-cycle? Show the sticky status as a readable badge.
                     if (doneState[cand.id]) {
                         var ok = doneState[cand.id] === "done";
                         return makeBadge(ok ? "✓ Upgraded" : "✗ failed", ok ? "#bff5bf" : "#ffc9c9", ok ? "#1e4d1e" : "#5a1e1e");
                     }
-                    if (cand.state === 1) {
-                        var btn = new qx.ui.form.Button("⬆ Upgrade").set({ appearance: "button-text-small", toolTipText: "Upgrade this building now" });
-                        cand._btn = btn;
-                        btn.addListener("execute", function () { doUpgrade(cand, false); });
-                        return btn;
+                    // The Action column previews exactly what Go would do, from the cumulative dry-run.
+                    var fv = cand._feasible;
+                    if (fv && fv.kind === "upgrade") return makeActionButton(cand, false, null, false);
+                    if (fv && fv.kind === "transfer") return makeActionButton(cand, true, fv.transferCost, false);
+                    if (fv && fv.kind === "blocked") {
+                        if (fv.xferoff) {
+                            // Needs a transfer, but "Transfer as needed" is off: disabled ⇄ button + hint.
+                            return new qx.ui.form.Button("⇄ Transfer & Upgrade" + (fv.transferCost != null ? " (" + fmtNum(fv.transferCost) + ")" : "")).set({
+                                appearance: "button-text-small", enabled: false,
+                                toolTipText: "Needs a Tiberium transfer" + (fv.transferCost != null ? " (" + fmtNum(fv.transferCost) + " credits)" : "") + ". Tick \"Transfer as needed\" above to allow it."
+                            });
+                        }
+                        if (fv.drain) return makeActionButton(cand, !!fv.viaTransfer, fv.transferCost, true);
+                        return makeBadge("⚠ " + (fv.reason || "blocked"), "#ffd2a6", "#5a3a14", fv.reason || "Can't be upgraded right now");
                     }
-                    // state 2: offer Transfer & Upgrade ONLY when pre-qualified (transfers can cover the
-                    // shortfall AND the player can afford the credit fee). The fee is shown on the button
-                    // and in the sortable "Xfer $" column.
-                    if (cand.state === 2 && cand.transferQualified) {
-                        var costStr = (cand.transferCost != null) ? " (" + fmtNum(cand.transferCost) + ")" : "";
-                        var tbtn = new qx.ui.form.Button("⇄ Transfer & Upgrade" + costStr).set({
-                            appearance: "button-text-small",
-                            toolTipText: "Pull the missing Tiberium from your other bases (cheapest first), then upgrade.\nTransfer fee: " + fmtNum(cand.transferCost || 0) + " credits."
-                        });
-                        cand._btn = tbtn;
-                        tbtn.addListener("execute", function () { doUpgrade(cand, true); });
-                        return tbtn;
-                    }
-                    // state 3, or a transfer that doesn't qualify (can't cover it, or can't afford the fee).
-                    // Show the countdown to when it'll be affordable (from this base's own production).
-                    // Rendered as a dark badge with bright text so it stays readable on any row background
-                    // (the window's row colour shifts between light/dark depending on focus, which is what
-                    // made plain coloured text hard to read).
-                    var waitTip = (cand.state === 2)
-                        ? "Could be covered by transfer, but you can't afford the transfer fee right now"
-                        : "Affordable in about " + (cand.etaSeconds > 0 ? fmtTime(cand.etaSeconds) : "?") + " from this base's production";
+                    // No verdict (state-3 wait, or sim unavailable): show the production countdown badge.
                     var waitTxt = (cand.etaSeconds > 0) ? ("⏳ " + fmtTime(cand.etaSeconds)) : "wait";
-                    return makeBadge(waitTxt, "#ffe08a", "#4a3814", waitTip);
+                    return makeBadge(waitTxt, "#ffe08a", "#4a3814", "Affordable in about " + (cand.etaSeconds > 0 ? fmtTime(cand.etaSeconds) : "?") + " from this base's production");
                 }
 
                 // ---- batch upgrade: walk the visible, sorted rows; re-validate each before firing ----
@@ -2570,14 +2747,47 @@
                     } catch (e) { werr("liveEvalCandidate:", e); return { action: 'skip', reason: 'eval error - see console' }; }
                 }
 
+                // After an accepted upgrade, the spent Tiberium drains a tick LATE. The NEXT row's
+                // liveEvalCandidate reads this base's Tiberium to decide upgrade-vs-transfer; if it reads
+                // before the drain lands it sees the count stale-HIGH (still topped up from the previous
+                // transfer), wrongly picks a plain upgrade instead of transfer+upgrade, and the server
+                // then rejects it for lack of Tiberium. That's the "every other row failed" pattern. So
+                // instead of a fixed delay the server can outrun, wait for the drain to actually land
+                // (poll until the count drops by ~half the cost) before starting the next row.
+                function waitForDrain(cand, cb) {
+                    try {
+                        var ERT = ClientLib.Base.EResourceType;
+                        var city = getCityById(cand.cityId);
+                        if (!city || !cand.costTib) { window.setTimeout(cb, 250); return; }
+                        var before = city.GetResourceCount(ERT.Tiberium);
+                        var landed = before - cand.costTib * 0.5; // drain has landed once it's dropped this far
+                        var tries = 0;
+                        (function poll() {
+                            tries++;
+                            var c = getCityById(cand.cityId);
+                            var now = c ? c.GetResourceCount(ERT.Tiberium) : 0;
+                            if (now <= landed || tries >= 16) { cb(); return; } // ~4s cap as a safety net
+                            window.setTimeout(poll, 250);
+                        })();
+                    } catch (e) { werr("waitForDrain:", e); window.setTimeout(cb, 400); }
+                }
+
                 function upgradeTopN(n) {
                     if (batchRunning) return;
-                    // Snapshot the queue from the current sort order. We DON'T pre-filter by state
-                    // anymore - liveEvalCandidate revisits each row's state at execute time so resource
-                    // drains from earlier rows propagate.
-                    var queue = sortedData().filter(function (c) { return !doneState[c.id]; }).slice(0, n);
-                    if (!queue.length) { infoLbl.setValue("Nothing to upgrade."); return; }
                     var xferOn = cbTopXfer.getValue();
+                    // Re-run the dry-run, then queue ONLY rows it says will succeed (in order). This is
+                    // what makes a batch fail-proof: blocked rows are never queued, so they can't eat a
+                    // slot or fail. liveEvalCandidate below still re-checks each row as a safety net.
+                    computeFeasibility();
+                    var queue = sortedData().filter(function (c) {
+                        return !doneState[c.id] && c._feasible && (c._feasible.kind === "upgrade" || c._feasible.kind === "transfer");
+                    }).slice(0, n);
+                    if (!queue.length) {
+                        infoLbl.setValue(!xferOn
+                            ? "Nothing to upgrade without transfers - tick \"Transfer as needed\" to allow them, or wait for this base to produce more Tiberium."
+                            : "Nothing to upgrade right now - not enough resources (or credits for the transfer fees).");
+                        return;
+                    }
                     batchRunning = true;
                     var i = 0, processed = 0, transferred = 0, failed = 0, skipped = 0;
                     var lastSkipReason = "";
@@ -2617,10 +2827,12 @@
                             markDone(cand, ok);
                             if (ok) { processed++; if (viaTransfer) transferred++; }
                             else { failed++; }
-                            // Settle before the next row so its liveEval reads accurate post-spend totals
-                            // (an upgrade's resource drain confirms a tick late; reading too soon over-
-                            // approves the next row and the server then rejects it). Longer after a transfer.
-                            window.setTimeout(step, viaTransfer ? 600 : 400);
+                            // Settle before the next row so its liveEval reads accurate post-spend totals.
+                            // On a successful Tib-spending upgrade, wait for the drain to ACTUALLY land
+                            // (effect-confirmed) rather than a fixed delay the server can outrun - this is
+                            // what fixes the "every other transfer row failed" race. Otherwise pace briefly.
+                            if (ok && cand.costTib) { waitForDrain(cand, step); }
+                            else { window.setTimeout(step, viaTransfer ? 600 : 400); }
                         });
                     }
                     step();
@@ -2675,6 +2887,7 @@
                         var aff = 0, xfer = 0;
                         for (var i = 0; i < data.length; i++) { if (data[i].state === 1) aff++; else if (data[i].state === 2 && data[i].transferQualified) xfer++; }
                         infoLbl.setValue(data.length + " candidate(s), " + aff + " upgradeable now" + (xfer ? ", " + xfer + " via transfer" : "") + ". Click a column header to sort (try 'Xfer $' for cheapest transfers).");
+                        resetTopNToDefault(); // default ceiling (5), capped at what the dry-run says is feasible
                     } catch (e) { werr("upgrade refreshTab failed:", e); }
                 }
 
@@ -2700,7 +2913,10 @@
                     MM.settings.set("BaseTools.UpgradeResourceFilter", sel ? sel.getModel() : "All");
                     refreshTab();
                 });
-                spinTopN.addListener("changeValue", function (e) { MM.settings.set("BaseTools.UpgradeTopN", Number(e.getData()) || 5); });
+                spinTopN.addListener("changeValue", function (e) {
+                    if (suppressSpinSave || suppressFilterEvents) return; // ignore our own programmatic clamps/resets
+                    MM.settings.set("BaseTools.UpgradeTopN", Number(e.getData()) || 5);
+                });
                 btnUpgradeTop.addListener("execute", function () { upgradeTopN(spinTopN.getValue()); });
                 page.addListener("appear", refreshTab);
                 // "Current Base" follow: when the player switches bases in-game, re-render for the new base
