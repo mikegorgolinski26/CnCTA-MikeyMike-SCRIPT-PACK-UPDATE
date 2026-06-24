@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.12
+// @version         1.4.13
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -2068,9 +2068,10 @@
                     { k: "Pow", title: "Power",      third: "Alliance Bonus" },
                     { k: "Dol", title: "Credits ($)", third: "Total / BaseLevel" }
                 ];
-                var RED = "#ff8a8a";    // readable red for stopped/held/excluded values
-                var TOTAL = "#5ab9ff";  // "Total / h" accent - light blue, far easier to read on the
-                                        // dark panel than the old yellow (Mike's request)
+                var RED = "#ff9d3c";    // high-contrast orange for stopped/held/excluded/zero values
+                                        // (replaced the dim red; Mike picked it from the live preview)
+                var TOTAL = "#6ee07a";  // "Total / h" accent - bright green, far easier to read on the
+                                        // dark panel than the old yellow / light blue (Mike's pick)
 
                 function snapshot() {
                     try {
@@ -2153,9 +2154,9 @@
                     addLbl(row++, 0, "");
                     for (var s = 0; s < SECTIONS.length; s++) {
                         addLbl(row++, 0, SECTIONS[s].title, { bold: true, color: "#ffffff" });
-                        addLbl(row++, 0, "Package Production",    { color: "#c8c8c8" });
-                        addLbl(row++, 0, "Continuous Production", { color: "#c8c8c8" });
-                        addLbl(row++, 0, SECTIONS[s].third,       { color: "#c8c8c8" });
+                        addLbl(row++, 0, "Package Production",    { color: "#a9c4e0", bold: true });
+                        addLbl(row++, 0, "Continuous Production", { color: "#a9c4e0", bold: true });
+                        addLbl(row++, 0, SECTIONS[s].third,       { color: "#a9c4e0", bold: true });
                         addLbl(row++, 0, "Total / h",             { color: TOTAL, big: true });
                     }
                     addLbl(row, 0, ""); // access-button row
