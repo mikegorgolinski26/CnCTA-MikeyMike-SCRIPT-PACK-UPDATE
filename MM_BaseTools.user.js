@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.11
+// @version         1.4.12
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -88,6 +88,13 @@
                 }
             } catch (e) { werr("eachOwnCity iteration failed:", e); }
         }
+
+        // Sort comparator that matches the game's own "creation order" (the order the in-game
+        // Player Info > Bases list uses by default). The server assigns base ids incrementally as
+        // bases are founded, so ascending numeric id == creation order. Used for the Production
+        // columns and the base dropdowns so they read in the same order as Player Info instead of
+        // a name sort (where "Destroyer 1.10" wrongly sorts before "Destroyer 1.3").
+        function byCreated(a, b) { return (Number(a.id) || 0) - (Number(b.id) || 0); }
 
         // Aggregate counts: how many bases have collectable packages / repairable units / repairable buildings.
         // The repair-availability check needs a Vis.Mode (City for buildings, ArmySetup for units), exactly
@@ -2061,7 +2068,9 @@
                     { k: "Pow", title: "Power",      third: "Alliance Bonus" },
                     { k: "Dol", title: "Credits ($)", third: "Total / BaseLevel" }
                 ];
-                var RED = "#ff8a8a"; // readable red for stopped/held/excluded values
+                var RED = "#ff8a8a";    // readable red for stopped/held/excluded values
+                var TOTAL = "#5ab9ff";  // "Total / h" accent - light blue, far easier to read on the
+                                        // dark panel than the old yellow (Mike's request)
 
                 function snapshot() {
                     try {
@@ -2084,8 +2093,8 @@
                             };
                             cities.push({ name: name, id: id, stopped: stopped, pkgStopped: pkgStopped, baseLevel: baseLevel, perRes: perRes });
                         });
-                        // Sort cities by name for stable column order.
-                        cities.sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+                        // Order columns by creation order (matches the in-game Player Info > Bases list).
+                        cities.sort(byCreated);
                         // Per-resource grand totals. Killed (ghost) bases are excluded ENTIRELY - they
                         // aren't producing. For a base whose packages are on hold (cooldown after a
                         // rebuild), the package bonus is excluded too (it isn't being produced yet).
@@ -2110,7 +2119,9 @@
                     opts = opts || {};
                     var lbl = new qx.ui.basic.Label(text == null ? "" : String(text));
                     if (opts.color) lbl.setTextColor(opts.color);
-                    if (opts.bold) { try { lbl.setFont(qx.bom.Font.fromString("bold 11px sans-serif")); } catch (e) {} }
+                    // opts.big = the emphasized Total / h rows (bold + a touch larger so they stand out).
+                    if (opts.big) { try { lbl.setFont(qx.bom.Font.fromString("bold 12px sans-serif")); } catch (e) {} }
+                    else if (opts.bold) { try { lbl.setFont(qx.bom.Font.fromString("bold 11px sans-serif")); } catch (e) {} }
                     if (opts.align) lbl.setTextAlign(opts.align);
                     if (opts.width) lbl.setWidth(opts.width);
                     grid.add(lbl, { row: row, column: col });
@@ -2142,10 +2153,10 @@
                     addLbl(row++, 0, "");
                     for (var s = 0; s < SECTIONS.length; s++) {
                         addLbl(row++, 0, SECTIONS[s].title, { bold: true, color: "#ffffff" });
-                        addLbl(row++, 0, "Package Production",    { color: "#aaaaaa" });
-                        addLbl(row++, 0, "Continuous Production", { color: "#aaaaaa" });
-                        addLbl(row++, 0, SECTIONS[s].third,       { color: "#aaaaaa" });
-                        addLbl(row++, 0, "Total / h",             { color: "#cccccc", bold: true });
+                        addLbl(row++, 0, "Package Production",    { color: "#c8c8c8" });
+                        addLbl(row++, 0, "Continuous Production", { color: "#c8c8c8" });
+                        addLbl(row++, 0, SECTIONS[s].third,       { color: "#c8c8c8" });
+                        addLbl(row++, 0, "Total / h",             { color: TOTAL, big: true });
                     }
                     addLbl(row, 0, ""); // access-button row
 
@@ -2159,25 +2170,26 @@
                             var sec = SECTIONS[sIdx];
                             var p = c.perRes[sec.k];
                             r++; // skip section-header row (only the left col has text there)
+                            // All value cells are bold for legibility (Mike's request).
                             // Row 1: Package Production (= bonus). Red+excluded if base killed OR packages held.
                             var pkgRed = c.stopped || c.pkgStopped || p.bonus === 0;
-                            addLbl(r++, col, fmt(p.bonus), { align: "right", color: pkgRed ? RED : "#ffffff", bold: pkgRed });
+                            addLbl(r++, col, fmt(p.bonus), { align: "right", color: pkgRed ? RED : "#ffffff", bold: true });
                             // Row 2: Continuous Production (= delta). Red if base killed.
                             var contRed = c.stopped || p.delta === 0;
-                            addLbl(r++, col, fmt(p.delta), { align: "right", color: contRed ? RED : "#ffffff", bold: contRed });
+                            addLbl(r++, col, fmt(p.delta), { align: "right", color: contRed ? RED : "#ffffff", bold: true });
                             // Row 3: Alliance Bonus (POI) - or Total/BaseLevel for Credits.
                             if (sec.k === "Dol") {
                                 var perLvl = c.baseLevel > 0 ? (p.delta + p.bonus + p.poi) / c.baseLevel : 0;
-                                addLbl(r++, col, fmt(perLvl), { align: "right", color: c.stopped ? RED : "#ffffff", bold: c.stopped });
+                                addLbl(r++, col, fmt(perLvl), { align: "right", color: c.stopped ? RED : "#ffffff", bold: true });
                             } else {
                                 var poiRed = c.stopped || p.poi === 0;
-                                addLbl(r++, col, fmt(p.poi), { align: "right", color: poiRed ? RED : "#ffffff", bold: poiRed });
+                                addLbl(r++, col, fmt(p.poi), { align: "right", color: poiRed ? RED : "#ffffff", bold: true });
                             }
                             // Row 4: Total / h. Killed base shows its raw potential in red (excluded from
                             // grand totals); a packages-held base excludes the held package bonus.
                             var baseTotal = c.stopped ? (p.delta + p.bonus + p.poi)
                                                       : (p.delta + p.poi + (c.pkgStopped ? 0 : p.bonus));
-                            addLbl(r++, col, fmt(baseTotal), { align: "right", bold: true, color: c.stopped ? RED : "#ffe14d" });
+                            addLbl(r++, col, fmt(baseTotal), { align: "right", big: true, color: c.stopped ? RED : TOTAL });
                         }
                         grid.add(accessBtn(c.id), { row: r, column: col });
                         col++;
@@ -2185,7 +2197,7 @@
 
                     // Grand-totals column.
                     var tr = 0;
-                    addLbl(tr++, col, "Total / h", { bold: true, align: "right", color: "#ffe14d" });
+                    addLbl(tr++, col, "Total / h", { big: true, align: "right", color: TOTAL });
                     for (var ti = 0; ti < SECTIONS.length; ti++) {
                         var tk = SECTIONS[ti].k;
                         var T = snap.totals[tk] || { delta: 0, bonus: 0, poi: 0, total: 0 };
@@ -2194,7 +2206,7 @@
                         addLbl(tr++, col, fmt(T.delta), { align: "right", bold: true }); // Continuous Production
                         if (tk === "Dol") { tr++; } // Total/BaseLevel is per-base only, blank in grand totals
                         else { addLbl(tr++, col, fmt(T.poi), { align: "right", bold: true }); } // Alliance Bonus
-                        addLbl(tr++, col, fmt(T.total), { align: "right", bold: true, color: "#ffe14d" });
+                        addLbl(tr++, col, fmt(T.total), { align: "right", big: true, color: TOTAL });
                     }
                 }
 
@@ -2252,7 +2264,7 @@
                                 list.push({ id: String(c.get_Id()), name: c.get_Name() });
                             } catch (e) {}
                         });
-                        list.sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+                        list.sort(byCreated); // creation order (matches Player Info > Bases)
                         var sel = (prev === "current") ? curItem : allItem;
                         for (var i = 0; i < list.length; i++) {
                             var it = new qx.ui.form.ListItem(list[i].name); it.setModel(list[i].id); baseSelect.add(it);
@@ -2964,7 +2976,7 @@
                         var itC = new qx.ui.form.ListItem("Current base"); itC.setModel("current"); baseSelect.add(itC);
                         var list = [];
                         eachOwnCity(function (c) { try { if (c.get_IsGhostMode && c.get_IsGhostMode()) return; list.push({ id: String(c.get_Id()), name: c.get_Name() }); } catch (e) {} });
-                        list.sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+                        list.sort(byCreated); // creation order (matches Player Info > Bases)
                         var sel = itC;
                         for (var i = 0; i < list.length; i++) { var it = new qx.ui.form.ListItem(list[i].name); it.setModel(list[i].id); baseSelect.add(it); if (list[i].id === prev) sel = it; }
                         baseSelect.setSelection([sel]);
