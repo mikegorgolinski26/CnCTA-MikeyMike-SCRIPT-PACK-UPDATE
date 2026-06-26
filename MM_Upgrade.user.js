@@ -5,7 +5,7 @@
 // @contributor     NetquiK (https://github.com/netquik)
 // @translator      ES: Nefrontheone
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.2
+// @version         1.1.3
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
@@ -116,17 +116,22 @@
             };
         }
 
-        // Plan a transfer of `amount` of one EResourceType to targetCity. Cheapest per-unit-credit
-        // source first; pulls only as much as needed from each source. Returns {feasible, plan,
-        // totalCost, need} or {feasible:false, reason}. (Mirrors MM - Base Tools' planTransfer
-        // pattern; generalised for any ERT and standalone so MM - Upgrade doesn't depend on
-        // MM - Base Tools per the no-cross-script-deps rule.)
-        function planResourceTransfer(targetCity, ert, amount) {
+        // Plan a BEST-EFFORT transfer of up to `amount` of one EResourceType to targetCity. Cheapest
+        // per-unit-credit source first; pulls only as much as needed from each source, and never more
+        // than `creditBudget` worth of trade fees (pass null/Infinity for no cap). Unlike a strict
+        // planner this NEVER fails for "not enough" - it moves as much as is available AND affordable
+        // so the caller can then upgrade "as many as fit" instead of all-or-nothing. (Mike's request:
+        // "All army units" should survey total crystal across bases and grab the max it can.)
+        // Returns { plan:[{source,amount,cost}], totalCost, moved, need, full, reason }:
+        //   moved  = units actually planned for transfer (0 if nothing available/affordable)
+        //   full   = true if the whole `amount` is covered
+        //   reason = set only for a hard block (target can't trade / error); "" otherwise.
+        function planBestEffortTransfer(targetCity, ert, amount, creditBudget) {
+            var out = { plan: [], totalCost: 0, moved: 0, need: Math.max(0, Math.ceil(amount || 0)), full: false, reason: "" };
             try {
                 var ETradeNone = ClientLib.Data.ETradeError.None;
-                if (targetCity.CanTrade && targetCity.CanTrade() !== ETradeNone) return { feasible: false, reason: "target base cannot trade right now" };
-                var need = Math.ceil(amount);
-                if (need <= 0) return { feasible: true, plan: [], totalCost: 0, need: 0 };
+                if (targetCity.CanTrade && targetCity.CanTrade() !== ETradeNone) { out.reason = "target base cannot trade right now"; return out; }
+                if (out.need <= 0) { out.full = true; return out; }
                 var tx = targetCity.get_PosX(), ty = targetCity.get_PosY();
                 var sources = [];
                 var arr = ClientLib.Data.MainData.GetInstance().get_Cities().get_AllCities();
@@ -146,19 +151,32 @@
                     } catch (e) {}
                 }
                 sources.sort(function (a, b) { return a.perUnit - b.perUnit; });
-                var plan = [], remaining = need, totalCost = 0;
-                for (var i = 0; i < sources.length && remaining > 0; i++) {
-                    var amt = Math.min(sources[i].have, remaining);
+                var remaining = out.need, budget = (creditBudget == null || !isFinite(creditBudget)) ? Infinity : creditBudget;
+                for (var i = 0; i < sources.length && remaining > 0 && budget > 0; i++) {
+                    var s = sources[i];
+                    var amt = Math.min(s.have, remaining);
                     if (amt <= 0) continue;
                     var cost = 0;
-                    try { cost = sources[i].city.CalculateTradeCostToCoord(tx, ty, amt); } catch (e) {}
-                    plan.push({ source: sources[i].city, amount: amt, cost: cost });
-                    totalCost += cost;
+                    try { cost = s.city.CalculateTradeCostToCoord(tx, ty, amt); } catch (e) {}
+                    if (cost > budget) {
+                        // Credit budget can't cover the full pull from this source - take only what the
+                        // remaining budget affords (per-unit estimate), then verify the exact fee.
+                        var perU = (s.perUnit && isFinite(s.perUnit) && s.perUnit > 0) ? s.perUnit : (amt > 0 ? cost / amt : Infinity);
+                        var affordAmt = Math.floor(budget / perU);
+                        if (affordAmt <= 0) break;
+                        amt = Math.min(amt, affordAmt);
+                        try { cost = s.city.CalculateTradeCostToCoord(tx, ty, amt); } catch (e) {}
+                        if (cost > budget || amt <= 0) break;
+                    }
+                    out.plan.push({ source: s.city, amount: amt, cost: cost });
+                    out.totalCost += cost;
+                    out.moved += amt;
                     remaining -= amt;
+                    budget -= cost;
                 }
-                if (remaining > 0) return { feasible: false, reason: "not enough across all bases" };
-                return { feasible: true, plan: plan, totalCost: totalCost, need: need };
-            } catch (e) { werr("planResourceTransfer:", e); return { feasible: false, reason: "error - see console" }; }
+                out.full = (remaining <= 0);
+                return out;
+            } catch (e) { werr("planBestEffortTransfer:", e); out.reason = "error - see console"; return out; }
         }
 
         // Execute one resource's transfer plan (sequential SelfTrade commands), then poll the target's
@@ -201,11 +219,14 @@
         }
 
         // Top-level helper used by the section onUpgrade handlers. If transfer-as-needed is OFF, just
-        // calls fireUpgrade() and we're done (matches the original behaviour). If ON, computes the
-        // shortfall in Tib/Cry, plans + runs transfers to cover it, then fires the upgrade. Power
-        // shortfalls always fall through (game upgrades what fits). `setStatus(html)` is the callback
-        // used to surface progress to the user (transfer status label in the panel footer); pass a
-        // no-op if you don't care.
+        // calls fireUpgrade() and we're done (matches the original behaviour). If ON, it surveys the
+        // Tib/Cry shortfall for the WHOLE batch, pulls in as much as is available across every base
+        // (within the credit budget for trade fees), then fires the upgrade so the game upgrades as
+        // many units/buildings as now fit. Crucially it does NOT give up when the bases can't cover
+        // the entire batch - it grabs the maximum and lets the engine upgrade what fits (Mike's
+        // request: clicking "All army units" with crystal short should still upgrade every unit it
+        // can, not nothing). Power isn't transferable, so a power shortage just falls through.
+        // `setStatus(html)` surfaces progress to the panel-footer label; pass a no-op if you don't care.
         function upgradeWithMaybeTransfer(totalCosts, setStatus, fireUpgrade) {
             try {
                 if (!transferOn()) { fireUpgrade(); return; }
@@ -215,33 +236,54 @@
                 var short = localShortfall(city, totalCosts);
                 if (short.tib <= 0 && short.cry <= 0) { fireUpgrade(); return; }
                 var ERT = ClientLib.Base.EResourceType;
-                var plans = [];
-                if (short.tib > 0) {
-                    var pT = planResourceTransfer(city, ERT.Tiberium, short.tib);
-                    if (!pT.feasible) { setStatus("<span style='color:#ffd54f;font-weight:bold'>Tiberium short and " + pT.reason + " - upgrading what fits.</span>"); fireUpgrade(); return; }
-                    plans.push({ ert: ERT.Tiberium, plan: pT, label: "Tiberium" });
-                }
-                if (short.cry > 0) {
-                    var pC = planResourceTransfer(city, ERT.Crystal, short.cry);
-                    if (!pC.feasible) { setStatus("<span style='color:#ffd54f;font-weight:bold'>Crystal short and " + pC.reason + " - upgrading what fits.</span>"); fireUpgrade(); return; }
-                    plans.push({ ert: ERT.Crystal, plan: pC, label: "Crystal" });
-                }
-                var totalCost = 0;
-                for (var k = 0; k < plans.length; k++) totalCost += plans[k].plan.totalCost;
                 var credits = 0;
                 try { credits = ClientLib.Data.MainData.GetInstance().get_Player().GetCreditsCount(); } catch (e) {}
-                if (credits < totalCost) { setStatus("<span style='color:#ffd54f;font-weight:bold'>Can't afford transfer fee (" + Math.round(totalCost) + " credits) - upgrading what fits.</span>"); fireUpgrade(); return; }
-                setStatus("Transferring " + plans.length + " resource type(s), fee " + Math.round(totalCost) + " credits...");
+
+                // Plan best-effort transfers for each short resource, sharing one credit budget so the
+                // fees never exceed what we can pay. (In practice only one of Tib/Cry is short per
+                // mode: army/defense = Crystal, buildings = Tiberium.)
+                var specs = [];
+                if (short.tib > 0) specs.push({ ert: ERT.Tiberium, need: short.tib, label: "Tiberium" });
+                if (short.cry > 0) specs.push({ ert: ERT.Crystal,  need: short.cry, label: "Crystal" });
+                var budget = credits, plans = [], anyPartial = false, hardReason = "";
+                for (var s = 0; s < specs.length; s++) {
+                    var sp = specs[s];
+                    var be = planBestEffortTransfer(city, sp.ert, sp.need, budget);
+                    if (be.reason && be.plan.length === 0) { hardReason = sp.label + ": " + be.reason; }
+                    if (be.plan.length > 0) {
+                        plans.push({ ert: sp.ert, plan: { plan: be.plan, need: be.moved }, label: sp.label });
+                        budget -= be.totalCost;
+                    }
+                    if (!be.full) anyPartial = true;
+                }
+
+                if (plans.length === 0) {
+                    // Nothing could be transferred (no spare resources across bases, can't trade, or no
+                    // credits for the fee). Fire anyway so the game upgrades whatever local resources
+                    // already cover - honest about why nothing moved.
+                    setStatus("<span style='color:#ff9d3c;font-weight:bold'>" + (hardReason || "No transferable resources within your credit budget") + " - upgrading what fits.</span>");
+                    fireUpgrade();
+                    return;
+                }
+
+                var totalFee = credits - budget;
+                setStatus("Transferring max available (" + plans.length + " resource type" + (plans.length > 1 ? "s" : "") + ", fee ~" + Math.round(totalFee) + " credits)...");
                 var pi = 0;
                 function nextPlan() {
                     if (pi >= plans.length) {
-                        setStatus("<span style='color:#7ee07e'>Transfers complete - upgrading.</span>");
-                        window.setTimeout(function () { fireUpgrade(); window.setTimeout(function () { setStatus(""); }, 2500); }, 400);
+                        // All planned transfers attempted - now upgrade everything that fits. One
+                        // UpgradeAll*ToLevel pass spends the topped-up pool greedily (we already pulled
+                        // ALL available resources, so a second pass couldn't add anything).
+                        setStatus(anyPartial
+                            ? "<span style='color:#6ee07a;font-weight:bold'>Transferred all available - upgrading as many as fit.</span>"
+                            : "<span style='color:#6ee07a;font-weight:bold'>Transfers complete - upgrading.</span>");
+                        window.setTimeout(function () { fireUpgrade(); window.setTimeout(function () { setStatus(""); }, 3000); }, 400);
                         return;
                     }
                     var pp = plans[pi++];
                     runTransferPlan(city, pp.ert, pp.plan, function (ok) {
-                        if (!ok) { setStatus("<span style='color:#ffd54f;font-weight:bold'>" + pp.label + " transfer didn't arrive in time - upgrading what fits.</span>"); fireUpgrade(); return; }
+                        // Even if a plan doesn't fully land in time, keep going and upgrade what arrived.
+                        if (!ok) setStatus("<span style='color:#ff9d3c;font-weight:bold'>" + pp.label + " didn't fully arrive - upgrading what fits.</span>");
                         nextPlan();
                     });
                 }
