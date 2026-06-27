@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.30
+// @version         1.4.31
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -1126,8 +1126,8 @@
             // shrinks the search space. (Silos are shared by Tib/Cry; PowerPlants by Pow/Dol - inherent
             // contention, accepted for single-objective optimize.)
             var RES_CFG = {
-                Tib: { mod: MOD.Tib, label: "Tiberium", movable: function (b) { return (b.techName === "Harvester" && b.harvRes === "Tib") || b.techName === "Silo"; } },
-                Cry: { mod: MOD.Cry, label: "Crystal",  movable: function (b) { return (b.techName === "Harvester" && b.harvRes === "Cry") || b.techName === "Silo"; } },
+                Tib: { mod: MOD.Tib, label: "Tiberium", movable: function (b) { return b.techName === "Harvester" || b.techName === "Silo"; } },
+                Cry: { mod: MOD.Cry, label: "Crystal",  movable: function (b) { return b.techName === "Harvester" || b.techName === "Silo"; } },
                 Pow: { mod: MOD.Pow, label: "Power",    movable: function (b) { return b.techName === "PowerPlant" || b.techName === "Accumulator"; } },
                 Dol: { mod: MOD.Dol, label: "Credits",  movable: function (b) { return b.techName === "Refinery" || b.techName === "PowerPlant"; } }
             };
@@ -1305,6 +1305,39 @@
                     if (calibCross) wlog("OPT: calibrated " + calibCross + " link(s) via cross-level fallback (no same-level sibling existed)");
                     if (calibWarn) wlog("OPT: " + calibWarn + " link(s) could not be calibrated (no connected sibling at any level) - excluded from scoring");
 
+                    // Harvesters are resource-AGNOSTIC: the SAME harvester produces tiberium on a tiberium
+                    // field or crystal on a crystal field (moving one between field types just changes what it
+                    // harvests - and resets its in-progress package). The live data only gives a harvester the
+                    // production link for the resource it CURRENTLY harvests, so the optimizer couldn't score
+                    // (or allow) relocating it to the other field type - it would build a NEW harvester instead.
+                    // Give every harvester BOTH a Tib and a Cry production link (the missing one cloned from a
+                    // sibling harvester of that type, perConn scaled to THIS harvester's level), so scoreForMod
+                    // naturally computes its output from whichever field it sits on, and the move search can
+                    // relocate it. A harvester surrounded by tib tiles scores tib via its Tib link and ~0
+                    // crystal (no adjacent crystal tiles), and vice-versa - so this is correct, not a fudge.
+                    var harvRefLt = {};   // mod -> a representative {lt,max} from any harvester that harvests it
+                    for (var hr = 0; hr < order.length; hr++) { var hb = buildings[order[hr]];
+                        if (hb.techName !== "Harvester") continue;
+                        [MOD.Tib, MOD.Cry].forEach(function (mod) {
+                            if (harvRefLt[mod]) return;
+                            var ls = hb.links[mod]; if (!ls) return;
+                            for (var j = 0; j < ls.length; j++) if (ls[j].perConn > 0) { harvRefLt[mod] = { lt: ls[j].lt, max: ls[j].max }; break; }
+                        });
+                    }
+                    var harvCross = 0;
+                    for (var hk = 0; hk < order.length; hk++) { var hb2 = buildings[order[hk]];
+                        if (hb2.techName !== "Harvester") continue;
+                        [MOD.Tib, MOD.Cry].forEach(function (mod) {
+                            if (hb2.links[mod] && hb2.links[mod].length) return;   // already has this resource's link
+                            var ref = harvRefLt[mod]; if (!ref) return;            // no sibling harvests this resource -> can't synthesize
+                            var pc = calibrateAcrossLevels("Harvester", hb2.level, ref.lt);
+                            if (pc == null || !(pc > 0)) return;
+                            hb2.links[mod] = [{ lt: ref.lt, max: ref.max, perConn: pc }];
+                            harvCross++;
+                        });
+                    }
+                    if (harvCross) wlog("OPT: gave " + harvCross + " harvester(s) their cross-resource production link (so they can be relocated tib<->crystal)");
+
                     // Classify producers (have this mod) and movable buildings (this resource's set).
                     var producers = [], movable = [];
                     for (var i3 = 0; i3 < order.length; i3++) { var b3 = buildings[order[i3]];
@@ -1463,10 +1496,7 @@
             // tile, and NO non-harvester building may occupy a field tile. Everything else goes on NONE.
             function terrainOK(snap, b, x, y) {
                 var terr = snap.terrain[y][x];
-                if (b.techName === "Harvester") {
-                    if (b.harvRes === "Cry") return terr === "CRYSTAL";
-                    return terr === "TIBERIUM"; // default/Tib harvester
-                }
+                if (b.techName === "Harvester") return terr === "TIBERIUM" || terr === "CRYSTAL"; // a harvester works on EITHER field type (production follows the field it's on)
                 return terr === "NONE"; // non-harvesters: clear ground only (never on a field tile)
             }
             function legalFor(snap, g, b, x, y) {
@@ -2326,13 +2356,18 @@
                     occ[tx + "," + ty] = "VIRT";
                 });
 
-                // Package-progress loss (count each moved building once, even if staged = 2 steps).
-                // Count distinct moved buildings (a staged move = 2 steps for one building). Moving is free
-                // in-game (verified: it does NOT reset package progress), so there's no loss to warn about.
-                var seen = {};
+                // Moving a building is free and does NOT reset its package - EXCEPT a harvester moved onto a
+                // DIFFERENT field type (tiberium<->crystal): that switches what it harvests and resets its
+                // in-progress package (per Mike). Count those so the confirm dialog can warn.
+                var seen = {}, nPkgReset = 0;
                 steps.forEach(function (st) { if (st.type === "move") seen[st.id] = 1; });
+                (res.moves || []).forEach(function (m) {
+                    var b = snap.buildings[m.id]; if (!b || b.techName !== "Harvester") return;
+                    var ft = snap.terrain[m.fromY] && snap.terrain[m.fromY][m.fromX], tt = snap.terrain[m.toY] && snap.terrain[m.toY][m.toX];
+                    if (ft && tt && ft !== tt) nPkgReset++;
+                });
                 return { ok: true, steps: steps, nMoves: Object.keys(seen).length, nSells: (res.sells || []).length,
-                         nStaged: steps.filter(function (s) { return s.staged; }).length,
+                         nStaged: steps.filter(function (s) { return s.staged; }).length, nPkgReset: nPkgReset,
                          nBuilds: (res.builds || []).length, builds: (res.builds || []) };
             }
 
@@ -3721,6 +3756,9 @@
                 function typeColor(b) { if (b.techName === "Harvester") return b.harvRes === "Cry" ? "#8fc4ff" : "#8fe08f"; return { Silo: "#dddddd", PowerPlant: "#ece28a", Accumulator: "#d8b0ff", Refinery: "#e6c08f" }[b.techName] || "#bbbbbb"; }
                 function terrBg(t) { return t === "TIBERIUM" ? "#173117" : (t === "CRYSTAL" ? "#152340" : (t === "NONE" ? "#2a2a2a" : "#101010")); }
                 function iconUrlOf(snap, b) { var I = snap.icons || {}; if (b.techName === "Harvester") return b.harvRes === "Cry" ? I.HarvCry : I.HarvTib; return I[b.techName] || null; }
+                // A harvester shown at tile (terr) displays as whatever it harvests THERE - so a crystal
+                // harvester relocated onto a tiberium field shows as a (green) tiberium harvester, not blue.
+                function harvAtTerr(b, terr) { if (!b || b.techName !== "Harvester") return b; var hr = terr === "CRYSTAL" ? "Cry" : (terr === "TIBERIUM" ? "Tib" : b.harvRes); if (hr === b.harvRes) return b; var c = {}; for (var k in b) c[k] = b[k]; c.harvRes = hr; return c; }
 
                 // A single grid cell built with a Canvas layout so we can stack: terrain bg, building icon
                 // (or letter), level (bottom-right), and a move/sell badge (top-left).
@@ -3773,18 +3811,19 @@
 
                     for (var ry = 0; ry < OPT.GRID_H; ry++) for (var rx = 0; rx < OPT.GRID_W; rx++) {
                         var b = occ[ry][rx], terr = snap.terrain[ry][rx], key = rx + "," + ry, cell;
+                        var bd = harvAtTerr(b, terr);   // display harvesters as the resource of the field they sit on
                         if (b && builtAt[key]) {
                             var nb = builtAt[key];
-                            cell = makeCell({ iconUrl: iconUrlOf(snap, b), text: iconUrlOf(snap, b) ? null : abbrOf(b), fg: typeColor(b),
+                            cell = makeCell({ iconUrl: iconUrlOf(snap, bd), text: iconUrlOf(snap, bd) ? null : abbrOf(bd), fg: typeColor(bd),
                                 level: nb.level, bg: "#0e3a44", border: "#4dd0e1", borderWidth: 2,
                                 badge: "+", badgeBg: "#0d7a8c", badgeFg: "#d6fbff",
-                                tip: "BUILD NEW " + nameOf(b) + " -> L" + nb.level + " @ " + rx + ":" + ry });
+                                tip: "BUILD NEW " + nameOf(bd) + " -> L" + nb.level + " @ " + rx + ":" + ry });
                         } else if (b) {
                             var n = moved[b.id];
-                            cell = makeCell({ iconUrl: iconUrlOf(snap, b), text: iconUrlOf(snap, b) ? null : abbrOf(b), fg: typeColor(b),
+                            cell = makeCell({ iconUrl: iconUrlOf(snap, bd), text: iconUrlOf(snap, bd) ? null : abbrOf(bd), fg: typeColor(bd),
                                 level: b.level, bg: n ? "#1e6e1e" : terrBg(terr), border: n ? "#7ee07e" : "#000000", borderWidth: n ? 2 : 1,
                                 badge: n || null, badgeBg: "#1e6e1e", badgeFg: "#eaffea",
-                                tip: nameOf(b) + " L" + b.level + " @ " + rx + ":" + ry + (n ? " (moves here - #" + n + ")" : "") });
+                                tip: nameOf(bd) + " L" + b.level + " @ " + rx + ":" + ry + (n ? " (moves here - #" + n + ")" : "") });
                         } else if (soldAt[key]) {
                             var sb = soldAt[key];
                             cell = makeCell({ iconUrl: iconUrlOf(snap, sb), text: iconUrlOf(snap, sb) ? null : abbrOf(sb), dim: true, bg: "#4a1414", border: "#ff8a8a", borderWidth: 2,
@@ -3933,7 +3972,9 @@
                         var mv = collapsible("<b style='color:#ffffff'>Moves (" + res.moves.length + ")</b> <span style='color:#7f7f7f'>&mdash; click to expand</span>", false);
                         for (var i = 0; i < res.moves.length; i++) {
                             var m = res.moves[i], dist = Math.max(Math.abs(m.toX - m.fromX), Math.abs(m.toY - m.fromY));
-                            mv.body.add(new qx.ui.basic.Label("<b>" + (i + 1) + "</b>. " + nameOf(m) + " L" + m.level + "  <b>" + dirArrow(m.toX - m.fromX, m.toY - m.fromY) + "</b> " + dist + (dist === 1 ? " tile" : " tiles")).set({ rich: true, textColor: "#e6e6e6", toolTipText: m.fromX + ":" + m.fromY + " -> " + m.toX + ":" + m.toY }));
+                            var destTerr = res.snapshot && res.snapshot.terrain[m.toY] ? res.snapshot.terrain[m.toY][m.toX] : null;
+                            var dm = harvAtTerr(m, destTerr), switched = (dm !== m);   // harvester relocated to the other field type
+                            mv.body.add(new qx.ui.basic.Label("<b>" + (i + 1) + "</b>. " + nameOf(dm) + " L" + m.level + "  <b>" + dirArrow(m.toX - m.fromX, m.toY - m.fromY) + "</b> " + dist + (dist === 1 ? " tile" : " tiles") + (switched ? " <span style='color:#ffb74d'>(now harvests " + (dm.harvRes === "Cry" ? "Crystal" : "Tiberium") + ")</span>" : "")).set({ rich: true, textColor: "#e6e6e6", toolTipText: m.fromX + ":" + m.fromY + " -> " + m.toX + ":" + m.toY }));
                         }
                         box.add(mv.wrap);
                     } else {
@@ -3994,6 +4035,9 @@
                         win.add(new qx.ui.basic.Label("<span style='color:#ffb74d'>Note: build &amp; upgrade are queued as game commands; the new building appears immediately and upgrades complete over time. Make sure the demolition refund covers the cost.</span>").set({ rich: true, wrap: true, allowGrowX: true }));
                     }
 
+                    if (plan.nPkgReset) {
+                        win.add(new qx.ui.basic.Label("<span style='color:#ffb74d'>&#9888; " + plan.nPkgReset + " harvester" + (plan.nPkgReset === 1 ? "" : "s") + " will switch field type (tiberium &harr; crystal) - this <b>resets that harvester's in-progress package</b>. Continuous production still improves; you just lose the partial package.</span>").set({ rich: true, wrap: true, allowGrowX: true }));
+                    }
 
                     win.add(new qx.ui.core.Spacer(null, 4));
                     var btnRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8, "right"));
@@ -4086,7 +4130,17 @@
                             if (forceSell.length) res = await OPT.optimizeMultiBuild(city, resKey, opts, forceSell);
                             else if (sellN >= 2) res = await OPT.optimizeMultiReplace(city, resKey, opts, sellN);  // sell up to N economy -> build a producer per sell (self-funded)
                             else if (sellN > 0) res = await OPT.optimizeWithReplace(city, resKey, opts, sellN);     // exactly 1 sell + 1 build (verified path)
-                            else res = await OPT.optimizeMultiBuild(city, resKey, opts, []);   // free-slot build (stored-funded); falls back to moves-only if no open slot
+                            else {
+                                // Default (no selling): compare building into free slots vs just MOVING existing
+                                // buildings. Prefer moves when they get ~the same result - moves are free, spend
+                                // no stored resources, and can't fail a build/harvester cap. This is what makes
+                                // it RELOCATE an idle harvester onto an empty tib field instead of (failing to)
+                                // build a brand-new one there. Building still wins when it genuinely adds more
+                                // (e.g. a Power producer in a free slot, which no move can create).
+                                var built = await OPT.optimizeMultiBuild(city, resKey, opts, []);
+                                var moved = OPT.optimize(city, resKey, opts);
+                                res = (moved && moved.ok && moved.projected >= ((built && built.ok) ? built.projected * 0.995 : 0)) ? moved : built;
+                            }
                         }
                         catch (e) { werr("OPT optimize threw:", e); res = { ok: false, reason: "internal error (see console)" }; }
                         try {
