@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.23
+// @version         1.4.24
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -1561,6 +1561,13 @@
                 return { startPos: startPos, startScore: startScore, bestPos: best, bestScore: bestScore };
             }
 
+            // Cooperative yield: the layout search is pure JS that reads live game objects mid-loop, so it
+            // can't move to a Web Worker - instead the optimize* entry points are async and `await yieldUI()`
+            // between heavy chunks (each runSearch is short; it's dozens back-to-back that froze the page and
+            // tripped Chrome's "Page Unresponsive" watchdog). setTimeout(0) hands a macrotask back to the
+            // browser so it can paint the "Optimizing..." status and stay responsive.
+            function yieldUI() { return new Promise(function (r) { window.setTimeout(r, 0); }); }
+
             // Build the move list (buildings that actually moved) given start + best positions over `mov`.
             // movableList override is used by allowReductions mode where the search ranged over a wider
             // building set than snap.movable.
@@ -1628,7 +1635,7 @@
             // producers into the freed space, and keep the single demolition that yields the highest target
             // production - but only if it actually beats the running best (so it won't recommend pointless
             // sells). Returns the standard result + sells:[{id,techName,harvRes,level,x,y}].
-            function optimizeWithSell(city, resKey, opts, sellN) {
+            async function optimizeWithSell(city, resKey, opts, sellN) {
                 opts = opts || {};
                 var snap = snapshot(city, resKey);
                 if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
@@ -1668,13 +1675,16 @@
                         var r = runSearch(snap, bestRemoved, lightOpts, salt++);
                         delete bestRemoved[id];
                         if (!roundBest || r.bestScore > roundBest.bestScore) { roundBest = r; roundBestId = id; }
+                        if ((i & 3) === 3) await yieldUI();   // breathe every few candidate sells
                     }
                     if (roundBestId < 0 || roundBest.bestScore <= bestScore + 1e-6) break;
                     bestRemoved[roundBestId] = true;
                     var sb = snap.buildings[roundBestId];
                     sells.push({ id: roundBestId, techName: sb.techName, harvRes: sb.harvRes, level: sb.level, x: sb.x, y: sb.y });
                     bestScore = roundBest.bestScore;
+                    await yieldUI();
                 }
+                await yieldUI();
                 var polishOpts = mkSearchOpts({ restarts: 5 });
                 bestR = runSearch(snap, bestRemoved, polishOpts, 99);
                 var moves = diffMoves(snap, bestR.startPos, bestR.bestPos, bestRemoved, polishOpts.movableList);
@@ -1781,7 +1791,7 @@
 
             // Optimize the target resource allowing ONE self-funded sell->build->upgrade. Falls back to
             // optimizeWithSell when no build beats it. Returns the standard result + builds:[...].
-            function optimizeWithReplace(city, resKey, opts, sellN) {
+            async function optimizeWithReplace(city, resKey, opts, sellN) {
                 opts = opts || {};
                 if (!costApi()) return optimizeWithSell(city, resKey, opts, sellN);  // no cost data -> plain sell
                 var snap = snapshot(city, resKey);
@@ -1794,7 +1804,7 @@
                 var targetMod = RES_CFG[resKey].mod;
 
                 // Baseline to beat = plain optimize (+sells). Our fallback if no build helps.
-                var baseResult = optimizeWithSell(city, resKey, opts, sellN || 0);
+                var baseResult = await optimizeWithSell(city, resKey, opts, sellN || 0);
 
                 // Compound score for ranking candidates vs the baseline (matches the search metric).
                 function compound(aug, pos, removed, pls) {
@@ -1813,69 +1823,75 @@
                 var maxLvlCap = 1; for (var oi = 0; oi < snap.order.length; oi++) maxLvlCap = Math.max(maxLvlCap, N(snap.buildings[snap.order[oi]].level));
                 var cands = BUILD_CANDIDATES[resKey] || [];
                 var lightOpts = { rounds: Math.min(opts.rounds || 30, 20), kicks: 1, maxNeighbors: opts.maxNeighbors, restarts: 2 };
-                // The search RNG is seeded from snap.order.length (see mkRnd), so a single seed can make a
-                // strong candidate under-score and get dropped - that was the "no recommendation on one run,
-                // +36% on the next" flakiness. Evaluate each candidate over several seeds and keep its BEST,
-                // so one unlucky chain can't veto a good plan. SCAN = cheap candidate scan; POLISH = winner.
-                var SCAN_SEEDS = 3, POLISH_SEEDS = 2;
-                // Score one sell+build candidate over SCAN_SEEDS independent seeds; return its best compound.
-                function scanCandidate(aug, removed, movableList, scoreFn, pls, baseSalt) {
+                // The search RNG seeds off snap.order.length (see mkRnd), so a single seed can make a strong
+                // candidate under-score and get dropped - the "no recommendation on one run, +36% on the next"
+                // flakiness. We run the cheap candidate scan at ONE seed (fast, keeps the page responsive) and
+                // only ESCALATE to extra seeds when that pass found NO build worth recommending - so we pay for
+                // robustness only when a single seed would otherwise have (wrongly) returned "nothing".
+                // Score one sell+build candidate over `seeds` independent seeds; return its best compound.
+                function scanCandidate(aug, removed, movableList, scoreFn, pls, baseSalt, seeds) {
                     var sBest = -Infinity;
-                    for (var sd = 0; sd < SCAN_SEEDS; sd++) {
+                    for (var sd = 0; sd < seeds; sd++) {
                         var r = runSearch(aug, removed, { rounds: lightOpts.rounds, kicks: lightOpts.kicks, maxNeighbors: lightOpts.maxNeighbors, restarts: lightOpts.restarts, movableList: movableList, scoreFn: scoreFn }, baseSalt + sd * 9973);
                         var sc = compound(aug, r.bestPos, removed, pls);
                         if (sc > sBest) sBest = sc;
                     }
                     return sBest;
                 }
+                // One full sweep over every (candidate tech x distinct sellable building) at `seeds` seeds each.
+                // Resets best/bestScore to the baseline floor so an escalation pass can re-find a winner. Async
+                // so it can yield to the browser between candidate evaluations (no main-thread freeze).
+                async function scanAll(seeds) {
+                    best = null; bestScore = baseScore;
+                    for (var ci = 0; ci < cands.length; ci++) {
+                        var techName = cands[ci];
+                        var harvRes = (techName === "Harvester") ? (resKey === "Cry" ? "Cry" : "Tib") : null;
+                        var refB = refSiblingFor(snap, techName, harvRes);
+                        if (!refB || !refB.obj) continue;
+                        var seenSell = {};
+                        for (var si = 0; si < snap.order.length; si++) {
+                            var S = snap.buildings[snap.order[si]];
+                            if (S.virtual || !SELLABLE[S.techName] || !S.obj) continue;
+                            if (producesTarget(S, targetMod)) continue;            // only sell non-target buildings
+                            var skey = S.techName + "|" + (S.harvRes || "") + "|" + N(S.level);
+                            if (seenSell[skey]) continue; seenSell[skey] = 1;       // one representative per (tech,level)
+                            var refund = refundFor(S.obj, N(S.level)); if (!refund) continue;
+                            var fundedL = maxFundedLevel(refB.obj, refund, maxLvlCap); if (fundedL < 1) continue;
 
-                for (var ci = 0; ci < cands.length; ci++) {
-                    var techName = cands[ci];
-                    var harvRes = (techName === "Harvester") ? (resKey === "Cry" ? "Cry" : "Tib") : null;
-                    var refB = refSiblingFor(snap, techName, harvRes);
-                    if (!refB || !refB.obj) continue;
+                            var removed = {}; removed[S.id] = true;
+                            var Vtmp = makeVirtual(refB, fundedL, N(S.x), N(S.y)), startXY = null;
+                            if (terrainOK(snap, Vtmp, N(S.x), N(S.y))) startXY = { x: N(S.x), y: N(S.y) };
+                            else { var empt = emptyTiles(snap, buildOcc(snap, startPosFor(snap, removed), removed));
+                                   for (var ei = 0; ei < empt.length; ei++) if (terrainOK(snap, Vtmp, empt[ei].x, empt[ei].y)) { startXY = empt[ei]; break; } }
+                            if (!startXY) continue;
 
-                    var seenSell = {};
-                    for (var si = 0; si < snap.order.length; si++) {
-                        var S = snap.buildings[snap.order[si]];
-                        if (S.virtual || !SELLABLE[S.techName] || !S.obj) continue;
-                        if (producesTarget(S, targetMod)) continue;            // only sell non-target buildings
-                        var skey = S.techName + "|" + (S.harvRes || "") + "|" + N(S.level);
-                        if (seenSell[skey]) continue; seenSell[skey] = 1;       // one representative per (tech,level)
-                        var refund = refundFor(S.obj, N(S.level)); if (!refund) continue;
-                        var fundedL = maxFundedLevel(refB.obj, refund, maxLvlCap); if (fundedL < 1) continue;
-
-                        var removed = {}; removed[S.id] = true;
-                        var Vtmp = makeVirtual(refB, fundedL, N(S.x), N(S.y)), startXY = null;
-                        if (terrainOK(snap, Vtmp, N(S.x), N(S.y))) startXY = { x: N(S.x), y: N(S.y) };
-                        else { var empt = emptyTiles(snap, buildOcc(snap, startPosFor(snap, removed), removed));
-                               for (var ei = 0; ei < empt.length; ei++) if (terrainOK(snap, Vtmp, empt[ei].x, empt[ei].y)) { startXY = empt[ei]; break; } }
-                        if (!startXY) continue;
-
-                        var V = makeVirtual(refB, fundedL, startXY.x, startXY.y);
-                        var aug = augmentSnap(snap, V), pls = buildProdLists(aug), movableList = widenMovable(aug);
-                        var scoreFn = allowReductions ? makeMultiScoreFn(aug, resKey, baselines, alpha, pls) : makeStrictScoreFn(aug, resKey, baselines, pls);
-                        var sc = scanCandidate(aug, removed, movableList, scoreFn, pls, si * 7 + ci + 1);
-                        if (sc > bestScore + 1e-6) {
-                            bestScore = sc;
-                            best = { S: S, refB: refB, fundedL: fundedL, refund: refund, startXY: startXY };
+                            var V = makeVirtual(refB, fundedL, startXY.x, startXY.y);
+                            var aug = augmentSnap(snap, V), pls = buildProdLists(aug), movableList = widenMovable(aug);
+                            var scoreFn = allowReductions ? makeMultiScoreFn(aug, resKey, baselines, alpha, pls) : makeStrictScoreFn(aug, resKey, baselines, pls);
+                            var sc = scanCandidate(aug, removed, movableList, scoreFn, pls, si * 7 + ci + 1, seeds);
+                            if (sc > bestScore + 1e-6) {
+                                bestScore = sc;
+                                best = { S: S, refB: refB, fundedL: fundedL, refund: refund, startXY: startXY };
+                            }
+                            await yieldUI();   // breathe between candidate evaluations
                         }
                     }
                 }
 
+                await scanAll(1);                 // fast first pass (one seed)
+                if (!best) await scanAll(3);      // escalate on miss: a "nothing" result may be one unlucky seed
+
                 if (!best) { wlog("optimizeWithReplace: no build beat the plain baseline; returning baseResult"); return baseResult; }   // nothing beats plain sell/optimize
 
-                // Polish the winning candidate over several seeds; keep the best layout it finds (seed-robust).
+                // Polish the winning candidate (restarts:5 is already robust); monotonic floor below catches a
+                // rare under-find. Single seed here - the escalation above already de-flaked candidate SELECTION.
                 var removedW = {}; removedW[best.S.id] = true;
                 var Vw = makeVirtual(best.refB, best.fundedL, best.startXY.x, best.startXY.y);
                 var augW = augmentSnap(snap, Vw), plsW = buildProdLists(augW), movW = widenMovable(augW);
                 var scoreFnW = allowReductions ? makeMultiScoreFn(augW, resKey, baselines, alpha, plsW) : makeStrictScoreFn(augW, resKey, baselines, plsW);
-                var pr = null, prScore = -Infinity;
-                for (var psd = 0; psd < POLISH_SEEDS; psd++) {
-                    var prTry = runSearch(augW, removedW, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5, movableList: movW, scoreFn: scoreFnW }, 99 + psd * 9973);
-                    var prTryScore = compound(augW, prTry.bestPos, removedW, plsW);
-                    if (prTryScore > prScore) { prScore = prTryScore; pr = prTry; }
-                }
+                await yieldUI();
+                var pr = runSearch(augW, removedW, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5, movableList: movW, scoreFn: scoreFnW }, 99);
+                var prScore = compound(augW, pr.bestPos, removedW, plsW);
                 // Monotonic floor: if the polished winner somehow scores below the plain baseline (rare
                 // heuristic under-find), return the baseline instead of a worse plan - a wider "Sell up to N"
                 // must never produce a result worse than a narrower one.
@@ -1938,7 +1954,7 @@
             //    funded by the base's STORED Tiberium + Power, upgraded as high as that affords. No selling.
             // Placement: greedily drop one producer into the best empty tile per round (no mid-placement
             // rearrange). Leveling: spend the budget greedily by target-gain-per-cost across the new builds.
-            function optimizeMultiBuild(city, resKey, opts, forceSellTechs) {
+            async function optimizeMultiBuild(city, resKey, opts, forceSellTechs) {
                 opts = opts || {};
                 var snap = snapshot(city, resKey);
                 if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
@@ -2024,6 +2040,7 @@
                     if (bestAdd.cand.tech === "Harvester") fieldsLeft--; else slotsLeft--;
                     aug = augmentSnap(aug, bestAdd.V); virtuals.push({ V: bestAdd.V, cand: bestAdd.cand });
                     committed.tib += bestAdd.l1.tib; committed.pow += bestAdd.l1.pow; curScore = bestAdd.sc;
+                    await yieldUI();   // breathe between placement rounds (each scans cands x empty tiles)
                 }
                 if (!virtuals.length) {
                     if (freeSlotMode) return optimize(city, resKey, opts);   // free slot but nothing worth building -> just moves
@@ -3859,7 +3876,7 @@
                         + (allowReductions && !forceSell.length ? " (allowing reductions)" : "")
                         + "...");
                     MM.settings.set("BaseTools.OptResource", resKey);
-                    window.setTimeout(function () {
+                    window.setTimeout(async function () {
                         var res, opts = {
                             rounds: spRounds.getValue(), maxNeighbors: spNeigh.getValue(), kicks: spKicks.getValue(),
                             allowReductions: allowReductions
@@ -3867,9 +3884,11 @@
                         try {
                             // force-sell special buildings -> multi-build; else any sell auto-considers a self-funded
                             // build (optimizeWithReplace falls back to plain sell when no build wins); else plain optimize.
-                            if (forceSell.length) res = OPT.optimizeMultiBuild(city, resKey, opts, forceSell);
-                            else if (sellN > 0) res = OPT.optimizeWithReplace(city, resKey, opts, sellN);
-                            else res = OPT.optimizeMultiBuild(city, resKey, opts, []);   // free-slot build (stored-funded); falls back to moves-only if no open slot
+                            // These are async (they yield to the browser between search chunks so the page stays
+                            // responsive instead of tripping the "Page Unresponsive" watchdog) - so await them.
+                            if (forceSell.length) res = await OPT.optimizeMultiBuild(city, resKey, opts, forceSell);
+                            else if (sellN > 0) res = await OPT.optimizeWithReplace(city, resKey, opts, sellN);
+                            else res = await OPT.optimizeMultiBuild(city, resKey, opts, []);   // free-slot build (stored-funded); falls back to moves-only if no open slot
                         }
                         catch (e) { werr("OPT optimize threw:", e); res = { ok: false, reason: "internal error (see console)" }; }
                         try {
