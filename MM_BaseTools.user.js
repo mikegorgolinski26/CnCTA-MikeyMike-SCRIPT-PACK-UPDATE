@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.22
+// @version         1.4.23
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -1807,11 +1807,27 @@
                     return t - alpha * pen;
                 }
                 var bestScore = (baseResult && baseResult.ok) ? compound(baseResult.snapshot || snap, baseResult.bestPos, baseResult.removed || null, buildProdLists(baseResult.snapshot || snap)) : -Infinity;
+                var baseScore = bestScore;   // monotonic floor: the plain-baseline compound; we never return worse
                 var best = null;
 
                 var maxLvlCap = 1; for (var oi = 0; oi < snap.order.length; oi++) maxLvlCap = Math.max(maxLvlCap, N(snap.buildings[snap.order[oi]].level));
                 var cands = BUILD_CANDIDATES[resKey] || [];
                 var lightOpts = { rounds: Math.min(opts.rounds || 30, 20), kicks: 1, maxNeighbors: opts.maxNeighbors, restarts: 2 };
+                // The search RNG is seeded from snap.order.length (see mkRnd), so a single seed can make a
+                // strong candidate under-score and get dropped - that was the "no recommendation on one run,
+                // +36% on the next" flakiness. Evaluate each candidate over several seeds and keep its BEST,
+                // so one unlucky chain can't veto a good plan. SCAN = cheap candidate scan; POLISH = winner.
+                var SCAN_SEEDS = 3, POLISH_SEEDS = 2;
+                // Score one sell+build candidate over SCAN_SEEDS independent seeds; return its best compound.
+                function scanCandidate(aug, removed, movableList, scoreFn, pls, baseSalt) {
+                    var sBest = -Infinity;
+                    for (var sd = 0; sd < SCAN_SEEDS; sd++) {
+                        var r = runSearch(aug, removed, { rounds: lightOpts.rounds, kicks: lightOpts.kicks, maxNeighbors: lightOpts.maxNeighbors, restarts: lightOpts.restarts, movableList: movableList, scoreFn: scoreFn }, baseSalt + sd * 9973);
+                        var sc = compound(aug, r.bestPos, removed, pls);
+                        if (sc > sBest) sBest = sc;
+                    }
+                    return sBest;
+                }
 
                 for (var ci = 0; ci < cands.length; ci++) {
                     var techName = cands[ci];
@@ -1839,8 +1855,7 @@
                         var V = makeVirtual(refB, fundedL, startXY.x, startXY.y);
                         var aug = augmentSnap(snap, V), pls = buildProdLists(aug), movableList = widenMovable(aug);
                         var scoreFn = allowReductions ? makeMultiScoreFn(aug, resKey, baselines, alpha, pls) : makeStrictScoreFn(aug, resKey, baselines, pls);
-                        var r = runSearch(aug, removed, { rounds: lightOpts.rounds, kicks: lightOpts.kicks, maxNeighbors: lightOpts.maxNeighbors, restarts: lightOpts.restarts, movableList: movableList, scoreFn: scoreFn }, si * 7 + ci + 1);
-                        var sc = compound(aug, r.bestPos, removed, pls);
+                        var sc = scanCandidate(aug, removed, movableList, scoreFn, pls, si * 7 + ci + 1);
                         if (sc > bestScore + 1e-6) {
                             bestScore = sc;
                             best = { S: S, refB: refB, fundedL: fundedL, refund: refund, startXY: startXY };
@@ -1848,14 +1863,23 @@
                     }
                 }
 
-                if (!best) return baseResult;   // nothing beats plain sell/optimize
+                if (!best) { wlog("optimizeWithReplace: no build beat the plain baseline; returning baseResult"); return baseResult; }   // nothing beats plain sell/optimize
 
-                // Polish the winning candidate from scratch (fresh restarts).
+                // Polish the winning candidate over several seeds; keep the best layout it finds (seed-robust).
                 var removedW = {}; removedW[best.S.id] = true;
                 var Vw = makeVirtual(best.refB, best.fundedL, best.startXY.x, best.startXY.y);
                 var augW = augmentSnap(snap, Vw), plsW = buildProdLists(augW), movW = widenMovable(augW);
                 var scoreFnW = allowReductions ? makeMultiScoreFn(augW, resKey, baselines, alpha, plsW) : makeStrictScoreFn(augW, resKey, baselines, plsW);
-                var pr = runSearch(augW, removedW, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5, movableList: movW, scoreFn: scoreFnW }, 99);
+                var pr = null, prScore = -Infinity;
+                for (var psd = 0; psd < POLISH_SEEDS; psd++) {
+                    var prTry = runSearch(augW, removedW, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5, movableList: movW, scoreFn: scoreFnW }, 99 + psd * 9973);
+                    var prTryScore = compound(augW, prTry.bestPos, removedW, plsW);
+                    if (prTryScore > prScore) { prScore = prTryScore; pr = prTry; }
+                }
+                // Monotonic floor: if the polished winner somehow scores below the plain baseline (rare
+                // heuristic under-find), return the baseline instead of a worse plan - a wider "Sell up to N"
+                // must never produce a result worse than a narrower one.
+                if (prScore < baseScore - 1e-6) { wlog("optimizeWithReplace: polished winner regressed below baseline; returning baseResult"); return baseResult; }
                 var moves = diffMoves(augW, pr.startPos, pr.bestPos, removedW, movW).filter(function (m) { return m.id !== Vw.id; });
                 var vpos = pr.bestPos[Vw.id] || { x: Vw.x, y: Vw.y };
                 var startProd = baselines, bestProd = scoreAll(augW, pr.bestPos, removedW, plsW);
