@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.31
+// @version         1.4.32
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -1366,7 +1366,13 @@
                 for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
                     if (!dx && !dy) continue; var nx = x + dx, ny = y + dy; if (!inGrid(nx, ny)) continue;
                     if (def.kind === "t") { if (snap.terrain[ny][nx] === def.terr) c++; }
-                    else { var nb = g[ny][nx]; if (nb && nb.techName === def.tech && (!def.res || nb.harvRes === def.res)) c++; }
+                    else { var nb = g[ny][nx];
+                        if (nb && nb.techName === def.tech) {
+                            if (!def.res) c++;                                  // not resource-specific (e.g. silo<-... by tech only)
+                            else if (def.tech === "Harvester") { var fr = snap.terrain[ny][nx]; if ((def.res === "Tib" && fr === "TIBERIUM") || (def.res === "Cry" && fr === "CRYSTAL")) c++; } // harvester's resource = its FIELD
+                            else if (nb.harvRes === def.res) c++;
+                        }
+                    }
                 }
                 return c;
             }
@@ -1412,6 +1418,13 @@
                     var b = snap.buildings[prod[i]]; if (removed && removed[b.id]) continue;
                     var p = pos[b.id]; if (!p) continue;
                     var ls = b.links[modId]; if (!ls) continue;
+                    // A harvester carries BOTH a tib and a crystal link (so it can move to either field), but it
+                    // only ACTUALLY produces the resource of the field it currently sits on - score only that
+                    // one, or it would double-count (the bug where building tib harvesters raised crystal too).
+                    if (b.techName === "Harvester" && (modId === MOD.Tib || modId === MOD.Cry)) {
+                        var ft = snap.terrain[p.y][p.x];
+                        if (!((modId === MOD.Tib && ft === "TIBERIUM") || (modId === MOD.Cry && ft === "CRYSTAL"))) continue;
+                    }
                     for (var j = 0; j < ls.length; j++) {
                         var L = ls[j], def = LINK[L.lt]; if (!def || !L.perConn) continue;
                         total += L.perConn * Math.min(countLink(snap, g, p.x, p.y, def), L.max);
@@ -2165,11 +2178,15 @@
                 try { slotUsed = N(city.GetBuildingSlotCount()); } catch (e) {}
                 try { fieldsLeft = N(city.GetNumberOfFreeResourceFieldsInCity()); } catch (e) {}
                 slotsLeft = Math.max(0, slotLimit - slotUsed) + sells.length;   // freed slots + any already-free
+                // EVERY new building (harvesters included) needs a free building slot - a base at its slot cap
+                // (e.g. 32/32) can't build anything even onto empty resource fields, so it should relocate
+                // existing buildings instead. A harvester additionally needs a free field. (Mike: a full base
+                // was getting 3 "build harvester" proposals that can't actually be built.)
                 var emptyCap = emptyTiles(snap, buildOcc(snap, startPosFor(snap, removed), removed)).length;
-                var maxAdds = Math.min(emptyCap, slotsLeft + fieldsLeft, 40);
+                var maxAdds = Math.min(emptyCap, slotsLeft, 40);
                 var curScore = scoreForMod(aug, startPosFor(aug, removed), targetMod, buildProdLists(aug)[resKey], removed);
                 for (var addN = 0; addN < maxAdds; addN++) {
-                    if (slotsLeft <= 0 && fieldsLeft <= 0) break;
+                    if (slotsLeft <= 0) break;
                     var basePos = startPosFor(aug, removed);
                     var empties = emptyTiles(aug, buildOcc(aug, basePos, removed));
                     if (!empties.length) break;
@@ -2177,7 +2194,7 @@
                     for (var ci = 0; ci < cands.length; ci++) {
                         var cand = cands[ci], l1 = cand.cum[1] || { tib: 0, pow: 0 };
                         var isHarv = cand.tech === "Harvester";
-                        if (isHarv ? (fieldsLeft <= 0) : (slotsLeft <= 0)) continue;       // respect the relevant cap
+                        if (slotsLeft <= 0 || (isHarv && fieldsLeft <= 0)) continue;       // needs a slot; harvesters also need a free field
                         if (committed.tib + l1.tib > R.tib || committed.pow + l1.pow > R.pow) continue;
                         for (var e = 0; e < empties.length; e++) {
                             var t = empties[e];
@@ -2189,7 +2206,7 @@
                         }
                     }
                     if (!bestAdd || bestAdd.sc <= curScore + 1e-6) break;     // no empty tile improves the target -> stop
-                    if (bestAdd.cand.tech === "Harvester") fieldsLeft--; else slotsLeft--;
+                    slotsLeft--; if (bestAdd.cand.tech === "Harvester") fieldsLeft--;   // every build consumes a slot; harvesters also a field
                     aug = augmentSnap(aug, bestAdd.V); virtuals.push({ V: bestAdd.V, cand: bestAdd.cand });
                     committed.tib += bestAdd.l1.tib; committed.pow += bestAdd.l1.pow; curScore = bestAdd.sc;
                     await yieldUI();   // breathe between placement rounds (each scans cands x empty tiles)
