@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.25
+// @version         1.4.26
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -3510,11 +3510,36 @@
 
                 function currentOwnCity() { try { return ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity(); } catch (e) { return null; } }
 
-                // ---- controls row 1: base + resource buttons (Flow so it wraps when the window is narrow) ----
-                var ctrls = new qx.ui.container.Composite(new qx.ui.layout.Flow(6, 6));
-                var baseGroup = new qx.ui.container.Composite(new qx.ui.layout.HBox(4));
-                baseGroup.add(new qx.ui.basic.Label("Base:").set({ alignY: "middle" }));
-                var baseSelect = new qx.ui.form.SelectBox().set({ width: 150, alignY: "middle" });
+                // ---- UI helpers: dark rounded section panel, click-to-collapse group, label+spinner group ----
+                function sectionPanel(headerHtml) {
+                    var p = new qx.ui.container.Composite(new qx.ui.layout.VBox(8)).set({ padding: 10 });
+                    try { p.setDecorator(new qx.ui.decoration.Decorator().set({ radius: 8, backgroundColor: "#1b1b1d", width: 1, color: "#34343a", style: "solid" })); } catch (e) {}
+                    if (headerHtml) p.add(new qx.ui.basic.Label(headerHtml).set({ rich: true }));
+                    return p;
+                }
+                function collapsible(headerHtml, startOpen) {
+                    var wrap = new qx.ui.container.Composite(new qx.ui.layout.VBox(6));
+                    var open = !!startOpen, hdr = headerHtml;
+                    var head = new qx.ui.basic.Label("").set({ rich: true, cursor: "pointer", allowGrowX: true });
+                    var body = new qx.ui.container.Composite(new qx.ui.layout.VBox(6));
+                    function sync() { head.setValue((open ? "&#9662; " : "&#9656; ") + hdr); body.setVisibility(open ? "visible" : "excluded"); }
+                    head.addListener("tap", function () { open = !open; sync(); });
+                    wrap.add(head); wrap.add(body); sync();
+                    return { wrap: wrap, body: body };
+                }
+                function spinner(target, label, key, def, min, max, tip) {
+                    var grp = new qx.ui.container.Composite(new qx.ui.layout.HBox(4));
+                    grp.add(new qx.ui.basic.Label(label).set({ alignY: "middle", textColor: "#d8d8d8", toolTipText: tip }));
+                    var sp = new qx.ui.form.Spinner(min, MM.settings.get(key, def), max).set({ width: 58, alignY: "middle", toolTipText: tip });
+                    sp.addListener("changeValue", function (e) { MM.settings.set(key, Number(e.getData()) || def); });
+                    grp.add(sp); if (target) target.add(grp); return sp;
+                }
+
+                // ---- STEP 1: pick a base, then a resource to maximize ----
+                var step1 = sectionPanel("<b style='color:#7fd0ff'>1 &middot; Pick a base, then a resource to maximize</b>");
+                var baseGroup = new qx.ui.container.Composite(new qx.ui.layout.HBox(6)).set({ alignY: "middle" });
+                baseGroup.add(new qx.ui.basic.Label("Base:").set({ alignY: "middle", textColor: "#cfcfcf" }));
+                var baseSelect = new qx.ui.form.SelectBox().set({ width: 160, alignY: "middle" });
                 var suppressBase = false, baseBuilt = false;
                 function selectedBaseId() { var s = baseSelect.getSelection()[0]; return s ? s.getModel() : "current"; }
                 function selectedCity() { var bid = selectedBaseId(); return (bid === "current") ? currentOwnCity() : getCityById(bid); }
@@ -3535,7 +3560,7 @@
                 }
                 baseSelect.addListener("changeSelection", function () { if (suppressBase) return; renderCurrent(); });
                 baseGroup.add(baseSelect);
-                ctrls.add(baseGroup);
+                step1.add(baseGroup);
 
                 var RESBTN = [
                     { key: "Tib", label: "Tiberium", color: "#8fe08f" },
@@ -3543,27 +3568,21 @@
                     { key: "Pow", label: "Power",    color: "#ece28a" },
                     { key: "Dol", label: "Credits",  color: "#e6c08f" }
                 ];
+                var resRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8));
                 RESBTN.forEach(function (r) {
-                    var b = new qx.ui.form.Button(r.label).set({ toolTipText: "Optimize this base's layout to maximize " + r.label + " production" });
+                    var b = new qx.ui.form.Button(r.label).set({ toolTipText: "Optimize this base's layout to maximize " + r.label + " production", center: true });
                     try { b.setTextColor(r.color); } catch (e) {}
                     b.addListener("execute", function () { runOptimize(r.key); });
-                    ctrls.add(b);
+                    resRow.add(b, { flex: 1 });
                 });
-                page.add(ctrls);
+                step1.add(resRow);
+                page.add(step1);
 
-                // ---- controls row 2: search settings + sell (Flow; each label+spinner stays grouped) ----
-                var setRow = new qx.ui.container.Composite(new qx.ui.layout.Flow(8, 6));
-                function spinner(label, key, def, min, max, tip) {
-                    var grp = new qx.ui.container.Composite(new qx.ui.layout.HBox(4));
-                    grp.add(new qx.ui.basic.Label(label).set({ alignY: "middle", toolTipText: tip }));
-                    var sp = new qx.ui.form.Spinner(min, MM.settings.get(key, def), max).set({ width: 58, alignY: "middle", toolTipText: tip });
-                    sp.addListener("changeValue", function (e) { MM.settings.set(key, Number(e.getData()) || def); });
-                    grp.add(sp); setRow.add(grp); return sp;
-                }
-                var spRounds = spinner("Rounds:", "BaseTools.OptRounds", 30, 5, 200, "Improvement passes per attempt. Higher = more thorough but slower.");
-                var spNeigh = spinner("Neighbors:", "BaseTools.OptNeighbors", 16, 4, 72, "How many candidate destination tiles to test per building each pass. Higher = more thorough but slower.");
-                var spKicks = spinner("Kicks:", "BaseTools.OptKicks", 3, 0, 20, "Random shake-ups to escape a 'good but not best' layout and explore a different arrangement. More = explores more but slower.");
-                var spSell = spinner("Sell up to:", "BaseTools.OptSellN", 0, 0, 6, "CEILING on how many ECONOMY / duplicate buildings (Silo, Refinery, spare Harvester/PowerPlant/Accumulator) the optimizer may demolish to make room - it then builds a new producer of the chosen resource in EACH freed tile, paid for entirely by that building's 90% demolish refund (none of your stored resources are spent). It's a ceiling, not a quota: 'Sell up to 3' will sell 1, 2, or 3 - whatever actually raises the resource - and stops when one more sell wouldn't help. This is SEPARATE from 'Force-sell special buildings' (Defense HQ, Airport, etc.), which you pick by checking them. 0 = don't sell anything.");
+                // ---- STEP 2: selling options (what gets proposed) ----
+                var step2 = sectionPanel("<b style='color:#ff9d9d'>2 &middot; Selling</b> <span style='color:#9a9a9a'>&ndash; optional; changes what gets proposed</span>");
+                var sellRow = new qx.ui.container.Composite(new qx.ui.layout.Flow(14, 6));
+                var spSell = spinner(sellRow, "Sell up to:", "BaseTools.OptSellN", 0, 0, 6, "CEILING on how many ECONOMY / duplicate buildings (Silo, Refinery, spare Harvester/PowerPlant/Accumulator) the optimizer may demolish to make room - it then builds a new producer of the chosen resource in EACH freed tile, paid for entirely by that building's 90% demolish refund (none of your stored resources are spent). It's a ceiling, not a quota: 'Sell up to 3' will sell 1, 2, or 3 - whatever actually raises the resource - and stops when one more sell wouldn't help. This is SEPARATE from 'Force-sell special buildings' (Defense HQ, Airport, etc.), which you pick by checking them. 0 = don't sell anything.");
+                sellRow.add(new qx.ui.basic.Label("buildings").set({ alignY: "middle", textColor: "#9a9a9a" }));
                 // "Allow reductions" - widen the search to consider moves that improve the target resource
                 // AT THE COST of other resources. Score = target_gain - 0.5*sum(other losses), so the
                 // optimizer is willing to take a -200 Tib loss for a +101 Crystal gain but NOT a +99 gain.
@@ -3575,7 +3594,7 @@
                     toolTipText: "OFF (default): only suggest moves that improve the chosen resource without hurting the others. Strict but limited - a swap that's blocked by, say, a Refinery in the way is never considered.\n\nON: widen the search to ALL resource buildings and let the optimizer trade small losses in other resources for a larger target gain (score = target_gain - 0.5 * sum_of_other_losses). The results panel shows the net change for all 4 resources so you can see exactly what's being traded."
                 });
                 cbAllowRed.addListener("changeValue", function (e) { MM.settings.set("BaseTools.OptAllowReductions", !!e.getData()); });
-                setRow.add(cbAllowRed);
+                sellRow.add(cbAllowRed);
                 // "Force-sell special buildings" - reveals the picker below for the "one-of" non-economy buildings
                 // (Defense HQ/Facility, Command Center, Barracks, Factory, Airport, Support). Checked ones are
                 // force-demolished and their pooled 90% refund funds new target-resource producers in the freed
@@ -3587,8 +3606,17 @@
                     toolTipText: "Reveals a checklist of the 'one-of' special buildings on this base (Defense HQ/Facility, Command Center, Barracks, Factory, Airport, Support). Check any you're willing to sacrifice; the optimizer demolishes them, pools their 90% refund, and fills the freed tiles with the best new producers of the chosen resource (early-game 'strip to the Construction Yard' play).\n\nYou do NOT need this for the normal case: with 'Sell up to' >= 1 and 'Allow reductions' on, the optimizer already auto-considers selling an economy building (e.g. a Silo) and building a producer (e.g. an Accumulator) in its place."
                 });
                 cbForceSell.addListener("changeValue", function (e) { MM.settings.set("BaseTools.OptAllowBuild", !!e.getData()); rebuildForceSell(); });
-                setRow.add(cbForceSell);
-                page.add(setRow);
+                sellRow.add(cbForceSell);
+                step2.add(sellRow);
+                step2.add(new qx.ui.basic.Label("<i>A ceiling, not a quota &mdash; the optimizer sells only as many as actually help, and builds a producer in each freed tile paid for by that building's 90% demolish refund. Your stored resources are untouched.</i>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#8f8f8f" }));
+                page.add(step2);
+
+                // ---- STEP 3: search quality (advanced; collapsed by default - most users never touch these) ----
+                var adv = collapsible("<span style='color:#9a9a9a'>Search quality (advanced) &mdash; defaults are fine</span>", false);
+                var advRow = new qx.ui.container.Composite(new qx.ui.layout.Flow(14, 6)); adv.body.add(advRow);
+                var spRounds = spinner(advRow, "Rounds:", "BaseTools.OptRounds", 30, 5, 200, "Improvement passes per attempt. Higher = more thorough but slower.");
+                var spNeigh = spinner(advRow, "Neighbors:", "BaseTools.OptNeighbors", 16, 4, 72, "How many candidate destination tiles to test per building each pass. Higher = more thorough but slower.");
+                var spKicks = spinner(advRow, "Kicks:", "BaseTools.OptKicks", 3, 0, 20, "Random shake-ups to escape a 'good but not best' layout and explore a different arrangement. More = explores more but slower.");
 
                 // ---- Force-sell picker: the "one-of" special buildings to sacrifice (shown when the box above
                 // is checked). Icon + level + checkbox per type; selection persists (BaseTools.OptForceSell).
@@ -3624,6 +3652,8 @@
                     });
                     forceSellBox.add(flow);
                 }
+
+                page.add(adv.wrap);
 
                 // ---- Apply row: one-click auto-apply of the proposed layout (Phase B) ----
                 var applyRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8));
@@ -3790,9 +3820,53 @@
                     var box = ensureResultBox();
                     if (!res || !res.ok) { box.add(new qx.ui.basic.Label(res && res.reason ? ("Could not optimize: " + res.reason) : "").set({ textColor: "#ff8a8a" })); return; }
 
-                    // Net-change table across all 4 resources (always shown when we have startProd/bestProd,
-                    // which optimize/optimizeWithSell now always produce - independent of allowReductions).
-                    // In ALLOW REDUCTIONS mode this is the headline: it tells you what you're trading.
+                    // colored rounded sub-panel for the Sell / Build cards
+                    function miniCard(borderColor, bgColor) {
+                        var c = new qx.ui.container.Composite(new qx.ui.layout.VBox(3)).set({ padding: 8, allowGrowX: true });
+                        try { c.setDecorator(new qx.ui.decoration.Decorator().set({ radius: 7, backgroundColor: bgColor, width: 1, color: borderColor, style: "solid" })); } catch (e) {}
+                        return c;
+                    }
+
+                    // 1) Self-funded callout - plain-English summary so the user sees WHAT's happening up front.
+                    var selfFunded = !!(res.builds && res.builds.length && res.builds[0] && res.builds[0].fundedBy);
+                    if (selfFunded) {
+                        var nb0 = res.builds.length;
+                        box.add(new qx.ui.basic.Label("<b style='color:#ffe14d'>Self-funded plan:</b> demolish <b>" + res.sells.length + "</b> low-impact building" + (res.sells.length === 1 ? "" : "s") + " and spend the 90% demolish refund to build <b>" + nb0 + "</b> new <b>" + OPT.RES_CFG[res.resKey].label + "</b> producer" + (nb0 === 1 ? "" : "s") + " &mdash; <b>none of your stored resources are spent.</b>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e8e8e8" }));
+                        box.add(new qx.ui.core.Spacer(null, 6));
+                    }
+
+                    // 2) Sell + Build as side-by-side colored cards (sell -> build pairing visible at a glance).
+                    if ((res.sells && res.sells.length) || (res.builds && res.builds.length)) {
+                        var cards = new qx.ui.container.Composite(new qx.ui.layout.HBox(8));
+                        if (res.sells && res.sells.length) {
+                            var sellCard = miniCard("#5a2c2c", "#221314");
+                            sellCard.add(new qx.ui.basic.Label("<b style='color:#ff9d9d'>Sell (" + res.sells.length + ")</b> <span style='color:#b08888'>demolished</span>").set({ rich: true }));
+                            for (var s = 0; s < res.sells.length; s++) { var sl = res.sells[s]; sellCard.add(new qx.ui.basic.Label("&#10006; <b>" + nameOf(sl) + "</b> L" + sl.level + " &middot; " + sl.x + ":" + sl.y).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#ffc9c9" })); }
+                            cards.add(sellCard, { flex: 1 });
+                        }
+                        if (res.builds && res.builds.length) {
+                            var buildCard = miniCard("#2c5a5e", "#0f2024");
+                            buildCard.add(new qx.ui.basic.Label("<b style='color:#7fd0ff'>Build (" + res.builds.length + ")</b> <span style='color:#7f9aa0'>new producers</span>").set({ rich: true }));
+                            for (var bi2 = 0; bi2 < res.builds.length; bi2++) {
+                                var bl = res.builds[bi2];
+                                buildCard.add(new qx.ui.basic.Label("&#43; <b>" + nameOf(bl) + "</b> &rarr; L" + bl.level + " &middot; " + bl.x + ":" + bl.y).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bfeff7" }));
+                                if (bl.fundedBy) {
+                                    buildCard.add(new qx.ui.basic.Label("<span style='color:#ffb0b0'>&#8592; paid for by selling " + nameOf(bl.fundedBy) + " L" + bl.fundedBy.level + "</span>" + (bl.refund ? " <span style='color:#7f9aa0'>(refund " + MM.num.compact(Math.round(bl.refund.tib), 1) + " Tib + " + MM.num.compact(Math.round(bl.refund.pow), 1) + " Pow)</span>" : "")).set({ rich: true, wrap: true, allowGrowX: true }));
+                                }
+                            }
+                            cards.add(buildCard, { flex: 1 });
+                        }
+                        box.add(cards);
+                        if ((res.forceSell || res.freeSlot) && res.refundTotal) {
+                            var sp = res.spentTotal || { tib: 0, pow: 0 };
+                            var src = res.freeSlot ? "Stored resources" : "Pooled refund";
+                            box.add(new qx.ui.basic.Label(src + ": <b>" + MM.num.compact(Math.round(res.refundTotal.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(res.refundTotal.pow), 1) + "</b> Pow &middot; spent <b>" + MM.num.compact(Math.round(sp.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(sp.pow), 1) + "</b> Pow on builds+upgrades.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#9fd0e0" }));
+                            box.add(new qx.ui.basic.Label("<i>Tip: after applying, run <b>Upgrade Priority</b> (Transfer as needed) to push further using other bases.</i>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bbbbbb" }));
+                        }
+                        box.add(new qx.ui.core.Spacer(null, 6));
+                    }
+
+                    // 3) Net production change across all 4 resources (the trade, in ALLOW REDUCTIONS mode).
                     if (res.startProd && res.bestProd) {
                         var anyChange = false;
                         var rows = [];
@@ -3829,48 +3903,22 @@
                         }
                     }
 
-                    if (res.sells && res.sells.length) {
-                        // Plain-English header for a self-funded sell->build plan (each build paid for by a
-                        // sell's 90% demolish refund) so the user sees WHAT's happening before the line items.
-                        var selfFunded = !!(res.builds && res.builds.length && res.builds[0] && res.builds[0].fundedBy);
-                        if (selfFunded) {
-                            var nb = res.builds.length;
-                            box.add(new qx.ui.basic.Label("<b style='color:#ffe14d'>Self-funded plan:</b> demolish <b>" + res.sells.length + "</b> low-impact building" + (res.sells.length === 1 ? "" : "s") + " and spend the 90% demolish refund to build <b>" + nb + "</b> new <b>" + OPT.RES_CFG[res.resKey].label + "</b> producer" + (nb === 1 ? "" : "s") + " in the freed space &mdash; <b>none of your stored resources are spent.</b>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e8e8e8" }));
-                            box.add(new qx.ui.core.Spacer(null, 4));
+                    // 4) Moves - collapsed with a count (reference detail; the gain + sell/build above is the headline).
+                    if (res.moves.length) {
+                        var mv = collapsible("<b style='color:#ffffff'>Moves (" + res.moves.length + ")</b> <span style='color:#7f7f7f'>&mdash; click to expand</span>", false);
+                        for (var i = 0; i < res.moves.length; i++) {
+                            var m = res.moves[i], dist = Math.max(Math.abs(m.toX - m.fromX), Math.abs(m.toY - m.fromY));
+                            mv.body.add(new qx.ui.basic.Label("<b>" + (i + 1) + "</b>. " + nameOf(m) + " L" + m.level + "  <b>" + dirArrow(m.toX - m.fromX, m.toY - m.fromY) + "</b> " + dist + (dist === 1 ? " tile" : " tiles")).set({ rich: true, textColor: "#e6e6e6", toolTipText: m.fromX + ":" + m.fromY + " -> " + m.toX + ":" + m.toY }));
                         }
-                        box.add(new qx.ui.basic.Label("<b style='color:#ff8a8a'>Sell (" + res.sells.length + ")</b> &mdash; demolished, refund pays for the builds below").set({ rich: true }));
-                        for (var s = 0; s < res.sells.length; s++) { var sl = res.sells[s]; box.add(new qx.ui.basic.Label("✕ <b>" + nameOf(sl) + "</b> L" + sl.level + " (at " + sl.x + ":" + sl.y + ")").set({ rich: true, textColor: "#ffc9c9" })); }
-                        box.add(new qx.ui.core.Spacer(null, 4));
-                    }
-                    if (res.builds && res.builds.length) {
-                        box.add(new qx.ui.basic.Label("<b style='color:#4dd0e1'>Build (" + res.builds.length + ")</b>" + (res.builds[0] && res.builds[0].fundedBy ? " &mdash; each one paid for by selling the building named after it" : "")).set({ rich: true }));
-                        for (var bi2 = 0; bi2 < res.builds.length; bi2++) {
-                            var bl = res.builds[bi2];
-                            var fund = bl.fundedBy
-                                ? (" &mdash; <span style='color:#ffd6d6'>paid for by selling " + nameOf(bl.fundedBy) + " L" + bl.fundedBy.level + "</span>" + (bl.refund ? " (refund " + MM.num.compact(Math.round(bl.refund.tib), 1) + " Tib + " + MM.num.compact(Math.round(bl.refund.pow), 1) + " Pow)" : ""))
-                                : (bl.refund ? (" - funded by refund " + MM.num.compact(Math.round(bl.refund.tib), 1) + " Tib + " + MM.num.compact(Math.round(bl.refund.pow), 1) + " Pow") : "");
-                            var cost = bl.cost ? (" &middot; build cost " + MM.num.compact(Math.round(bl.cost.tib), 1) + " Tib + " + MM.num.compact(Math.round(bl.cost.pow), 1) + " Pow") : "";
-                            box.add(new qx.ui.basic.Label("+ <b>" + nameOf(bl) + "</b> &rarr; L" + bl.level + " (at " + bl.x + ":" + bl.y + ")" + cost + fund).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bfeff7" }));
-                        }
-                        if ((res.forceSell || res.freeSlot) && res.refundTotal) {
-                            var sp = res.spentTotal || { tib: 0, pow: 0 };
-                            var src = res.freeSlot ? "Stored resources" : "Pooled refund";
-                            box.add(new qx.ui.basic.Label(src + ": <b>" + MM.num.compact(Math.round(res.refundTotal.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(res.refundTotal.pow), 1) + "</b> Pow &middot; spent <b>" + MM.num.compact(Math.round(sp.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(sp.pow), 1) + "</b> Pow on builds+upgrades.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#9fd0e0" }));
-                            box.add(new qx.ui.basic.Label("<i>Tip: after applying, run <b>Upgrade Priority</b> (Transfer as needed) to push further using other bases.</i>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bbbbbb" }));
-                        }
-                        box.add(new qx.ui.core.Spacer(null, 4));
-                    }
-                    box.add(new qx.ui.basic.Label("<b>Moves (" + res.moves.length + ")</b>").set({ rich: true, textColor: "#ffffff" }));
-                    if (!res.moves.length) {
+                        box.add(mv.wrap);
+                    } else {
+                        box.add(new qx.ui.basic.Label("<b style='color:#ffffff'>Moves (0)</b>").set({ rich: true }));
                         var noteMsg = res.allowReductions
                             ? "No moves improve " + OPT.RES_CFG[res.resKey].label + " on this base, even when trading other resources."
                             : "No moves improve " + OPT.RES_CFG[res.resKey].label + " on this base. Try <b>Allow reductions</b> to consider moves that trade other resources for a bigger target gain.";
                         box.add(new qx.ui.basic.Label(noteMsg).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#7ee07e" }));
                     }
-                    for (var i = 0; i < res.moves.length; i++) {
-                        var m = res.moves[i], dist = Math.max(Math.abs(m.toX - m.fromX), Math.abs(m.toY - m.fromY));
-                        box.add(new qx.ui.basic.Label("<b>" + (i + 1) + "</b>. " + nameOf(m) + " L" + m.level + "  <b>" + dirArrow(m.toX - m.fromX, m.toY - m.fromY) + "</b> " + dist + (dist === 1 ? " tile" : " tiles")).set({ rich: true, textColor: "#e6e6e6", toolTipText: m.fromX + ":" + m.fromY + " -> " + m.toX + ":" + m.toY }));
-                    }
+
                     box.add(new qx.ui.core.Spacer(null, 6));
                     var changed = res.moves.length || (res.sells && res.sells.length) || (res.builds && res.builds.length);
                     box.add(new qx.ui.basic.Label(changed
