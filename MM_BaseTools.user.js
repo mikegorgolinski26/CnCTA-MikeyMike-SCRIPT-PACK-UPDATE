@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.28
+// @version         1.4.29
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -3539,7 +3539,7 @@
                 function collapsible(headerHtml, startOpen) {
                     var wrap = new qx.ui.container.Composite(new qx.ui.layout.VBox(6));
                     var open = !!startOpen, hdr = headerHtml;
-                    var head = new qx.ui.basic.Label("").set({ rich: true, cursor: "pointer", allowGrowX: true });
+                    var head = new qx.ui.basic.Label("").set({ rich: true, cursor: "pointer", allowGrowX: true, textColor: "#dcdcdc" });
                     var body = new qx.ui.container.Composite(new qx.ui.layout.VBox(6));
                     function sync() { head.setValue((open ? "&#9662; " : "&#9656; ") + hdr); body.setVisibility(open ? "visible" : "excluded"); }
                     head.addListener("tap", function () { open = !open; sync(); });
@@ -3631,7 +3631,7 @@
                 page.add(step2);
 
                 // ---- STEP 3: search quality (advanced; collapsed by default - most users never touch these) ----
-                var adv = collapsible("<span style='color:#9a9a9a'>Search quality (advanced) &mdash; defaults are fine</span>", false);
+                var adv = collapsible("<b style='color:#eaeaea'>Search quality (advanced)</b> <span style='color:#a9a9a9'>&mdash; defaults are fine</span>", false);
                 var advRow = new qx.ui.container.Composite(new qx.ui.layout.Flow(14, 6)); adv.body.add(advRow);
                 var spRounds = spinner(advRow, "Rounds:", "BaseTools.OptRounds", 30, 5, 200, "Improvement passes per attempt. Higher = more thorough but slower.");
                 var spNeigh = spinner(advRow, "Neighbors:", "BaseTools.OptNeighbors", 16, 4, 72, "How many candidate destination tiles to test per building each pass. Higher = more thorough but slower.");
@@ -3672,7 +3672,7 @@
                     forceSellBox.add(flow);
                 }
 
-                page.add(adv.wrap);
+                var advPanel = sectionPanel(null); advPanel.add(adv.wrap); page.add(advPanel);   // dark backing so the header reads with high contrast
 
                 // ---- Apply row: one-click auto-apply of the proposed layout (Phase B) ----
                 var applyRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8));
