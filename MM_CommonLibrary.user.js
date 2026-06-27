@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.22
+// @version         1.0.24
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.21"
+            version: "1.0.24"
         };
 
         // -------------------------------------------------------------------
@@ -81,6 +81,12 @@
             return {
                 log: function () {
                     if (!window.MM_DEBUG) return;
+                    try { console.log.apply(console, [prefix].concat([].slice.call(arguments))); } catch (e) {}
+                },
+                // verbose: routine high-volume chatter (window position restore, etc.) - gated behind a SEPARATE
+                // MM_DEBUG_VERBOSE flag so normal MM_DEBUG stays readable.
+                verbose: function () {
+                    if (!window.MM_DEBUG_VERBOSE) return;
                     try { console.log.apply(console, [prefix].concat([].slice.call(arguments))); } catch (e) {}
                 },
                 warn: function () {
@@ -1326,7 +1332,7 @@
                                 if (b.width) NS.settings.set(key + ".w", b.width);
                                 if (b.height) NS.settings.set(key + ".h", b.height);
                             }
-                            NS.log.log("window", key, "saved desired", v);
+                            // (no per-save log here - it fires on every drag tick and floods even MM_DEBUG)
                         } catch (e) {}
                     }
                     // Apply saved position/size. CRITICAL: this must NOT run before the player id is loaded.
@@ -1353,10 +1359,10 @@
                                 // Re-apply once after layout settles - a single early set can be overridden
                                 // by the window's content size hint before it's fully realized.
                                 window.setTimeout(function () { try { if (sw) win.setWidth(sw); if (sh) win.setHeight(sh); } catch (e) {} }, 300);
-                                NS.log.log("window", key, "restored pos", p, "size", sw + "x" + sh, "(pid", pid + ")");
+                                NS.log.verbose("window", key, "restored pos", p, "size", sw + "x" + sh, "(pid", pid + ")");
                             } else {
                                 if (opts.width) { var w = NS.settings.get(key + ".w", opts.width); if (w) win.setWidth(w); }
-                                NS.log.log("window", key, "restored pos", p, "(pid", pid + ")");
+                                NS.log.verbose("window", key, "restored pos", p, "(pid", pid + ")");
                             }
                             return true;
                         } catch (e) { return false; }
@@ -1555,14 +1561,14 @@
                                 if (!decided) {
                                     decided = true;
                                     var wantOpen = NS.settings.get(key + ".open", false);
-                                    NS.log.log("window", key, "restoreOpen flag =", wantOpen, "(pid", pid + ")");
+                                    NS.log.verbose("window", key, "restoreOpen flag =", wantOpen, "(pid", pid + ")");
                                     if (wantOpen !== true) { window.clearInterval(reopenId); return; }
                                     tries = 0; // reset the budget for the open() retries
                                 }
 
                                 if (win.isVisible()) {
                                     window.clearInterval(reopenId);
-                                    NS.log.log("window", key, "restored open after", tries, "tries");
+                                    NS.log.verbose("window", key, "restored open after", tries, "tries");
                                     return;
                                 }
                                 tries++;
@@ -1945,7 +1951,7 @@
                             var saved = NS.settings.get(KEY + ".pos", null);
                             if (saved && saved.left != null) {
                                 placeAbsolute(saved.left, saved.top);
-                                NS.log.log("HUDTray restored pos", saved);
+                                NS.log.verbose("HUDTray restored pos", saved);
                             }
                             applyVisible(showPref()); // re-apply from the correct per-player bucket
                         } catch (_) {}

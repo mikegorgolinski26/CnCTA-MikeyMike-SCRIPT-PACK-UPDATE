@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.13
+// @version         1.4.21
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -1202,7 +1202,7 @@
                         var raw = bd[o]; if (!raw || !raw.get_Id) continue;
                         var b = { id: raw.get_Id(), techName: rev[raw.get_TechName()] || String(raw.get_TechName()),
                                   x: raw.get_CoordX(), y: raw.get_CoordY(), level: raw.get_CurrentLevel ? raw.get_CurrentLevel() : 0,
-                                  harvRes: null, links: {} };
+                                  harvRes: null, links: {}, obj: raw };
                         var dv; try { dv = city.GetBuildingDetailViewInfo(raw); } catch (e) { dv = null; }
                         if (dv && dv.OwnProdModifiers && dv.OwnProdModifiers.d) {
                             var mods = dv.OwnProdModifiers.d;
@@ -1303,7 +1303,7 @@
                         }
                     }
                     if (calibCross) wlog("OPT: calibrated " + calibCross + " link(s) via cross-level fallback (no same-level sibling existed)");
-                    if (calibWarn) wwarn("OPT: " + calibWarn + " link(s) could not be calibrated (no connected sibling at any level) - excluded from scoring");
+                    if (calibWarn) wlog("OPT: " + calibWarn + " link(s) could not be calibrated (no connected sibling at any level) - excluded from scoring");
 
                     // Classify producers (have this mod) and movable buildings (this resource's set).
                     var producers = [], movable = [];
@@ -1688,6 +1688,344 @@
                          startProd: startProd, bestProd: bestProd, allowReductions: allowReductions, alpha: alpha };
             }
 
+            // ===================== Self-funded SELL -> BUILD -> UPGRADE operator ========
+            // Sell a building (90% refund of its from-scratch cost), build a NEW producer of the
+            // target resource on a freed tile, and upgrade it as high as the refund funds. Cost +
+            // production model live-sniffed (see opt-build-cost-refund-api memory):
+            //   cumulative from-scratch cost = GetUpgradeCostsForBuildingToLevel(level-0 stub, L)
+            //   refund = 0.9 * cumulative cost of the sold building at its level
+            //   production at level L = def.lm table, scaled by PROD_BASE^(L-tableMax) beyond table
+            var COST_TIB = 1, COST_POW = 5;          // EResourceType ids in the build-cost arrays
+            var PROD_BASE = 1.25;                     // production per-level growth beyond the def table
+            var _capi = null, _lvlG = null, _defG = null;
+            function costApi() {
+                if (_capi) return _capi;
+                try {
+                    var capi = ClientLib.API.City.GetInstance();
+                    var nm = capi.GetUpgradeCostsForBuildingToLevel.toString().match(/n\.(\w+)\(\)/g); // [curLvlGetter, defGetter]
+                    if (nm && nm.length >= 2) { _lvlG = nm[0].slice(2, -2); _defG = nm[1].slice(2, -2); _capi = capi; }
+                    else wwarn("OPT: could not parse cost-API getters (game may have updated)");
+                } catch (e) { werr("OPT.costApi failed:", e); }
+                return _capi;
+            }
+            function techDef(obj) { try { return (_defG && obj) ? obj[_defG]() : null; } catch (e) { return null; } }
+            // Cumulative from-scratch cost to level L for the tech of live building obj. -> {tib,pow} | null.
+            function cumCost(obj, L) {
+                var capi = costApi(); if (!capi || !_defG || !obj) return null;
+                var def = techDef(obj); if (!def) return null;
+                var stub = {}; stub[_lvlG] = function () { return 0; }; stub[_defG] = function () { return def; };
+                var c; try { c = capi.GetUpgradeCostsForBuildingToLevel(stub, L); } catch (e) { return null; }
+                c = (c && c.d) ? c.d : c; var tib = 0, pow = 0;
+                for (var k in c) { var e = c[k]; if (!e || e.Type == null) continue; var t = N(e.Type); if (t === COST_TIB) tib = N(e.Count); else if (t === COST_POW) pow = N(e.Count); }
+                return { tib: tib, pow: pow };
+            }
+            function refundFor(obj, level) { var c = cumCost(obj, level); return c ? { tib: Math.floor(c.tib * 0.9), pow: Math.floor(c.pow * 0.9) } : null; }
+            // Highest level <= cap whose from-scratch cost fits the budget (tib AND pow). Cost is
+            // monotonic in level, so binary-search instead of scanning every level.
+            function maxFundedLevel(obj, budget, cap) {
+                if (cap < 1) return 0;
+                function fits(L) { var c = cumCost(obj, L); return !!c && c.tib <= budget.tib && c.pow <= budget.pow; }
+                if (!fits(1)) return 0;
+                var lo = 1, hi = cap, best = 1;
+                while (lo <= hi) { var mid = (lo + hi) >> 1; if (fits(mid)) { best = mid; lo = mid + 1; } else hi = mid - 1; }
+                return best;
+            }
+            // Production modifier value (modId in {1,4,6,30}) at level L from the def table + growth.
+            function lmValueAt(def, modId, L) {
+                if (!def || !def.r || !def.r.length) return 0;
+                var maxIdx = def.r.length - 1;
+                function lmOf(idx) { var e = def.r[idx]; if (!e || !e.lm) return null; for (var i = 0; i < e.lm.length; i++) if (N(e.lm[i].t) === modId) return N(e.lm[i].v); return 0; }
+                if (L <= maxIdx) { var v = lmOf(L); return v == null ? 0 : v; }
+                var last = lmOf(maxIdx); if (last == null) return 0;
+                return last * Math.pow(PROD_BASE, L - maxIdx);
+            }
+            // Virtual (not-yet-built) building of refB's tech at level L, positioned at (x,y). perConn =
+            // refB's live-calibrated perConn scaled by the level-production ratio; typeId from the live obj.
+            // id is GLOBALLY UNIQUE (a counter, not position-based) - two virtuals transiently sharing a tile
+            // during the placement search must NOT collide, or the occupancy grid + producer lists double-count
+            // and the optimizer spirals into building dozens of stacked copies.
+            var _virtSeq = 0;
+            function makeVirtual(refB, L, x, y) {
+                var def = techDef(refB.obj), refLvl = N(refB.level), links = {};
+                for (var mid in refB.links) {
+                    var modId = N(mid), scale = 1;
+                    if (def) { var a = lmValueAt(def, modId, L), b = lmValueAt(def, modId, refLvl); if (b > 0) scale = a / b; }
+                    var src = refB.links[mid], arr = [];
+                    for (var i = 0; i < src.length; i++) arr.push({ lt: src[i].lt, max: src[i].max, perConn: src[i].perConn * scale });
+                    links[modId] = arr;
+                }
+                var typeId = null; try { typeId = N(refB.obj.WXVGSE()); } catch (e) {}
+                return { id: "VIRT_" + (++_virtSeq) + "_" + refB.techName, techName: refB.techName, harvRes: refB.harvRes,
+                         x: x, y: y, level: L, links: links, virtual: true, typeId: typeId, refTechName: refB.techName };
+            }
+            // Candidate NEW techs per resource (produce/boost the target). Each needs a live sibling.
+            var BUILD_CANDIDATES = { Tib: ["Harvester", "Silo"], Cry: ["Harvester", "Silo"],
+                                     Pow: ["Accumulator", "PowerPlant"], Dol: ["Refinery", "PowerPlant"] };
+            function refSiblingFor(snap, techName, harvRes) {
+                for (var i = 0; i < snap.order.length; i++) { var b = snap.buildings[snap.order[i]];
+                    if (b.virtual || b.techName !== techName) continue;
+                    if (techName === "Harvester" && harvRes && b.harvRes !== harvRes) continue;
+                    return b;
+                }
+                return null;
+            }
+            function augmentSnap(snap, V) {
+                var s = {}; for (var k in snap) s[k] = snap[k];
+                s.buildings = {}; for (var id in snap.buildings) s.buildings[id] = snap.buildings[id];
+                s.buildings[V.id] = V; s.order = snap.order.concat([V.id]);
+                return s;
+            }
+            // Does building b produce the target resource (any active link)? Used to skip selling a
+            // target producer (pointless to sell one to build another) and to keep the search bounded.
+            function producesTarget(b, modId) { var ls = b.links[modId]; if (!ls) return false; for (var i = 0; i < ls.length; i++) if (ls[i].perConn > 0) return true; return false; }
+
+            // Optimize the target resource allowing ONE self-funded sell->build->upgrade. Falls back to
+            // optimizeWithSell when no build beats it. Returns the standard result + builds:[...].
+            function optimizeWithReplace(city, resKey, opts, sellN) {
+                opts = opts || {};
+                if (!costApi()) return optimizeWithSell(city, resKey, opts, sellN);  // no cost data -> plain sell
+                var snap = snapshot(city, resKey);
+                if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
+
+                var allowReductions = !!opts.allowReductions;
+                var alpha = (typeof opts.alpha === "number") ? opts.alpha : 0.5;
+                var prodLists0 = buildProdLists(snap);
+                var baselines = scoreAll(snap, startPosFor(snap, null), null, prodLists0);
+                var targetMod = RES_CFG[resKey].mod;
+
+                // Baseline to beat = plain optimize (+sells). Our fallback if no build helps.
+                var baseResult = optimizeWithSell(city, resKey, opts, sellN || 0);
+
+                // Compound score for ranking candidates vs the baseline (matches the search metric).
+                function compound(aug, pos, removed, pls) {
+                    var t = scoreForMod(aug, pos, targetMod, pls[resKey], removed);
+                    if (!allowReductions) {
+                        for (var k in MOD) { if (MOD[k] === targetMod) continue; if (scoreForMod(aug, pos, MOD[k], pls[k], removed) < baselines[k] - 0.5) return -Infinity; }
+                        return t;
+                    }
+                    var pen = 0; for (var k2 in MOD) { if (MOD[k2] === targetMod) continue; var loss = baselines[k2] - scoreForMod(aug, pos, MOD[k2], pls[k2], removed); if (loss > 0) pen += loss; }
+                    return t - alpha * pen;
+                }
+                var bestScore = (baseResult && baseResult.ok) ? compound(baseResult.snapshot || snap, baseResult.bestPos, baseResult.removed || null, buildProdLists(baseResult.snapshot || snap)) : -Infinity;
+                var best = null;
+
+                var maxLvlCap = 1; for (var oi = 0; oi < snap.order.length; oi++) maxLvlCap = Math.max(maxLvlCap, N(snap.buildings[snap.order[oi]].level));
+                var cands = BUILD_CANDIDATES[resKey] || [];
+                var lightOpts = { rounds: Math.min(opts.rounds || 30, 20), kicks: 1, maxNeighbors: opts.maxNeighbors, restarts: 2 };
+
+                for (var ci = 0; ci < cands.length; ci++) {
+                    var techName = cands[ci];
+                    var harvRes = (techName === "Harvester") ? (resKey === "Cry" ? "Cry" : "Tib") : null;
+                    var refB = refSiblingFor(snap, techName, harvRes);
+                    if (!refB || !refB.obj) continue;
+
+                    var seenSell = {};
+                    for (var si = 0; si < snap.order.length; si++) {
+                        var S = snap.buildings[snap.order[si]];
+                        if (S.virtual || !SELLABLE[S.techName] || !S.obj) continue;
+                        if (producesTarget(S, targetMod)) continue;            // only sell non-target buildings
+                        var skey = S.techName + "|" + (S.harvRes || "") + "|" + N(S.level);
+                        if (seenSell[skey]) continue; seenSell[skey] = 1;       // one representative per (tech,level)
+                        var refund = refundFor(S.obj, N(S.level)); if (!refund) continue;
+                        var fundedL = maxFundedLevel(refB.obj, refund, maxLvlCap); if (fundedL < 1) continue;
+
+                        var removed = {}; removed[S.id] = true;
+                        var Vtmp = makeVirtual(refB, fundedL, N(S.x), N(S.y)), startXY = null;
+                        if (terrainOK(snap, Vtmp, N(S.x), N(S.y))) startXY = { x: N(S.x), y: N(S.y) };
+                        else { var empt = emptyTiles(snap, buildOcc(snap, startPosFor(snap, removed), removed));
+                               for (var ei = 0; ei < empt.length; ei++) if (terrainOK(snap, Vtmp, empt[ei].x, empt[ei].y)) { startXY = empt[ei]; break; } }
+                        if (!startXY) continue;
+
+                        var V = makeVirtual(refB, fundedL, startXY.x, startXY.y);
+                        var aug = augmentSnap(snap, V), pls = buildProdLists(aug), movableList = widenMovable(aug);
+                        var scoreFn = allowReductions ? makeMultiScoreFn(aug, resKey, baselines, alpha, pls) : makeStrictScoreFn(aug, resKey, baselines, pls);
+                        var r = runSearch(aug, removed, { rounds: lightOpts.rounds, kicks: lightOpts.kicks, maxNeighbors: lightOpts.maxNeighbors, restarts: lightOpts.restarts, movableList: movableList, scoreFn: scoreFn }, si * 7 + ci + 1);
+                        var sc = compound(aug, r.bestPos, removed, pls);
+                        if (sc > bestScore + 1e-6) {
+                            bestScore = sc;
+                            best = { S: S, refB: refB, fundedL: fundedL, refund: refund, startXY: startXY };
+                        }
+                    }
+                }
+
+                if (!best) return baseResult;   // nothing beats plain sell/optimize
+
+                // Polish the winning candidate from scratch (fresh restarts).
+                var removedW = {}; removedW[best.S.id] = true;
+                var Vw = makeVirtual(best.refB, best.fundedL, best.startXY.x, best.startXY.y);
+                var augW = augmentSnap(snap, Vw), plsW = buildProdLists(augW), movW = widenMovable(augW);
+                var scoreFnW = allowReductions ? makeMultiScoreFn(augW, resKey, baselines, alpha, plsW) : makeStrictScoreFn(augW, resKey, baselines, plsW);
+                var pr = runSearch(augW, removedW, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5, movableList: movW, scoreFn: scoreFnW }, 99);
+                var moves = diffMoves(augW, pr.startPos, pr.bestPos, removedW, movW).filter(function (m) { return m.id !== Vw.id; });
+                var vpos = pr.bestPos[Vw.id] || { x: Vw.x, y: Vw.y };
+                var startProd = baselines, bestProd = scoreAll(augW, pr.bestPos, removedW, plsW);
+                var current = startProd[resKey], projected = bestProd[resKey];
+                var gainPct = current > 0 ? ((projected - current) / current * 100) : 0;
+                return { ok: true, resKey: resKey, current: current, projected: projected, gainPct: gainPct, moves: moves,
+                         sells: [{ id: best.S.id, techName: best.S.techName, harvRes: best.S.harvRes, level: N(best.S.level), x: N(best.S.x), y: N(best.S.y) }],
+                         builds: [{ techName: Vw.techName, harvRes: Vw.harvRes, level: best.fundedL, x: vpos.x, y: vpos.y, typeId: Vw.typeId,
+                                    refund: best.refund, cost: cumCost(best.refB.obj, best.fundedL) }],
+                         removed: removedW, snapshot: augW, bestPos: pr.bestPos, startPos: pr.startPos,
+                         startProd: startProd, bestProd: bestProd, allowReductions: allowReductions, alpha: alpha, virtualId: Vw.id };
+            }
+
+            // Economy/auto-sellable techs handled by the normal Sell/Allow-reductions path; the force-sell
+            // listview offers everything ELSE (the "one-of" special buildings), never the Construction Yard.
+            var ECON_TECH = { Harvester: 1, Silo: 1, PowerPlant: 1, Accumulator: 1, Refinery: 1, Construction_Yard: 1 };
+            // List the force-sell candidates on a base (one row per distinct non-economy, non-CY tech),
+            // with an icon URL derived from the building def + the game's asset base. For the UI listview.
+            function forceSellCandidates(city) {
+                if (!costApi()) return [];
+                var snap = snapshot(city, "Tib"); if (!snap || !snap.ok) return [];
+                var prefix = null;
+                try { var I = snap.icons || {}; for (var k in I) { if (I[k] && I[k].indexOf("baseview/") >= 0) { prefix = I[k].slice(0, I[k].indexOf("baseview/")); break; } } } catch (e) {}
+                var seen = {}, out = [];
+                for (var i = 0; i < snap.order.length; i++) {
+                    var b = snap.buildings[snap.order[i]];
+                    if (b.virtual || ECON_TECH[b.techName]) continue;
+                    if (seen[b.techName]) { seen[b.techName].count++; continue; }
+                    var iconUrl = null;
+                    try { var def = b.obj ? techDef(b.obj) : null; var rel = def && (def.bi || def.qi || def.dimg); if (rel && prefix) iconUrl = prefix + rel; } catch (e) {}
+                    var rec = { techName: b.techName, level: N(b.level), iconUrl: iconUrl, count: 1 };
+                    seen[b.techName] = rec; out.push(rec);
+                }
+                return out;
+            }
+
+            // Multi-build operator: force-sell the chosen special buildings, pool their 90% refunds, and
+            // fill the freed + empty tiles with the best mix of new target-resource producers, each
+            // upgraded as high as the pooled refund funds. Strictly self-funded (see opt-build-cost-refund-api).
+            //   Placement: greedily add producers (re-optimizing positions each round) until none helps,
+            //              tiles run out, or the refund can't cover another L1 build.
+            //   Leveling:  spend the pooled refund greedily by target-gain-per-cost across the new builds.
+            function optimizeMultiBuild(city, resKey, opts, forceSellTechs) {
+                opts = opts || {};
+                var snap = snapshot(city, resKey);
+                if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
+                if (!costApi()) return { ok: false, reason: "could not read the build-cost API (game may have updated)" };
+                forceSellTechs = forceSellTechs || [];
+                // Force-sell is INDEPENDENT of the "Allow reductions" checkbox: the special buildings produce no
+                // resources, so selling them never reduces anything. We always use strict scoring here (protect
+                // the other resources - just add target producers), regardless of the checkbox.
+                var allowReductions = false;
+                var alpha = (typeof opts.alpha === "number") ? opts.alpha : 0.5;
+                var targetMod = RES_CFG[resKey].mod;
+                var baselines = scoreAll(snap, startPosFor(snap, null), null, buildProdLists(snap));
+
+                // 1) force-removed set + pooled refund (never the Construction Yard)
+                var forceSet = {}; for (var fi = 0; fi < forceSellTechs.length; fi++) forceSet[forceSellTechs[fi]] = 1;
+                delete forceSet.Construction_Yard;
+                var removed = {}, sells = [], R = { tib: 0, pow: 0 };
+                for (var i = 0; i < snap.order.length; i++) {
+                    var b = snap.buildings[snap.order[i]];
+                    if (b.virtual || !forceSet[b.techName] || !b.obj) continue;
+                    removed[b.id] = true;
+                    var rf = refundFor(b.obj, N(b.level)); if (rf) { R.tib += rf.tib; R.pow += rf.pow; }
+                    sells.push({ id: b.id, techName: b.techName, harvRes: b.harvRes, level: N(b.level), x: N(b.x), y: N(b.y) });
+                }
+                if (!sells.length) return { ok: false, reason: "none of the selected force-sell buildings are on this base" };
+
+                // 2) candidate producer techs (need a live sibling to clone) + per-level cost/production tables
+                var maxLvlCap = 1; for (var oc = 0; oc < snap.order.length; oc++) maxLvlCap = Math.max(maxLvlCap, N(snap.buildings[snap.order[oc]].level));
+                var cands = [], clist = BUILD_CANDIDATES[resKey] || [];
+                for (var ckn = 0; ckn < clist.length; ckn++) {
+                    var tech = clist[ckn], hr = (tech === "Harvester") ? (resKey === "Cry" ? "Cry" : "Tib") : null;
+                    var refB = refSiblingFor(snap, tech, hr); if (!refB || !refB.obj) continue;
+                    var def = techDef(refB.obj); if (!def) continue;
+                    var refLevel = N(refB.level), cum = [null], lm = [0];
+                    for (var L = 1; L <= maxLvlCap; L++) { cum[L] = cumCost(refB.obj, L) || { tib: 0, pow: 0 }; lm[L] = lmValueAt(def, targetMod, L); }
+                    cands.push({ tech: tech, hr: hr, refB: refB, def: def, refLevel: refLevel, cum: cum, lm: lm });
+                }
+                if (!cands.length) return { ok: false, reason: "no buildable " + RES_CFG[resKey].label + " producer exists on this base to clone" };
+
+                // 3) PLACEMENT - greedily drop one producer into the single best EMPTY tile each round (no
+                // rearranging during placement, so two virtuals can never land on the same tile). Cheaper than
+                // a full search per try, and the final polish (step 4) re-optimizes positions afterwards.
+                var aug = snap, virtuals = [], committed = { tib: 0, pow: 0 };
+                // TWO independent caps: building SLOTS (non-field producers: Silo/PowerPlant/Accumulator/Refinery)
+                // and free RESOURCE FIELDS (harvesters). Force-selling frees one building slot per sold building
+                // (all force-sell candidates are non-field). Without this the optimizer would propose far more
+                // buildings than the Construction Yard's slot cap allows.
+                var slotLimit = 25, slotUsed = 25, slotsLeft, fieldsLeft = 0;
+                try { slotLimit = N(city.GetBuildingSlotLimit()); } catch (e) {}
+                try { slotUsed = N(city.GetBuildingSlotCount()); } catch (e) {}
+                try { fieldsLeft = N(city.GetNumberOfFreeResourceFieldsInCity()); } catch (e) {}
+                slotsLeft = Math.max(0, slotLimit - slotUsed) + sells.length;   // freed slots + any already-free
+                var emptyCap = emptyTiles(snap, buildOcc(snap, startPosFor(snap, removed), removed)).length;
+                var maxAdds = Math.min(emptyCap, slotsLeft + fieldsLeft, 40);
+                var curScore = scoreForMod(aug, startPosFor(aug, removed), targetMod, buildProdLists(aug)[resKey], removed);
+                for (var addN = 0; addN < maxAdds; addN++) {
+                    if (slotsLeft <= 0 && fieldsLeft <= 0) break;
+                    var basePos = startPosFor(aug, removed);
+                    var empties = emptyTiles(aug, buildOcc(aug, basePos, removed));
+                    if (!empties.length) break;
+                    var bestAdd = null;
+                    for (var ci = 0; ci < cands.length; ci++) {
+                        var cand = cands[ci], l1 = cand.cum[1] || { tib: 0, pow: 0 };
+                        var isHarv = cand.tech === "Harvester";
+                        if (isHarv ? (fieldsLeft <= 0) : (slotsLeft <= 0)) continue;       // respect the relevant cap
+                        if (committed.tib + l1.tib > R.tib || committed.pow + l1.pow > R.pow) continue;
+                        for (var e = 0; e < empties.length; e++) {
+                            var t = empties[e];
+                            var probe = makeVirtual(cand.refB, cand.refLevel, t.x, t.y);
+                            if (!terrainOK(aug, probe, t.x, t.y)) continue;
+                            var trial = augmentSnap(aug, probe), pls = buildProdLists(trial);
+                            var sc = scoreForMod(trial, startPosFor(trial, removed), targetMod, pls[resKey], removed);
+                            if (!bestAdd || sc > bestAdd.sc + 1e-6) bestAdd = { cand: cand, V: probe, sc: sc, l1: l1 };
+                        }
+                    }
+                    if (!bestAdd || bestAdd.sc <= curScore + 1e-6) break;     // no empty tile improves the target -> stop
+                    if (bestAdd.cand.tech === "Harvester") fieldsLeft--; else slotsLeft--;
+                    aug = augmentSnap(aug, bestAdd.V); virtuals.push({ V: bestAdd.V, cand: bestAdd.cand });
+                    committed.tib += bestAdd.l1.tib; committed.pow += bestAdd.l1.pow; curScore = bestAdd.sc;
+                }
+                if (!virtuals.length) return { ok: false, reason: "the refund from those sells can't fund any useful new " + RES_CFG[resKey].label + " producer here" };
+
+                // 4) polish all virtuals + existing producers together
+                var plsF = buildProdLists(aug), movF = widenMovable(aug);
+                var sFnF = allowReductions ? makeMultiScoreFn(aug, resKey, baselines, alpha, plsF) : makeStrictScoreFn(aug, resKey, baselines, plsF);
+                var pr = runSearch(aug, removed, { rounds: opts.rounds, kicks: opts.kicks, maxNeighbors: opts.maxNeighbors, restarts: 5, movableList: movF, scoreFn: sFnF }, 991);
+                var grid = buildOcc(aug, pr.bestPos, removed);
+
+                // 5) LEVELING - spend the pooled refund greedily by target-gain-per-cost
+                var spent = { tib: 0, pow: 0 };
+                for (var v = 0; v < virtuals.length; v++) { var c1 = virtuals[v].cand.cum[1] || { tib: 0, pow: 0 }; spent.tib += c1.tib; spent.pow += c1.pow; virtuals[v].level = 1; }
+                for (var v2 = 0; v2 < virtuals.length; v2++) {
+                    var V2 = virtuals[v2].V, p2 = pr.bestPos[V2.id] || { x: V2.x, y: V2.y }, ls = V2.links[targetMod] || [], cc = 0;
+                    for (var j = 0; j < ls.length; j++) { var L2 = ls[j], dlk = LINK[L2.lt]; if (!dlk || !L2.perConn) continue; cc += L2.perConn * Math.min(countLink(aug, grid, p2.x, p2.y, dlk), L2.max); }
+                    virtuals[v2].contribRef = cc; virtuals[v2].lmRef = virtuals[v2].cand.lm[virtuals[v2].cand.refLevel] || 1;
+                }
+                var lguard = 0;
+                while (lguard++ < 3000) {
+                    var pick = null;
+                    for (var v3 = 0; v3 < virtuals.length; v3++) {
+                        var vo = virtuals[v3], L = vo.level, cd = vo.cand; if (L >= maxLvlCap) continue;
+                        var stepTib = (cd.cum[L + 1].tib || 0) - (cd.cum[L].tib || 0), stepPow = (cd.cum[L + 1].pow || 0) - (cd.cum[L].pow || 0);
+                        if (spent.tib + stepTib > R.tib || spent.pow + stepPow > R.pow) continue;
+                        var gain = vo.lmRef > 0 ? vo.contribRef * ((cd.lm[L + 1] - cd.lm[L]) / vo.lmRef) : 0;
+                        var ratio = gain / (stepTib + stepPow + 1);
+                        if (gain > 0 && (!pick || ratio > pick.ratio)) pick = { vo: vo, stepTib: stepTib, stepPow: stepPow, ratio: ratio };
+                    }
+                    if (!pick) break;
+                    pick.vo.level++; spent.tib += pick.stepTib; spent.pow += pick.stepPow;
+                }
+
+                // 6) finalize virtuals at chosen levels (rescale links in place) + assemble result
+                var builds = [];
+                for (var v4 = 0; v4 < virtuals.length; v4++) {
+                    var vo4 = virtuals[v4], V4 = vo4.V, p4 = pr.bestPos[V4.id] || { x: V4.x, y: V4.y };
+                    var fresh = makeVirtual(vo4.cand.refB, vo4.level, p4.x, p4.y);
+                    V4.links = fresh.links; V4.level = vo4.level;
+                    builds.push({ techName: V4.techName, harvRes: V4.harvRes, level: vo4.level, x: p4.x, y: p4.y, typeId: V4.typeId, cost: (vo4.cand.cum[vo4.level] || null) });
+                }
+                var moves = diffMoves(aug, pr.startPos, pr.bestPos, removed, movF).filter(function (m) { for (var z = 0; z < virtuals.length; z++) if (m.id === virtuals[z].V.id) return false; return true; });
+                var bestProd = scoreAll(aug, pr.bestPos, removed, buildProdLists(aug));
+                var current = baselines[resKey], projected = bestProd[resKey];
+                return { ok: true, resKey: resKey, current: current, projected: projected, gainPct: current > 0 ? ((projected - current) / current * 100) : 0,
+                         moves: moves, sells: sells, builds: builds, removed: removed, snapshot: aug, bestPos: pr.bestPos, startPos: pr.startPos,
+                         startProd: baselines, bestProd: bestProd, allowReductions: allowReductions, alpha: alpha, refundTotal: R, spentTotal: spent, forceSell: true };
+            }
+
             // ===================== PHASE B: auto-apply ============================
             // Turn an optimize result into a dependency-safe ordered step list and fire it
             // against the live base. The move primitive is the (obfuscated) CityBuilding mover
@@ -1790,16 +2128,23 @@
                 }
                 if (pending.length) return { ok: false, reason: "couldn't sequence all moves automatically - apply by hand in move mode" };
 
-                // Package-progress loss (count each moved building once, even if staged = 2 steps).
-                var lossList = [], seen = {};
-                steps.forEach(function (st) {
-                    if (st.type !== "move" || seen[st.id]) return; seen[st.id] = 1;
-                    var L = live.byId[st.id], pct = L ? pkgProgressPct(L.obj) : null;
-                    if (pct != null && pct > 0) lossList.push({ id: st.id, techName: st.techName, harvRes: st.harvRes, level: st.level, pct: pct });
+                // Builds (self-funded sell->build->upgrade): sells freed the slot + refund, moves settled,
+                // so the target tile is now empty. Append a CreateBuilding step + an upgrade-to-level step.
+                (res.builds || []).forEach(function (bld) {
+                    var tx = N(bld.x), ty = N(bld.y);
+                    steps.push({ type: "build", techName: bld.techName, harvRes: bld.harvRes, level: N(bld.level), toX: tx, toY: ty, typeId: bld.typeId });
+                    if (N(bld.level) > 1) steps.push({ type: "upgrade", techName: bld.techName, harvRes: bld.harvRes, level: N(bld.level), toX: tx, toY: ty });
+                    occ[tx + "," + ty] = "VIRT";
                 });
-                lossList.sort(function (a, b) { return b.pct - a.pct; });
+
+                // Package-progress loss (count each moved building once, even if staged = 2 steps).
+                // Count distinct moved buildings (a staged move = 2 steps for one building). Moving is free
+                // in-game (verified: it does NOT reset package progress), so there's no loss to warn about.
+                var seen = {};
+                steps.forEach(function (st) { if (st.type === "move") seen[st.id] = 1; });
                 return { ok: true, steps: steps, nMoves: Object.keys(seen).length, nSells: (res.sells || []).length,
-                         nStaged: steps.filter(function (s) { return s.staged; }).length, lossList: lossList };
+                         nStaged: steps.filter(function (s) { return s.staged; }).length,
+                         nBuilds: (res.builds || []).length, builds: (res.builds || []) };
             }
 
             // Fire an ordered plan against the live base, SEQUENTIALLY, verifying each step BY EFFECT
@@ -1810,12 +2155,44 @@
                 hooks = hooks || {};
                 var steps = plan.steps, i = 0, done = [], failed = [];
                 function findObj(id) { try { var bd = city.get_Buildings().d; for (var k in bd) { var b = bd[k]; if (b && b.get_Id && b.get_Id() === id) return b; } } catch (e) {} return null; }
+                function findByPos(x, y) { try { var bd = city.get_Buildings().d; for (var k in bd) { var b = bd[k]; if (b && b.get_CoordX && N(b.get_CoordX()) === x && N(b.get_CoordY()) === y) return b; } } catch (e) {} return null; }
                 function fail(st, msg) { failed.push({ step: st, msg: msg }); if (hooks.onStep) try { hooks.onStep(i, st, false, msg); } catch (e) {} i++; window.setTimeout(next, 90); }
                 function ok(st) { done.push(st); if (hooks.onStep) try { hooks.onStep(i, st, true, "ok"); } catch (e) {} i++; window.setTimeout(next, 140); }
                 function verify(test, st) { var tries = 0; (function poll() { try { if (test()) return ok(st); } catch (e) {} if (++tries > 25) return fail(st, "no visible effect (timeout)"); window.setTimeout(poll, 120); })(); }
                 function next() {
                     if (i >= steps.length) { if (hooks.onDone) try { hooks.onDone({ applied: done.length, failed: failed.length, failedSteps: failed }); } catch (e) {} return; }
-                    var st = steps[i], obj = findObj(st.id);
+                    var st = steps[i];
+                    if (st.type === "build") {
+                        try {
+                            var mgr = city.AKMRLA;
+                            if (!mgr || typeof mgr.OAJKZC !== "function") return fail(st, "build manager unavailable");
+                            if (st.typeId == null) return fail(st, "missing build type id");
+                            if (findByPos(st.toX, st.toY)) return fail(st, "build tile is occupied");
+                            mgr.OAJKZC(st.typeId, st.toX, st.toY);
+                            verify(function () { return !!findByPos(st.toX, st.toY); }, st);
+                        } catch (e) { return fail(st, String(e)); }
+                        return;
+                    }
+                    if (st.type === "upgrade") {
+                        try {
+                            var ub = findByPos(st.toX, st.toY);
+                            if (!ub) return fail(st, "building to upgrade not found");
+                            var curLvl = N(ub.get_CurrentLevel ? ub.get_CurrentLevel() : 0);
+                            var nLevels = st.level - curLvl;
+                            var mgr = city.AKMRLA, hasMulti = !!(mgr && typeof mgr.ZYSGML === "function");
+                            wlog("apply upgrade @" + st.toX + ":" + st.toY + " cur=" + curLvl + " target=" + st.level + " nLevels=" + nLevels + " multiLevelApi=" + hasMulti + " canUpg=" + (ub.AJLDOH ? ub.AJLDOH() : "?"));
+                            if (nLevels <= 0) { return ok(st); }
+                            if (hasMulti) {
+                                mgr.ZYSGML(ub, nLevels);   // UpgradeBuildingMultiLevel: queues ALL levels in one command
+                            } else {
+                                ClientLib.API.City.GetInstance().UpgradeBuildingToLevel(ub, st.level); // fallback (queues only 1 level on a fresh build)
+                            }
+                            // upgrades queue server-side; level climbs over time - treat as fired-ok after a beat.
+                            window.setTimeout(function () { ok(st); }, 250);
+                        } catch (e) { return fail(st, String(e)); }
+                        return;
+                    }
+                    var obj = findObj(st.id);
                     if (!obj) return fail(st, "building not found");
                     try {
                         if (st.type === "demolish") {
@@ -1832,6 +2209,8 @@
             }
 
             return { snapshot: snapshot, score: score, optimize: optimize, optimizeWithSell: optimizeWithSell,
+                     optimizeWithReplace: optimizeWithReplace, optimizeMultiBuild: optimizeMultiBuild,
+                     forceSellCandidates: forceSellCandidates, costApi: costApi,
                      buildApplyPlan: buildApplyPlan, executeApplyPlan: executeApplyPlan, pkgProgressPct: pkgProgressPct,
                      RES_CFG: RES_CFG, GRID_W: GRID_W, GRID_H: GRID_H };
         })();
@@ -3014,7 +3393,7 @@
                 var spRounds = spinner("Rounds:", "BaseTools.OptRounds", 30, 5, 200, "Improvement passes per attempt. Higher = more thorough but slower.");
                 var spNeigh = spinner("Neighbors:", "BaseTools.OptNeighbors", 16, 4, 72, "How many candidate destination tiles to test per building each pass. Higher = more thorough but slower.");
                 var spKicks = spinner("Kicks:", "BaseTools.OptKicks", 3, 0, 20, "Random shake-ups to escape a 'good but not best' layout and explore a different arrangement. More = explores more but slower.");
-                var spSell = spinner("Sell up to:", "BaseTools.OptSellN", 0, 0, 6, "Also recommend up to N least-impactful resource buildings to DEMOLISH (free up tiles) for a bigger gain. 0 = don't sell anything. It only suggests a sale if it actually increases the chosen resource.");
+                var spSell = spinner("Sell up to:", "BaseTools.OptSellN", 0, 0, 6, "Auto-sell up to N ECONOMY / duplicate buildings (Silo, Refinery, spare Harvester/PowerPlant/Accumulator) when it raises the chosen resource - and, with 'Allow reductions' on, build a producer in the freed tile. This is SEPARATE from 'Force-sell special buildings' (Defense HQ, Airport, etc.), which you select by checking them - no count needed here. 0 = don't auto-sell economy buildings.");
                 // "Allow reductions" - widen the search to consider moves that improve the target resource
                 // AT THE COST of other resources. Score = target_gain - 0.5*sum(other losses), so the
                 // optimizer is willing to take a -200 Tib loss for a +101 Crystal gain but NOT a +99 gain.
@@ -3027,7 +3406,54 @@
                 });
                 cbAllowRed.addListener("changeValue", function (e) { MM.settings.set("BaseTools.OptAllowReductions", !!e.getData()); });
                 setRow.add(cbAllowRed);
+                // "Force-sell special buildings" - reveals the picker below for the "one-of" non-economy buildings
+                // (Defense HQ/Facility, Command Center, Barracks, Factory, Airport, Support). Checked ones are
+                // force-demolished and their pooled 90% refund funds new target-resource producers in the freed
+                // tiles (optimizeMultiBuild). NOTE: ordinary self-funded sell->build (e.g. sell a Silo, add an
+                // Accumulator) happens automatically whenever "Sell up to" >= 1 - it does NOT need this box.
+                var cbForceSell = new qx.ui.form.CheckBox("Force-sell special buildings").set({
+                    value: !!MM.settings.get("BaseTools.OptAllowBuild", false),
+                    alignY: "middle",
+                    toolTipText: "Reveals a checklist of the 'one-of' special buildings on this base (Defense HQ/Facility, Command Center, Barracks, Factory, Airport, Support). Check any you're willing to sacrifice; the optimizer demolishes them, pools their 90% refund, and fills the freed tiles with the best new producers of the chosen resource (early-game 'strip to the Construction Yard' play).\n\nYou do NOT need this for the normal case: with 'Sell up to' >= 1 and 'Allow reductions' on, the optimizer already auto-considers selling an economy building (e.g. a Silo) and building a producer (e.g. an Accumulator) in its place."
+                });
+                cbForceSell.addListener("changeValue", function (e) { MM.settings.set("BaseTools.OptAllowBuild", !!e.getData()); rebuildForceSell(); });
+                setRow.add(cbForceSell);
                 page.add(setRow);
+
+                // ---- Force-sell picker: the "one-of" special buildings to sacrifice (shown when the box above
+                // is checked). Icon + level + checkbox per type; selection persists (BaseTools.OptForceSell).
+                // On a dark panel for readable contrast; the panel only appears when there's content. ----
+                var forceSellBox = new qx.ui.container.Composite(new qx.ui.layout.VBox(3)).set({ padding: 0 });
+                page.add(forceSellBox);
+                var forceSellDeco = null;
+                try { forceSellDeco = new qx.ui.decoration.Decorator().set({ radius: 5, backgroundColor: "#1b1b1b", width: 1, color: "#3a3a3a", style: "solid" }); } catch (e) {}
+                function rebuildForceSell() {
+                    try { var kids = forceSellBox.removeAll(); for (var i = 0; i < kids.length; i++) { try { kids[i].destroy(); } catch (e) {} } } catch (e) {}
+                    if (!cbForceSell.getValue()) { try { forceSellBox.setDecorator(null); forceSellBox.setPadding(0); } catch (e) {} return; }
+                    try { if (forceSellDeco) forceSellBox.setDecorator(forceSellDeco); forceSellBox.setPadding(8); } catch (e) {}
+                    forceSellBox.add(new qx.ui.basic.Label("<b style='color:#5fe0f5'>Force-sell</b> &ndash; just <b>check</b> the “one-of” buildings you'll sacrifice (count is automatic &ndash; you do <b>not</b> need “Sell up to”). Their pooled refund funds new producers of the chosen resource. Works regardless of “Allow reductions”. (Economy/duplicate buildings: use “Sell up to” instead.)").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#cfeaf2" }));
+                    var city = selectedCity();
+                    if (!city) { forceSellBox.add(new qx.ui.basic.Label("(open or select a base)").set({ textColor: "#aaaaaa" })); return; }
+                    var cands = [];
+                    try { cands = OPT.forceSellCandidates(city) || []; } catch (e) { werr("forceSellCandidates failed:", e); }
+                    if (!cands.length) { forceSellBox.add(new qx.ui.basic.Label("(no force-sellable buildings on this base)").set({ textColor: "#aaaaaa" })); return; }
+                    var sel = MM.settings.get("BaseTools.OptForceSell", []) || [], selMap = {}; for (var s = 0; s < sel.length; s++) selMap[sel[s]] = 1;
+                    var flow = new qx.ui.container.Composite(new qx.ui.layout.Flow(14, 5));
+                    cands.forEach(function (c) {
+                        var row = new qx.ui.container.Composite(new qx.ui.layout.HBox(4));
+                        var cb = new qx.ui.form.CheckBox().set({ value: !!selMap[c.techName], alignY: "middle" });
+                        cb.addListener("changeValue", function (e) {
+                            var cur = MM.settings.get("BaseTools.OptForceSell", []) || [], m = {}; for (var k = 0; k < cur.length; k++) m[cur[k]] = 1;
+                            if (e.getData()) m[c.techName] = 1; else delete m[c.techName];
+                            MM.settings.set("BaseTools.OptForceSell", Object.keys(m));
+                        });
+                        row.add(cb);
+                        if (c.iconUrl) { try { row.add(new qx.ui.basic.Label("<img src='" + c.iconUrl + "' style='height:20px;vertical-align:middle;' />").set({ rich: true, alignY: "middle" })); } catch (e) {} }
+                        row.add(new qx.ui.basic.Label(nameOf(c) + " L" + c.level + (c.count > 1 ? (" ×" + c.count) : "")).set({ rich: true, alignY: "middle", textColor: "#f0f0f0" }));
+                        flow.add(row);
+                    });
+                    forceSellBox.add(flow);
+                }
 
                 // ---- Apply row: one-click auto-apply of the proposed layout (Phase B) ----
                 var applyRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8));
@@ -3035,29 +3461,39 @@
                 try { applyBtn.setTextColor("#7ee07e"); } catch (e) {}
                 applyBtn.addListener("execute", function () { onApply(); });
                 applyRow.add(applyBtn, { flex: 0 });
-                applyRow.add(new qx.ui.basic.Label("Run an optimize first, then apply the proposed moves to your base.").set({ rich: true, alignY: "middle", textColor: "#999999" }), { flex: 1 });
+                applyRow.add(new qx.ui.basic.Label("Click a resource above (<b>Tiberium / Crystal / Power / Credits</b>) to generate a plan, then <b>Apply to base</b> to make those changes in-game.").set({ rich: true, wrap: true, allowGrowX: true, alignY: "middle", textColor: "#333333" }), { flex: 1 });
                 page.add(applyRow);
                 function setApplyEnabled(on) { try { applyBtn.setEnabled(!!on); } catch (e) {} }
 
-                var summary = new qx.ui.basic.Label("").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#cccccc" });
+                // Summary sits on a dark panel so the colored status text reads with high contrast.
+                var summary = new qx.ui.basic.Label("").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e6e6e6", padding: 8 });
+                try { summary.setDecorator(new qx.ui.decoration.Decorator().set({ radius: 5, backgroundColor: "#1b1b1b", width: 1, color: "#3a3a3a", style: "solid" })); } catch (e) {}
                 page.add(summary);
 
-                // ---- body: single vertical column (map on top, legend + results below) inside one scroll,
-                // so the whole panel wraps and the window can be made narrow. ----
+                // ---- body: map on the LEFT, results/net-change panel to its RIGHT (uses the wide empty space),
+                // legend BELOW. All inside one scroll so the panel still works when the window is narrow. ----
                 var scrollAll = new qx.ui.container.Scroll();
                 var contentCol = new qx.ui.container.Composite(new qx.ui.layout.VBox(8));
                 scrollAll.add(contentCol);
                 page.add(scrollAll, { flex: 1 });
+
+                var topRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(12));
+                contentCol.add(topRow);
 
                 var mapBox = new qx.ui.container.Composite(new qx.ui.layout.VBox(4));
                 var mapTitle = new qx.ui.basic.Label("<b>Base layout</b>").set({ rich: true, textColor: "#ffffff" });
                 mapBox.add(mapTitle);
                 var grid = new qx.ui.container.Composite(new qx.ui.layout.Grid(2, 2));
                 mapBox.add(grid);
-                contentCol.add(mapBox);
+                topRow.add(mapBox);
 
-                var rightBox = new qx.ui.container.Composite(new qx.ui.layout.VBox(6));
-                contentCol.add(rightBox);
+                // results / net-change panel - to the RIGHT of the map (fills the empty space)
+                var resultCol = new qx.ui.container.Composite(new qx.ui.layout.VBox(6));
+                topRow.add(resultCol, { flex: 1 });
+
+                // legend - BELOW the map+results row
+                var legendCol = new qx.ui.container.Composite(new qx.ui.layout.VBox(6));
+                contentCol.add(legendCol);
 
                 // ---- icon + label helpers ----
                 var ABBR = { Harvester: "H", Silo: "S", PowerPlant: "P", Accumulator: "A", Refinery: "R", Construction_Yard: "CY", Defense_HQ: "DHQ", Defense_Facility: "DEF", Support_Art: "SUP" };
@@ -3100,11 +3536,11 @@
                     return comp;
                 }
 
-                // Render any layout: pos = {id->{x,y}} of buildings to draw; moves/sells overlay markers.
-                function renderLayout(snap, pos, moves, sells) {
+                // Render any layout: pos = {id->{x,y}} of buildings to draw; moves/sells/builds overlay markers.
+                function renderLayout(snap, pos, moves, sells, builds) {
                     try { var kids = grid.removeAll(); for (var ki = 0; ki < kids.length; ki++) { try { kids[ki].destroy(); } catch (e) {} } } catch (e) {}
                     if (!snap) return;
-                    moves = moves || []; sells = sells || [];
+                    moves = moves || []; sells = sells || []; builds = builds || [];
                     var occ = []; for (var y = 0; y < OPT.GRID_H; y++) { occ.push([]); for (var x = 0; x < OPT.GRID_W; x++) occ[y].push(null); }
                     for (var id in pos) { var p = pos[id]; if (p && snap.buildings[id]) occ[p.y][p.x] = snap.buildings[id]; }
                     var moved = {}, moveNum = {};
@@ -3113,10 +3549,18 @@
                     for (var mj = 0; mj < moves.length; mj++) { var mv = moves[mj]; if (!occ[mv.fromY][mv.fromX]) vacated[mv.fromX + "," + mv.fromY] = mj + 1; }
                     var soldAt = {};
                     for (var si = 0; si < sells.length; si++) { soldAt[sells[si].x + "," + sells[si].y] = sells[si]; }
+                    var builtAt = {};
+                    for (var bi = 0; bi < builds.length; bi++) builtAt[builds[bi].x + "," + builds[bi].y] = builds[bi];
 
                     for (var ry = 0; ry < OPT.GRID_H; ry++) for (var rx = 0; rx < OPT.GRID_W; rx++) {
                         var b = occ[ry][rx], terr = snap.terrain[ry][rx], key = rx + "," + ry, cell;
-                        if (b) {
+                        if (b && builtAt[key]) {
+                            var nb = builtAt[key];
+                            cell = makeCell({ iconUrl: iconUrlOf(snap, b), text: iconUrlOf(snap, b) ? null : abbrOf(b), fg: typeColor(b),
+                                level: nb.level, bg: "#0e3a44", border: "#4dd0e1", borderWidth: 2,
+                                badge: "+", badgeBg: "#0d7a8c", badgeFg: "#d6fbff",
+                                tip: "BUILD NEW " + nameOf(b) + " -> L" + nb.level + " @ " + rx + ":" + ry });
+                        } else if (b) {
                             var n = moved[b.id];
                             cell = makeCell({ iconUrl: iconUrlOf(snap, b), text: iconUrlOf(snap, b) ? null : abbrOf(b), fg: typeColor(b),
                                 level: b.level, bg: n ? "#1e6e1e" : terrBg(terr), border: n ? "#7ee07e" : "#000000", borderWidth: n ? 2 : 1,
@@ -3149,15 +3593,17 @@
                         "Tiles show each building's icon + its <b>level</b> (corner).<br>" +
                         "<span style='color:#7ee07e'>&#9632;</span> green tile / #badge = building <b>moves here</b> (matching <span style='color:#ff8a8a'>&rarr;#</span> red tile = where it left).<br>" +
                         "<span style='color:#ff8a8a'>&#10006;</span> red tile = recommended <b>sell</b> (demolish).<br>" +
+                        "<span style='color:#4dd0e1'>&#43;</span> cyan tile = <b>build new</b> building here (self-funded by a sell's refund).<br>" +
                         "Field tiles tinted: <span style='color:#7ed07e'>tiberium</span> / <span style='color:#8fc0ff'>crystal</span>.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e6e6e6" }));
                     panel.add(new qx.ui.basic.Label(
                         "<b>Controls</b><br>" +
                         "<b>Rounds</b> &ndash; improvement passes per attempt (higher = more thorough, slower).<br>" +
                         "<b>Neighbors</b> &ndash; candidate destination tiles tested per building each pass.<br>" +
                         "<b>Kicks</b> &ndash; random shake-ups to escape a 'good-but-not-best' layout.<br>" +
-                        "<b>Sell up to N</b> &ndash; also suggest demolishing up to N low-impact buildings to free tiles for a bigger gain (only if it helps).").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#cfcfcf" }));
-                    rightBox.add(panel);
-                    rightBox.add(new qx.ui.core.Spacer(null, 6));
+                        "<b>Sell up to N</b> &ndash; also demolish up to N low-impact economy buildings to free tiles / fund a build. With <b>Allow reductions</b> on, the optimizer auto-considers selling one (e.g. a Silo) and BUILDING a producer (e.g. an Accumulator) in its place, self-funded by the 90% refund.<br>" +
+                        "<b>Force-sell special buildings</b> &ndash; reveals a checklist of the base's 'one-of' buildings (Defense HQ/Facility, Command Center, etc.). Sacrifices the checked ones and fills the freed tiles with the best new producers (early-game strip-to-CY). Apply does demolish &rarr; move &rarr; build &rarr; upgrade automatically.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#cfcfcf" }));
+                    legendCol.add(panel);
+                    legendCol.add(new qx.ui.core.Spacer(null, 6));
                 }
 
                 var resultBox = null; // sub-container for per-run move/sell list (so legend stays put)
@@ -3166,7 +3612,7 @@
                     resultBox = new qx.ui.container.Composite(new qx.ui.layout.VBox(2)).set({ padding: 8 });
                     try { resultBox.setDecorator(new qx.ui.decoration.Decorator().set({ radius: 5, backgroundColor: "#1b1b1b", width: 1, color: "#3a3a3a", style: "solid" })); }
                     catch (e) { try { resultBox.setBackgroundColor("#1b1b1b"); } catch (e2) {} }
-                    rightBox.add(resultBox);
+                    resultCol.add(resultBox);
                     return resultBox;
                 }
 
@@ -3218,6 +3664,21 @@
                         for (var s = 0; s < res.sells.length; s++) { var sl = res.sells[s]; box.add(new qx.ui.basic.Label("✕ <b>" + nameOf(sl) + "</b> L" + sl.level + " (at " + sl.x + ":" + sl.y + ")").set({ rich: true, textColor: "#ffc9c9" })); }
                         box.add(new qx.ui.core.Spacer(null, 4));
                     }
+                    if (res.builds && res.builds.length) {
+                        box.add(new qx.ui.basic.Label("<b style='color:#4dd0e1'>Build (" + res.builds.length + ")</b>").set({ rich: true }));
+                        for (var bi2 = 0; bi2 < res.builds.length; bi2++) {
+                            var bl = res.builds[bi2];
+                            var ref = bl.refund ? (" - funded by refund " + MM.num.compact(Math.round(bl.refund.tib), 1) + " Tib + " + MM.num.compact(Math.round(bl.refund.pow), 1) + " Pow") : "";
+                            var cost = bl.cost ? (" (build cost " + MM.num.compact(Math.round(bl.cost.tib), 1) + " Tib + " + MM.num.compact(Math.round(bl.cost.pow), 1) + " Pow)") : "";
+                            box.add(new qx.ui.basic.Label("+ <b>" + nameOf(bl) + "</b> &rarr; L" + bl.level + " (at " + bl.x + ":" + bl.y + ")" + cost + ref).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bfeff7" }));
+                        }
+                        if (res.forceSell && res.refundTotal) {
+                            var sp = res.spentTotal || { tib: 0, pow: 0 };
+                            box.add(new qx.ui.basic.Label("Pooled refund: <b>" + MM.num.compact(Math.round(res.refundTotal.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(res.refundTotal.pow), 1) + "</b> Pow &middot; spent <b>" + MM.num.compact(Math.round(sp.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(sp.pow), 1) + "</b> Pow on builds+upgrades.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#9fd0e0" }));
+                            box.add(new qx.ui.basic.Label("<i>Tip: after applying, run <b>Upgrade Priority</b> (Transfer as needed) for a cross-base max-upgrade pass.</i>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bbbbbb" }));
+                        }
+                        box.add(new qx.ui.core.Spacer(null, 4));
+                    }
                     box.add(new qx.ui.basic.Label("<b>Moves (" + res.moves.length + ")</b>").set({ rich: true, textColor: "#ffffff" }));
                     if (!res.moves.length) {
                         var noteMsg = res.allowReductions
@@ -3230,7 +3691,7 @@
                         box.add(new qx.ui.basic.Label("<b>" + (i + 1) + "</b>. " + nameOf(m) + " L" + m.level + "  <b>" + dirArrow(m.toX - m.fromX, m.toY - m.fromY) + "</b> " + dist + (dist === 1 ? " tile" : " tiles")).set({ rich: true, textColor: "#e6e6e6", toolTipText: m.fromX + ":" + m.fromY + " -> " + m.toX + ":" + m.toY }));
                     }
                     box.add(new qx.ui.core.Spacer(null, 6));
-                    var changed = res.moves.length || (res.sells && res.sells.length);
+                    var changed = res.moves.length || (res.sells && res.sells.length) || (res.builds && res.builds.length);
                     box.add(new qx.ui.basic.Label(changed
                         ? "Numbers match the grid. Click <b>Apply to base</b> above to make these changes in-game (you'll get a confirmation first), or do them by hand in move mode."
                         : "Numbers match the grid.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#aaaaaa" }));
@@ -3272,19 +3733,18 @@
                         for (var s = 0; s < sells.length; s++) { var sl = sells[s]; win.add(new qx.ui.basic.Label("&nbsp;&nbsp;&#10006; " + nameOf(sl) + " L" + sl.level + " (at " + sl.fromX + ":" + sl.fromY + ")").set({ rich: true, textColor: "#ffc9c9" })); }
                     }
 
-                    if (plan.lossList && plan.lossList.length) {
-                        win.add(new qx.ui.basic.Label("<b style='color:#ffd24d'>Package progress reset</b> (moving restarts a building's progress toward its next collectable package):").set({ rich: true, wrap: true, allowGrowX: true }));
-                        var maxShow = 8;
-                        for (var l = 0; l < plan.lossList.length && l < maxShow; l++) { var li = plan.lossList[l]; win.add(new qx.ui.basic.Label("&nbsp;&nbsp;&bull; " + nameOf(li) + " L" + li.level + " &ndash; ~" + li.pct + "% lost").set({ rich: true, textColor: "#e9d9a6" })); }
-                        if (plan.lossList.length > maxShow) win.add(new qx.ui.basic.Label("&nbsp;&nbsp;&hellip; and " + (plan.lossList.length - maxShow) + " more").set({ rich: true, textColor: "#bbbbbb" }));
-                    } else if (plan.nMoves) {
-                        win.add(new qx.ui.basic.Label("No in-progress package progress will be lost.").set({ rich: true, textColor: "#9fdf9f" }));
+                    if (plan.nBuilds) {
+                        win.add(new qx.ui.basic.Label("<b style='color:#4dd0e1'>&#43; " + plan.nBuilds + " new building" + (plan.nBuilds === 1 ? "" : "s") + " will be BUILT and UPGRADED</b> (paid from the demolition refund):").set({ rich: true, wrap: true, allowGrowX: true }));
+                        var blds = plan.steps.filter(function (s) { return s.type === "build"; });
+                        for (var bb = 0; bb < blds.length; bb++) { var bl = blds[bb]; win.add(new qx.ui.basic.Label("&nbsp;&nbsp;&#43; " + nameOf(bl) + " &rarr; L" + bl.level + " (at " + bl.toX + ":" + bl.toY + ")").set({ rich: true, textColor: "#bfeff7" })); }
+                        win.add(new qx.ui.basic.Label("<span style='color:#ffb74d'>Note: build &amp; upgrade are queued as game commands; the new building appears immediately and upgrades complete over time. Make sure the demolition refund covers the cost.</span>").set({ rich: true, wrap: true, allowGrowX: true }));
                     }
+
 
                     win.add(new qx.ui.core.Spacer(null, 4));
                     var btnRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8, "right"));
                     var cancel = new qx.ui.form.Button("Cancel");
-                    var go = new qx.ui.form.Button(plan.nSells ? ("Demolish " + plan.nSells + " + apply") : ("Apply " + plan.nMoves + " move" + (plan.nMoves === 1 ? "" : "s")));
+                    var go = new qx.ui.form.Button(plan.nBuilds ? ("Demolish + build + apply") : plan.nSells ? ("Demolish " + plan.nSells + " + apply") : ("Apply " + plan.nMoves + " move" + (plan.nMoves === 1 ? "" : "s")));
                     try { go.setTextColor(plan.nSells ? "#ff8a8a" : "#7ee07e"); } catch (e) {}
                     cancel.addListener("execute", function () { try { win.close(); win.destroy(); } catch (e) {} });
                     go.addListener("execute", function () { try { win.close(); win.destroy(); } catch (e) {} runApply(city, plan); });
@@ -3305,8 +3765,8 @@
                     OPT.executeApplyPlan(city, plan, {
                         onStep: function (idx, step, ok2) {
                             doneN++;
-                            var verb = step.type === "demolish" ? "Demolished" : (step.staged ? "Staged" : "Moved");
-                            summary.setValue("Applying&hellip; " + doneN + "/" + total + " - " + (ok2 ? "" : "<span style='color:#ff8a8a'>FAILED </span>") + verb + " " + nameOf(step) + (step.type === "move" ? " &rarr; " + step.toX + ":" + step.toY : ""));
+                            var verb = step.type === "demolish" ? "Demolished" : step.type === "build" ? "Built" : step.type === "upgrade" ? "Upgraded" : (step.staged ? "Staged" : "Moved");
+                            summary.setValue("Applying&hellip; " + doneN + "/" + total + " - " + (ok2 ? "" : "<span style='color:#ff8a8a'>FAILED </span>") + verb + " " + nameOf(step) + (step.toX != null ? " &rarr; " + step.toX + ":" + step.toY : ""));
                         },
                         onDone: function (sum) {
                             applying = false; busy = false; lastRes = null;
@@ -3321,6 +3781,7 @@
                 // Draw the base as-is (no moves) so the grid is populated the moment you open the tab / switch base.
                 function renderCurrent() {
                     lastRes = null; setApplyEnabled(false);
+                    try { rebuildForceSell(); } catch (e) {}
                     try {
                         var city = selectedCity();
                         if (!city) { mapTitle.setValue("<b>Base layout</b>"); return; }
@@ -3340,9 +3801,11 @@
                     busy = true;
                     var sellN = spSell.getValue();
                     var allowReductions = !!cbAllowRed.getValue();
+                    var forceSellOn = !!cbForceSell.getValue();
+                    var forceSell = forceSellOn ? (MM.settings.get("BaseTools.OptForceSell", []) || []) : [];
                     summary.setValue("Optimizing " + OPT.RES_CFG[resKey].label
-                        + (sellN ? " (considering up to " + sellN + " sell" + (sellN > 1 ? "s" : "") + ")" : "")
-                        + (allowReductions ? " (allowing reductions in other resources)" : "")
+                        + (forceSell.length ? " (force-selling " + forceSell.length + " + building)" : (sellN ? " (up to " + sellN + " sell" + (sellN > 1 ? "s" : "") + ", auto-build)" : ""))
+                        + (allowReductions && !forceSell.length ? " (allowing reductions)" : "")
                         + "...");
                     MM.settings.set("BaseTools.OptResource", resKey);
                     window.setTimeout(function () {
@@ -3350,18 +3813,24 @@
                             rounds: spRounds.getValue(), maxNeighbors: spNeigh.getValue(), kicks: spKicks.getValue(),
                             allowReductions: allowReductions
                         };
-                        try { res = sellN > 0 ? OPT.optimizeWithSell(city, resKey, opts, sellN) : OPT.optimize(city, resKey, opts); }
+                        try {
+                            // force-sell special buildings -> multi-build; else any sell auto-considers a self-funded
+                            // build (optimizeWithReplace falls back to plain sell when no build wins); else plain optimize.
+                            if (forceSell.length) res = OPT.optimizeMultiBuild(city, resKey, opts, forceSell);
+                            else if (sellN > 0) res = OPT.optimizeWithReplace(city, resKey, opts, sellN);
+                            else res = OPT.optimize(city, resKey, opts);
+                        }
                         catch (e) { werr("OPT optimize threw:", e); res = { ok: false, reason: "internal error (see console)" }; }
                         try {
                             if (res && res.ok) {
                                 var cn = MM.num.compact(Math.round(res.current), 1), pn = MM.num.compact(Math.round(res.projected), 1);
                                 var sign = res.gainPct >= 0 ? "+" : "";
-                                var changed = res.moves.length || (res.sells && res.sells.length);
+                                var changed = res.moves.length || (res.sells && res.sells.length) || (res.builds && res.builds.length);
                                 var col = changed ? "#ffe14d" : "#7ee07e";
                                 var modeNote = res.allowReductions ? " <span style='color:#ffb74d'>[allow reductions: ON]</span>" : "";
-                                summary.setValue("<b style='color:" + col + "'>" + OPT.RES_CFG[resKey].label + "</b> (continuous /h): <b>" + cn + "</b> &rarr; <b>" + pn + "</b> (<b>" + sign + res.gainPct.toFixed(1) + "%</b>) via <b>" + res.moves.length + "</b> move(s)" + (res.sells && res.sells.length ? " + <b>" + res.sells.length + "</b> sell(s)" : "") + ". Figures are continuous production (packages aren't layout-dependent)." + modeNote + (res.snapshot && res.snapshot.calibWarn ? " <span style='color:#ffb74d'>(" + res.snapshot.calibWarn + " link(s) uncalibrated)</span>" : ""));
+                                summary.setValue("<b style='color:" + col + "'>" + OPT.RES_CFG[resKey].label + "</b> (continuous /h): <b>" + cn + "</b> &rarr; <b>" + pn + "</b> (<b>" + sign + res.gainPct.toFixed(1) + "%</b>) via <b>" + res.moves.length + "</b> move(s)" + (res.sells && res.sells.length ? " + <b>" + res.sells.length + "</b> sell(s)" : "") + (res.builds && res.builds.length ? " + <b>" + res.builds.length + "</b> build(s)" : "") + ". Figures are continuous production (packages aren't layout-dependent)." + modeNote + (res.snapshot && res.snapshot.calibWarn ? " <span style='color:#ffb74d'>(" + res.snapshot.calibWarn + " link(s) uncalibrated)</span>" : ""));
                                 mapTitle.setValue("<b>Proposed layout</b>");
-                                renderLayout(res.snapshot, res.bestPos, res.moves, res.sells);
+                                renderLayout(res.snapshot, res.bestPos, res.moves, res.sells, res.builds);
                                 lastRes = res; setApplyEnabled(!!changed);   // enable Apply only when there's something to apply
                             } else {
                                 summary.setValue("<span style='color:#ff8a8a'>Could not optimize: " + ((res && res.reason) || "unknown") + "</span>");

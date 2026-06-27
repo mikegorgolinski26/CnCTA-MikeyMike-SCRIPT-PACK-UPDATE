@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.5
+// @version         1.1.6
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -3415,7 +3415,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                         }
                                         //MOD enable native save formation function
                                         if (this.ArmySetupAttackBar[i].objid == "btn_saveload") {
-                                            console.log("SAVELOAD BTN = "+i);
+                                            if (window.MM_DEBUG) console.log("SAVELOAD BTN = "+i);
                                             //var regex = new RegExp( i + '\\.addListener\\(.,this\\.([A-Za-z_]+)');
                                             //this.SaveLoadF = webfrontend.gui.bars.ArmySetupAttackBar.$$original.toString().match(regex)[1];
                                             this.SaveLoad = this.ArmySetupAttackBar[i];
@@ -3433,7 +3433,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 }
                                 for (var i in this.ArmySetupAttackBarMainChildren) {
                                     if (this.ArmySetupAttackBarMainChildren[i].$$user_decorator == "pane-armysetup-right") {
-                                        console.log(this.ArmySetupAttackBarMainChildren[i].$$user_decorator)
+                                        if (window.MM_DEBUG) console.log(this.ArmySetupAttackBarMainChildren[i].$$user_decorator)
                                         this.armySetupRight = this.ArmySetupAttackBarMainChildren[i];
                                         this.armySetupRight.removeAt(1);
                                         this.armySetupRight.addAt(nativeSimBarDisableButton, 1);
@@ -3474,7 +3474,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 }
                                 for (var i in this.ArmySetupAttackBarMainChildren) {
                                     if (this.ArmySetupAttackBarMainChildren[i].$$user_decorator == "bg-armysetup-top") {
-                                        console.log('armysetup-top detected! : at  ArmySetupAttackBarChildren' + i);
+                                        if (window.MM_DEBUG) console.log('armysetup-top detected! : at  ArmySetupAttackBarChildren' + i);
                                         this._armyBar.addAt(this.ArmySetupAttackBarMainChildren[i], 3);
                                         break;
                                     }
@@ -5891,7 +5891,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         var app = qx.core.Init.getApplication();
                         if (app !== null && app.initDone === true && ClientLib.Data.MainData.GetInstance().get_Player().get_Id() !== 0 && ClientLib.Data.MainData.GetInstance().get_Server().get_WorldId() !== 0) {
                             try {
-                                console.time("loaded in");
+                                if (window.MM_DEBUG) console.time("loaded in");
                                 // replacing LoadCombatDirect
                                 if (ClientLib.Vis.Battleground.Battleground.prototype.LoadCombatDirect === undefined) {
                                     var sBString = ClientLib.API.Battleground.prototype.SimulateBattle.toString();
@@ -5900,15 +5900,13 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     var lCString = ClientLib.API.Battleground.prototype[targetMethod].toString();
                                     //MOD 22.3-2
                                     var methodLoadDirect = lCString.match(/\$I\.[A-Z]{6}\.[A-Z]{6}\(\)\.[A-Z]{6}\(\)\.([A-Z]{6})\([a-z]\.d\)/)[1];
-                                    console.log(methodLoadDirect);
+                                    if (window.MM_DEBUG) console.log(methodLoadDirect);
                                     ClientLib.Vis.Battleground.Battleground.prototype.LoadCombatDirect = ClientLib.Vis.Battleground.Battleground.prototype[methodLoadDirect];
                                 }
                                 translation();
                                 createClasses();
                                 TABS.getInstance();
-                                console.group("Tiberium Alliances Battle Simulator V2");
-                                console.timeEnd("loaded in");
-                                console.groupEnd();
+                                if (window.MM_DEBUG) { console.group("Tiberium Alliances Battle Simulator V2"); console.timeEnd("loaded in"); console.groupEnd(); }
                             } catch (e) {
                                 console.group("Tiberium Alliances Battle Simulator V2");
                                 console.error("Error in waitForGame", e);
