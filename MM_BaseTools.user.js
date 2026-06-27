@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.21
+// @version         1.4.22
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -1892,38 +1892,60 @@
                 return out;
             }
 
-            // Multi-build operator: force-sell the chosen special buildings, pool their 90% refunds, and
-            // fill the freed + empty tiles with the best mix of new target-resource producers, each
-            // upgraded as high as the pooled refund funds. Strictly self-funded (see opt-build-cost-refund-api).
-            //   Placement: greedily add producers (re-optimizing positions each round) until none helps,
-            //              tiles run out, or the refund can't cover another L1 build.
-            //   Leveling:  spend the pooled refund greedily by target-gain-per-cost across the new builds.
+            // Stored spendable resources on a base (Tiberium + Power) - the budget for FREE-SLOT builds.
+            function storedBudget(city) {
+                var tib = 0, pow = 0;
+                try { tib = N(city.GetResourceCount(ClientLib.Base.EResourceType.Tiberium)); } catch (e) {}
+                try { pow = N(city.GetResourceCount(ClientLib.Base.EResourceType.Power)); } catch (e) {}
+                return { tib: tib, pow: pow };
+            }
+            // Free building slots (non-field) and free resource fields (harvesters) on a base.
+            function freeCaps(city) {
+                var slot = 0, field = 0;
+                try { slot = Math.max(0, N(city.GetBuildingSlotLimit()) - N(city.GetBuildingSlotCount())); } catch (e) {}
+                try { field = N(city.GetNumberOfFreeResourceFieldsInCity()); } catch (e) {}
+                return { slot: slot, field: field };
+            }
+
+            // Multi-build operator. TWO modes:
+            //  - FORCE-SELL (forceSellTechs non-empty): demolish the checked special buildings, pool their 90%
+            //    refunds, and fill the freed + empty tiles with new target-resource producers. Self-funded.
+            //  - FREE-SLOT (forceSellTechs empty): build into already-free building slots / resource fields,
+            //    funded by the base's STORED Tiberium + Power, upgraded as high as that affords. No selling.
+            // Placement: greedily drop one producer into the best empty tile per round (no mid-placement
+            // rearrange). Leveling: spend the budget greedily by target-gain-per-cost across the new builds.
             function optimizeMultiBuild(city, resKey, opts, forceSellTechs) {
                 opts = opts || {};
                 var snap = snapshot(city, resKey);
                 if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
                 if (!costApi()) return { ok: false, reason: "could not read the build-cost API (game may have updated)" };
                 forceSellTechs = forceSellTechs || [];
-                // Force-sell is INDEPENDENT of the "Allow reductions" checkbox: the special buildings produce no
-                // resources, so selling them never reduces anything. We always use strict scoring here (protect
-                // the other resources - just add target producers), regardless of the checkbox.
+                var freeSlotMode = !forceSellTechs.length;
+                // Always strict scoring (add target producers without harming other resources); independent of
+                // the "Allow reductions" checkbox.
                 var allowReductions = false;
                 var alpha = (typeof opts.alpha === "number") ? opts.alpha : 0.5;
                 var targetMod = RES_CFG[resKey].mod;
                 var baselines = scoreAll(snap, startPosFor(snap, null), null, buildProdLists(snap));
 
-                // 1) force-removed set + pooled refund (never the Construction Yard)
-                var forceSet = {}; for (var fi = 0; fi < forceSellTechs.length; fi++) forceSet[forceSellTechs[fi]] = 1;
-                delete forceSet.Construction_Yard;
+                // 1) removed set + budget R.
                 var removed = {}, sells = [], R = { tib: 0, pow: 0 };
-                for (var i = 0; i < snap.order.length; i++) {
-                    var b = snap.buildings[snap.order[i]];
-                    if (b.virtual || !forceSet[b.techName] || !b.obj) continue;
-                    removed[b.id] = true;
-                    var rf = refundFor(b.obj, N(b.level)); if (rf) { R.tib += rf.tib; R.pow += rf.pow; }
-                    sells.push({ id: b.id, techName: b.techName, harvRes: b.harvRes, level: N(b.level), x: N(b.x), y: N(b.y) });
+                if (freeSlotMode) {
+                    // build into already-free slots, funded by stored Tiberium + Power
+                    R = storedBudget(city);
+                    if (freeCaps(city).slot <= 0 && freeCaps(city).field <= 0) return optimize(city, resKey, opts); // no room -> just moves
+                } else {
+                    var forceSet = {}; for (var fi = 0; fi < forceSellTechs.length; fi++) forceSet[forceSellTechs[fi]] = 1;
+                    delete forceSet.Construction_Yard;
+                    for (var i = 0; i < snap.order.length; i++) {
+                        var b = snap.buildings[snap.order[i]];
+                        if (b.virtual || !forceSet[b.techName] || !b.obj) continue;
+                        removed[b.id] = true;
+                        var rf = refundFor(b.obj, N(b.level)); if (rf) { R.tib += rf.tib; R.pow += rf.pow; }
+                        sells.push({ id: b.id, techName: b.techName, harvRes: b.harvRes, level: N(b.level), x: N(b.x), y: N(b.y) });
+                    }
+                    if (!sells.length) return { ok: false, reason: "none of the selected force-sell buildings are on this base" };
                 }
-                if (!sells.length) return { ok: false, reason: "none of the selected force-sell buildings are on this base" };
 
                 // 2) candidate producer techs (need a live sibling to clone) + per-level cost/production tables
                 var maxLvlCap = 1; for (var oc = 0; oc < snap.order.length; oc++) maxLvlCap = Math.max(maxLvlCap, N(snap.buildings[snap.order[oc]].level));
@@ -1979,7 +2001,10 @@
                     aug = augmentSnap(aug, bestAdd.V); virtuals.push({ V: bestAdd.V, cand: bestAdd.cand });
                     committed.tib += bestAdd.l1.tib; committed.pow += bestAdd.l1.pow; curScore = bestAdd.sc;
                 }
-                if (!virtuals.length) return { ok: false, reason: "the refund from those sells can't fund any useful new " + RES_CFG[resKey].label + " producer here" };
+                if (!virtuals.length) {
+                    if (freeSlotMode) return optimize(city, resKey, opts);   // free slot but nothing worth building -> just moves
+                    return { ok: false, reason: "the refund from those sells can't fund any useful new " + RES_CFG[resKey].label + " producer here" };
+                }
 
                 // 4) polish all virtuals + existing producers together
                 var plsF = buildProdLists(aug), movF = widenMovable(aug);
@@ -2023,7 +2048,8 @@
                 var current = baselines[resKey], projected = bestProd[resKey];
                 return { ok: true, resKey: resKey, current: current, projected: projected, gainPct: current > 0 ? ((projected - current) / current * 100) : 0,
                          moves: moves, sells: sells, builds: builds, removed: removed, snapshot: aug, bestPos: pr.bestPos, startPos: pr.startPos,
-                         startProd: baselines, bestProd: bestProd, allowReductions: allowReductions, alpha: alpha, refundTotal: R, spentTotal: spent, forceSell: true };
+                         startProd: baselines, bestProd: bestProd, allowReductions: allowReductions, alpha: alpha,
+                         refundTotal: R, spentTotal: spent, forceSell: !freeSlotMode, freeSlot: freeSlotMode };
             }
 
             // ===================== PHASE B: auto-apply ============================
@@ -3672,10 +3698,11 @@
                             var cost = bl.cost ? (" (build cost " + MM.num.compact(Math.round(bl.cost.tib), 1) + " Tib + " + MM.num.compact(Math.round(bl.cost.pow), 1) + " Pow)") : "";
                             box.add(new qx.ui.basic.Label("+ <b>" + nameOf(bl) + "</b> &rarr; L" + bl.level + " (at " + bl.x + ":" + bl.y + ")" + cost + ref).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bfeff7" }));
                         }
-                        if (res.forceSell && res.refundTotal) {
+                        if ((res.forceSell || res.freeSlot) && res.refundTotal) {
                             var sp = res.spentTotal || { tib: 0, pow: 0 };
-                            box.add(new qx.ui.basic.Label("Pooled refund: <b>" + MM.num.compact(Math.round(res.refundTotal.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(res.refundTotal.pow), 1) + "</b> Pow &middot; spent <b>" + MM.num.compact(Math.round(sp.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(sp.pow), 1) + "</b> Pow on builds+upgrades.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#9fd0e0" }));
-                            box.add(new qx.ui.basic.Label("<i>Tip: after applying, run <b>Upgrade Priority</b> (Transfer as needed) for a cross-base max-upgrade pass.</i>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bbbbbb" }));
+                            var src = res.freeSlot ? "Stored resources" : "Pooled refund";
+                            box.add(new qx.ui.basic.Label(src + ": <b>" + MM.num.compact(Math.round(res.refundTotal.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(res.refundTotal.pow), 1) + "</b> Pow &middot; spent <b>" + MM.num.compact(Math.round(sp.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(sp.pow), 1) + "</b> Pow on builds+upgrades.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#9fd0e0" }));
+                            box.add(new qx.ui.basic.Label("<i>Tip: after applying, run <b>Upgrade Priority</b> (Transfer as needed) to push further using other bases.</i>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bbbbbb" }));
                         }
                         box.add(new qx.ui.core.Spacer(null, 4));
                     }
@@ -3818,7 +3845,7 @@
                             // build (optimizeWithReplace falls back to plain sell when no build wins); else plain optimize.
                             if (forceSell.length) res = OPT.optimizeMultiBuild(city, resKey, opts, forceSell);
                             else if (sellN > 0) res = OPT.optimizeWithReplace(city, resKey, opts, sellN);
-                            else res = OPT.optimize(city, resKey, opts);
+                            else res = OPT.optimizeMultiBuild(city, resKey, opts, []);   // free-slot build (stored-funded); falls back to moves-only if no open slot
                         }
                         catch (e) { werr("OPT optimize threw:", e); res = { ok: false, reason: "internal error (see console)" }; }
                         try {
