@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.26
+// @version         1.4.27
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -1941,12 +1941,21 @@
 
                 var work = snap, removedAll = {}, sells = [], virtuals = [];
 
+                // STABLE running bar. Computed ONCE up front (best compound with no sell/build), then each
+                // accepted candidate's own compound becomes the next round's bar. Previously we re-ran a fresh
+                // "bar" search every round: a lucky seed inflated that threshold while the harder 2+-virtual
+                // candidate search under-scored, so the greedy stalled at 1 sell even when more clearly helped
+                // (Mike: "sell up to 5 still only sold 1"). A stable bar removes that asymmetry - and it's
+                // monotonic: every committed round strictly raised the compound it was measured against.
+                var bar0Pls = buildProdLists(work), bar0Mov = widenMovable(work);
+                var bar0Fn = allowReductions ? makeMultiScoreFn(work, resKey, baselines, alpha, bar0Pls) : makeStrictScoreFn(work, resKey, baselines, bar0Pls);
+                var bar0R = runSearch(work, removedAll, { rounds: lightOpts.rounds, kicks: lightOpts.kicks, maxNeighbors: lightOpts.maxNeighbors, restarts: lightOpts.restarts, movableList: bar0Mov, scoreFn: bar0Fn }, 7);
+                var barScore = compound(work, bar0R.bestPos, removedAll, bar0Pls);
+                wlog("optimizeMultiReplace: start bar (no sell) compound " + Math.round(barScore) + ", sellN=" + sellN);
+                await yieldUI();
+
                 for (var round = 0; round < sellN; round++) {
-                    // bar to beat this round = best compound of the CURRENT committed layout with NO new build.
-                    var barPls = buildProdLists(work), barMov = widenMovable(work);
-                    var barFn = allowReductions ? makeMultiScoreFn(work, resKey, baselines, alpha, barPls) : makeStrictScoreFn(work, resKey, baselines, barPls);
-                    var barR = runSearch(work, removedAll, { rounds: lightOpts.rounds, kicks: lightOpts.kicks, maxNeighbors: lightOpts.maxNeighbors, restarts: lightOpts.restarts, movableList: barMov, scoreFn: barFn }, 7 + round);
-                    var bestScore = compound(work, barR.bestPos, removedAll, barPls), bestPick = null;
+                    var bestScore = barScore, bestPick = null, roundBestSc = -Infinity, roundBestWhat = "";
                     await yieldUI();
 
                     for (var ci = 0; ci < cands.length; ci++) {
@@ -1976,15 +1985,18 @@
                             var scoreFn = allowReductions ? makeMultiScoreFn(aug, resKey, baselines, alpha, pls) : makeStrictScoreFn(aug, resKey, baselines, pls);
                             var r = runSearch(aug, removedTry, { rounds: lightOpts.rounds, kicks: lightOpts.kicks, maxNeighbors: lightOpts.maxNeighbors, restarts: lightOpts.restarts, movableList: movableList, scoreFn: scoreFn }, si * 7 + ci + 1 + round * 131);
                             var sc = compound(aug, r.bestPos, removedTry, pls);
+                            if (sc > roundBestSc) { roundBestSc = sc; roundBestWhat = "sell " + S.techName + " L" + N(S.level) + " -> build " + techName + " L" + fundedL; }
                             if (sc > bestScore + 1e-6) { bestScore = sc; bestPick = { S: S, refB: refB, fundedL: fundedL, refund: refund, V: V }; }
                             await yieldUI();
                         }
                     }
-                    if (!bestPick) break;   // nothing more to sell+build beats stopping here -> done (count is a ceiling)
+                    if (!bestPick) { wlog("optimizeMultiReplace: round " + (round + 1) + " - no sell+build beats bar " + Math.round(barScore) + " (best attempt: " + (roundBestWhat || "none") + " = " + Math.round(roundBestSc) + ", short by " + Math.round(barScore - roundBestSc) + "); stopping at " + virtuals.length + " sell(s)"); break; }   // count is a ceiling
                     removedAll[bestPick.S.id] = 1;
                     sells.push({ id: bestPick.S.id, techName: bestPick.S.techName, harvRes: bestPick.S.harvRes, level: N(bestPick.S.level), x: N(bestPick.S.x), y: N(bestPick.S.y) });
                     work = augmentSnap(work, bestPick.V);
                     virtuals.push(bestPick);
+                    barScore = bestScore;   // running committed compound becomes the next round's bar
+                    wlog("optimizeMultiReplace: round " + (round + 1) + " committed sell " + bestPick.S.techName + " L" + N(bestPick.S.level) + " -> build " + bestPick.V.techName + " L" + bestPick.fundedL + "; compound now " + Math.round(barScore));
                     await yieldUI();
                 }
 
