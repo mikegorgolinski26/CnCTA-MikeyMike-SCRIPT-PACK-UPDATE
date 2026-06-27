@@ -3,7 +3,7 @@
 // @description     Click any base / camp on the region map and a panel shows its lootable resources, offense/defense/base levels, condition, and where its Defense Facility & Construction Yard sit. Rebuilt on the MM - Common Library (merges the old MHTools "Available Loot Summary + Info" and "PluginsLib mhLoot").
 // @author          MH, netquik (original MHTools / PluginsLib mhLoot)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.1
+// @version         1.1.2
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_LootSummary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_LootSummary.user.js
@@ -263,7 +263,9 @@
                 var navReady = app && app.getUIItem && app.getUIItem(ClientLib.Data.Missions.PATH.BAR_NAVIGATION) && app.getUIItem(ClientLib.Data.Missions.PATH.BAR_NAVIGATION).isVisible();
                 if (navReady && window.MMCommon && window.MMCommon.ui && window.MMCommon.buttons && window.MMCommon.map && window.MMCommon.loot && window.MMCommon.base) {
                     MM = window.MMCommon;
-                    build();
+                    // Build ONCE. A throw inside build() must NOT fall through to the outer catch's retry -
+                    // that re-ran build() every 1s forever and flooded the console with the same error.
+                    try { build(); } catch (e2) { werr("build failed (not retrying):", e2); }
                 } else {
                     tries++;
                     if (tries === 30) wwarn("still waiting for game UI / MMCommon...");
