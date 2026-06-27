@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.29
+// @version         1.4.30
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -2347,7 +2347,7 @@
                 function findByPos(x, y) { try { var bd = city.get_Buildings().d; for (var k in bd) { var b = bd[k]; if (b && b.get_CoordX && N(b.get_CoordX()) === x && N(b.get_CoordY()) === y) return b; } } catch (e) {} return null; }
                 function fail(st, msg) { failed.push({ step: st, msg: msg }); if (hooks.onStep) try { hooks.onStep(i, st, false, msg); } catch (e) {} i++; window.setTimeout(next, 90); }
                 function ok(st) { done.push(st); if (hooks.onStep) try { hooks.onStep(i, st, true, "ok"); } catch (e) {} i++; window.setTimeout(next, 140); }
-                function verify(test, st) { var tries = 0; (function poll() { try { if (test()) return ok(st); } catch (e) {} if (++tries > 25) return fail(st, "no visible effect (timeout)"); window.setTimeout(poll, 120); })(); }
+                function verify(test, st, maxTries) { var tries = 0, cap = maxTries || 25; (function poll() { try { if (test()) return ok(st); } catch (e) {} if (++tries > cap) return fail(st, "no visible effect after " + Math.round(cap * 0.12) + "s (the game may have rejected it - check resources / build slots)"); window.setTimeout(poll, 120); })(); }
                 function next() {
                     if (i >= steps.length) { if (hooks.onDone) try { hooks.onDone({ applied: done.length, failed: failed.length, failedSteps: failed }); } catch (e) {} return; }
                     var st = steps[i];
@@ -2358,7 +2358,7 @@
                             if (st.typeId == null) return fail(st, "missing build type id");
                             if (findByPos(st.toX, st.toY)) return fail(st, "build tile is occupied");
                             mgr.OAJKZC(st.typeId, st.toX, st.toY);
-                            verify(function () { return !!findByPos(st.toX, st.toY); }, st);
+                            verify(function () { return !!findByPos(st.toX, st.toY); }, st, 50);   // builds (esp. harvesters on fields) can take longer to appear than a move
                         } catch (e) { return fail(st, String(e)); }
                         return;
                     }
@@ -4025,8 +4025,19 @@
                         onDone: function (sum) {
                             applying = false; busy = false; lastRes = null;
                             var col = sum.failed ? "#ffb74d" : "#7ee07e";
-                            summary.setValue("<b style='color:" + col + "'>Applied " + sum.applied + "/" + total + " change(s)" + (sum.failed ? " - " + sum.failed + " failed (see console)" : " - done") + ".</b> Re-reading base&hellip;");
-                            if (sum.failed) { for (var f = 0; f < sum.failedSteps.length; f++) { var fs = sum.failedSteps[f]; werr("OPT apply step failed:", fs.step.type, nameOf(fs.step), "->", fs.step.toX + ":" + fs.step.toY, "-", fs.msg); } }
+                            var head = "<b style='color:" + col + "'>Applied " + sum.applied + "/" + total + " change(s)" + (sum.failed ? " - " + sum.failed + " failed" : " - done") + ".</b>";
+                            var detail = "";
+                            if (sum.failed) {
+                                // Show WHY each step failed right in the panel (not just the console), so a partial
+                                // apply is diagnosable at a glance.
+                                for (var f = 0; f < sum.failedSteps.length; f++) {
+                                    var fs = sum.failedSteps[f];
+                                    var v = fs.step.type === "demolish" ? "Demolish" : fs.step.type === "build" ? "Build" : fs.step.type === "upgrade" ? "Upgrade" : "Move";
+                                    detail += "<br><span style='color:#ff8a8a'>&#10006; " + v + " " + nameOf(fs.step) + (fs.step.toX != null ? " &rarr; " + fs.step.toX + ":" + fs.step.toY : "") + "</span> &mdash; <span style='color:#ffd0d0'>" + fs.msg + "</span>";
+                                    werr("OPT apply step failed:", fs.step.type, nameOf(fs.step), "->", fs.step.toX + ":" + fs.step.toY, "-", fs.msg);
+                                }
+                            }
+                            summary.setValue(head + detail + " <span style='color:#aaaaaa'>Re-reading base&hellip;</span>");
                             window.setTimeout(function () { renderCurrent(); mapTitle.setValue("<b>Current layout</b> (after apply) - " + (city.get_Name ? city.get_Name() : "")); }, 600);
                         }
                     });
