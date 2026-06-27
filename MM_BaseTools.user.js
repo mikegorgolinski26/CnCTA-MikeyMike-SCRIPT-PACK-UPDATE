@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.27
+// @version         1.4.28
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -1925,7 +1925,13 @@
                 var snap = snapshot(city, resKey);
                 if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
                 var allowReductions = !!opts.allowReductions;
-                var alpha = (typeof opts.alpha === "number") ? opts.alpha : 0.5;
+                // Aggressive weighting for EXPLICIT multi-selling: when the user sets "Sell up to N>=2" AND
+                // turns on Allow reductions, they've clearly opted into trading other resources for the target,
+                // so weight the target much higher (small penalty alpha) - otherwise the 0.5 power-loss penalty
+                // vetoes credit-positive sells after the first and the loop stalls at 1 (Mike's case). Single
+                // optimize / N=1 keep the balanced 0.5. Each extra sell must still clear penAlpha*power-loss, so
+                // it won't tank Power for trivial credit; it just stops being over-protective.
+                var alpha = (typeof opts.alpha === "number") ? opts.alpha : (allowReductions ? 0.15 : 0.5);
                 var baselines = scoreAll(snap, startPosFor(snap, null), null, buildProdLists(snap));
                 var targetMod = RES_CFG[resKey].mod;
                 var maxLvlCap = 1; for (var oi = 0; oi < snap.order.length; oi++) maxLvlCap = Math.max(maxLvlCap, N(snap.buildings[snap.order[oi]].level));
@@ -2021,7 +2027,8 @@
                 var gainPct = current > 0 ? ((projected - current) / current * 100) : 0;
                 return { ok: true, resKey: resKey, current: current, projected: projected, gainPct: gainPct, moves: moves,
                          sells: sells, builds: builds, removed: removedAll, snapshot: work, bestPos: pr.bestPos, startPos: pr.startPos,
-                         startProd: startProd, bestProd: bestProd, allowReductions: allowReductions, alpha: alpha };
+                         startProd: startProd, bestProd: bestProd, allowReductions: allowReductions, alpha: alpha,
+                         sellCeiling: sellN, sellUsed: virtuals.length };
             }
 
             // Economy/auto-sellable techs handled by the normal Sell/Allow-reductions path; the force-sell
@@ -3875,6 +3882,12 @@
                             box.add(new qx.ui.basic.Label(src + ": <b>" + MM.num.compact(Math.round(res.refundTotal.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(res.refundTotal.pow), 1) + "</b> Pow &middot; spent <b>" + MM.num.compact(Math.round(sp.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(sp.pow), 1) + "</b> Pow on builds+upgrades.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#9fd0e0" }));
                             box.add(new qx.ui.basic.Label("<i>Tip: after applying, run <b>Upgrade Priority</b> (Transfer as needed) to push further using other bases.</i>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bbbbbb" }));
                         }
+                        box.add(new qx.ui.core.Spacer(null, 6));
+                    }
+
+                    // "Sell up to N" stopped before reaching N - tell the user it tried, so 1-of-5 isn't silent.
+                    if (res.sellCeiling && res.sellUsed != null && res.sellUsed < res.sellCeiling) {
+                        box.add(new qx.ui.basic.Label("<span style='color:#ffb74d'>Stopped at <b>" + res.sellUsed + "</b> of " + res.sellCeiling + " sell(s)</b></span> &mdash; no further sell raised <b>" + OPT.RES_CFG[res.resKey].label + "</b> enough to be worth demolishing another building (raising “Sell up to” past " + res.sellUsed + " won't change this plan). Enable <i>localStorage.MMBASETOOLS_DEBUG='1'</i> + reload to see the per-round numbers in the console.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e0c890" }));
                         box.add(new qx.ui.core.Spacer(null, 6));
                     }
 
