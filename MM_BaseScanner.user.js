@@ -3,7 +3,7 @@
 // @description     Scan every attackable base/camp/outpost within range of one of your bases and rank them for farming and capture: loot (Tib/Cry/Credits/Research), command-point cost, loot-per-CP efficiency, resource-field counts, perfect-layout flags, Construction-Yard / Defense-Facility row, and building/defense condition. Rebuilt on the MM - Common Library (no MaelstromTools dependency).
 // @author          BlinDManX, chertosha, Netquik, kad (original Maelstrom ADDON Basescanner AIO)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.1
+// @version         1.0.2
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
@@ -275,6 +275,34 @@
                         }
                     });
                 }
+                // Resource-spot shading for the Tib / Cry columns. Each cell holds "n7 | n6 | n5 | n4"
+                // perfect-harvester-spot counts; shade by the BEST tier present (more resource
+                // neighbours = better spot, so higher tiers win): any 7 -> light bright green,
+                // else any 6 -> light blue, else any 5 -> light amber, else any 4 -> light yellow.
+                // No nonzero count -> no shading (unchanged cell).
+                if (!qx.Class.isDefined("MMScanSpotR")) {
+                    qx.Class.define("MMScanSpotR", {
+                        extend: qx.ui.table.cellrenderer.Default,
+                        members: {
+                            _spotColor: function (v) {
+                                if (v == null || v === "") return null;
+                                var p = String(v).split("|");
+                                if (p.length < 4) return null;
+                                if ((parseInt(p[0], 10) || 0) > 0) return "#9af09a"; // 7 - light bright green
+                                if ((parseInt(p[1], 10) || 0) > 0) return "#acd8ff"; // 6 - light blue
+                                if ((parseInt(p[2], 10) || 0) > 0) return "#ffd591"; // 5 - light amber
+                                if ((parseInt(p[3], 10) || 0) > 0) return "#fff6a6"; // 4 - light yellow
+                                return null;
+                            },
+                            _getCellStyle: function (cellInfo) {
+                                var s = this.base(arguments, cellInfo) || "";
+                                var c = this._spotColor(cellInfo.value);
+                                if (c) s += "background-color:" + c + ";color:#111;";
+                                return s;
+                            }
+                        }
+                    });
+                }
                 // Row renderer: grey out ruled-out rows.
                 if (!qx.Class.isDefined("MMScanRowR")) {
                     qx.Class.define("MMScanRowR", {
@@ -321,6 +349,7 @@
                 try {
                     var def = COLS[ci];
                     if (ci === C.LOC) tcm.setDataCellRenderer(ci, new MMScanLinkR());
+                    else if (ci === C.TIBL || ci === C.CRYL) tcm.setDataCellRenderer(ci, new MMScanSpotR());
                     else if (def.t === "num") tcm.setDataCellRenderer(ci, new MMScanNumR());
                     else if (def.t === "pct") tcm.setDataCellRenderer(ci, new MMScanPctR());
                     else if (def.t === "bool") tcm.setDataCellRenderer(ci, new qx.ui.table.cellrenderer.Boolean());
