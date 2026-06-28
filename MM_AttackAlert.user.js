@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Warns you when one of your bases is under attack: flashes the browser-tab title, swaps the tab favicon to a flashing siren icon, and plays an alarm sound. By default it only sounds the alarm while the game tab is in the BACKGROUND (so it never nags you while you are actively playing), and it clears itself the moment you come back to the tab or the attack ends. Title / favicon / sound are each individually toggleable, and a "Test alarm" button lets you preview the siren (and prime your browser's autoplay permission).
-// @version      1.0.1
+// @version      1.0.2
 // @author       MikeyMike (rework of der_flake / XDaast's "CENTER DRIVEN PvP Alert Status")
 // @contributor  der_flake
 // @contributor  XDaast
@@ -59,6 +59,9 @@
 
 (function () {
 	var AA_main = function () {
+		// i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+		// loads after this script (extension injection order isn't guaranteed). Identity in English.
+		function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
 		// ---- logger ----------------------------------------------------------------
 		var LOG = (window.MMCommon && window.MMCommon.makeLogger)
 			? window.MMCommon.makeLogger("Attack Alert")
@@ -156,8 +159,8 @@
 			if (!titleOn()) return;
 			try {
 				if (savedTitle === null) savedTitle = window.document.title;
-				var who = (names && names.length) ? names.join(", ") : "a base";
-				window.document.title = "⚠ ALERT - " + who + " under attack!";
+				var who = (names && names.length) ? names.join(", ") : MMt("a base");
+				window.document.title = MMt("⚠ ALERT - ") + who + MMt(" under attack!");
 			} catch (e) { werr("setAlarmTitle:", e); }
 		}
 		function restoreTitle() {
@@ -238,7 +241,7 @@
 		// ---- options panel ---------------------------------------------------------
 		function buildOptions() {
 			var body = new qx.ui.container.Composite(new qx.ui.layout.VBox(6)).set({ padding: 10, backgroundColor: "#23282b" });
-			body.add(new qx.ui.basic.Label("Alert me when one of my bases is attacked:").set({
+			body.add(new qx.ui.basic.Label(MMt("Alert me when one of my bases is attacked:")).set({
 				rich: true, textColor: "#9fb4c0", font: new qx.bom.Font(12, ["sans-serif"]).set({ bold: true })
 			}));
 
@@ -252,37 +255,37 @@
 				return cb;
 			}
 
-			body.add(toggle("Play an alarm sound", "AttackAlert.sound", true, function (v) {
+			body.add(toggle(MMt("Play an alarm sound"), "AttackAlert.sound", true, function (v) {
 				if (!v) stopSiren(); else if (alarmActive) playSiren();
 			}));
-			body.add(toggle("Flash the browser-tab title", "AttackAlert.title", true, function (v) {
+			body.add(toggle(MMt("Flash the browser-tab title"), "AttackAlert.title", true, function (v) {
 				if (!v) restoreTitle(); else if (alarmActive) setAlarmTitle(alertedBaseNames());
 			}));
-			body.add(toggle("Flash the browser-tab favicon (siren icon)", "AttackAlert.favicon", true, function (v) {
+			body.add(toggle(MMt("Flash the browser-tab favicon (siren icon)"), "AttackAlert.favicon", true, function (v) {
 				if (!v) restoreFavicon(); else if (alarmActive) setAlarmFavicon();
 			}));
-			body.add(toggle("Only alarm while the game tab is in the background", "AttackAlert.onlyUnfocused", true, function () {
+			body.add(toggle(MMt("Only alarm while the game tab is in the background"), "AttackAlert.onlyUnfocused", true, function () {
 				scan();
 			}));
 
 			// Test alarm row (also primes the browser's autoplay permission)
 			var testRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8)).set({ marginTop: 4 });
-			var testBtn = new qx.ui.form.Button("Test alarm").set({ allowGrowX: false });
+			var testBtn = new qx.ui.form.Button(MMt("Test alarm")).set({ allowGrowX: false });
 			testBtn.addListener("execute", function () {
 				try {
 					// fire a real preview for ~3s so the user can hear/see it, then clear (unless a real attack is live)
-					raiseAlarm(["TEST"]);
+					raiseAlarm([MMt("TEST")]);
 					window.setTimeout(function () { if (alertedBaseNames().length === 0) clearAlarm(); }, 3000);
 				} catch (e) { werr("test alarm:", e); }
 			});
 			testRow.add(testBtn);
-			testRow.add(new qx.ui.basic.Label("Preview the siren / title / favicon (click once to allow sound).").set({
+			testRow.add(new qx.ui.basic.Label(MMt("Preview the siren / title / favicon (click once to allow sound).")).set({
 				rich: true, textColor: "#9fb4c0", alignY: "middle"
 			}));
 			body.add(testRow);
 
 			body.add(new qx.ui.core.Widget().set({ height: 1, backgroundColor: "#3a4248", marginTop: 4, marginBottom: 2, allowGrowX: true }));
-			var master = new qx.ui.form.CheckBox("Master: enable Attack Alert").set({ value: masterOn(), textColor: "#e8e8e8" });
+			var master = new qx.ui.form.CheckBox(MMt("Master: enable Attack Alert")).set({ value: masterOn(), textColor: "#e8e8e8" });
 			master.addListener("changeValue", function (e) {
 				setS("AttackAlert.enabled", e.getData() === true);
 				if (e.getData() === true) scan(); else if (alarmActive) clearAlarm();
@@ -290,14 +293,14 @@
 			body.add(master);
 
 			var win = MM.ui.Window({
-				caption: "Attack Alert", key: "AttackAlert.Window",
+				caption: MMt("Attack Alert"), key: "AttackAlert.Window",
 				layout: new qx.ui.layout.VBox(), pos: [280, 200], resizable: false, restoreOpen: true, dock: true
 			});
 			if (!win) { werr("options window creation failed"); return; }
 			win.add(body);
 			MM.buttons.register({
-				id: "mm-attack-alert", label: "Attack Alert",
-				tooltip: "Warn me (sound + tab title + favicon) when a base is under attack",
+				id: "mm-attack-alert", label: MMt("Attack Alert"),
+				tooltip: MMt("Warn me (sound + tab title + favicon) when a base is under attack"),
 				onExecute: function () { try { if (win.isVisible()) win.close(); else win.open(); } catch (e) { werr("toggle failed:", e); } }
 			});
 			wlog("options panel ready.");

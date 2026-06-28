@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           MM - Player Bases
-// @version        1.0.2
+// @version        1.0.3
 // @author         Dirk Kántor (NurIcke)
 // @contributor    leo7044 (https://github.com/leo7044)
 // @contributor    Gryphon / MrHIDEn (CnC: TA Hotkeys - salvaged hotkeys)
@@ -16,6 +16,9 @@
 
 (function () {
   var BaseInfoMain = function () {
+    // i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+    // loads after this script (extension injection order isn't guaranteed). Identity in English.
+    function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
     // --- [MM Player Bases] debug framework (pack-wide MM convention). wlog is gated behind either
     // window.BASEINFO_DEBUG or the pack-wide window.MM_DEBUG; wwarn/werr always print so genuine
     // problems aren't hidden. Persist either flag via localStorage to survive reloads:
@@ -33,1893 +36,14 @@
       // tray (MMCommon.buttons.register), which lays out and positions every script's button in one
       // user-draggable bar. See TA_MM_Common.user.js -> NS.buttons.
       try {
-        qx.Class.define("BaseInfoLang", {
-          type: "singleton",
-          extend: qx.core.Object,
-          construct: function (language) {
-            /*
-								Enthaltene Sprachen:
-								deutsch (de), englisch=(en), rumänisch (ro), ungarisch (hu), italienisch (it),
-								Türkisch (tr), Französisch (fr), Spanisch (es), Portugiesisch (pt), Tschechisch (cs)
-								Slowakisch (sk), Ukrainisch (uk), Weissrussland (be), Russisch (ru), Schwedisch (sv),
-								Norwegisch (nb), Niederländisch (nl), Kroatisch (hr), Griechisch (el), Finnisch (fi),
-								Dänisch (da), Bulgarisch (bg), Arabisch (ar), Polnisch (pl), Indonesisch (id),
-							*/
-            this.Languages = [
-              "de",
-              "en",
-              "ro",
-              "hu",
-              "it",
-              "tr",
-              "fr",
-              "es",
-              "pt",
-              "cs",
-              "sk",
-              "uk",
-              "be",
-              "ru",
-              "sv",
-              "nb",
-              "nl",
-              "hr",
-              "el",
-              "fi",
-              "da",
-              "bg",
-              "ar",
-              "pl",
-              "id",
-            ];
-            if (language !== null) {
-              this.MyLanguage = language;
-            }
-          },
-          members: {
-            MyLanguage: "de",
-            Languages: null,
-            Data: null,
-
-            loadData: function (language) {
-              var l = this.Languages.indexOf(language);
-
-              if (l < 0) {
-                this.Data = null;
-                return;
-              }
-
-              this.Data = new Object();
-
-              this.Data["Sprache"] = [
-                "de",
-                "en",
-                "ro",
-                "hu",
-                "it",
-                "tr",
-                "fr",
-                "es",
-                "pt",
-                "cs",
-                "sk",
-                "uk",
-                "be",
-                "ru",
-                "sv",
-                "nb",
-                "nl",
-                "hr",
-                "el",
-                "fi",
-                "da",
-                "bg",
-                "ar",
-                "pl",
-                "id",
-              ][l];
-              this.Data["Server Sprache"] = [
-                "Server Sprache",
-                "Server Language",
-                "Limbaj Server",
-                "Szerver nyelv",
-                "Lingua Server",
-                "Sunucu Dil",
-                "Langage de Serveur",
-                "Idioma del Servidor",
-                "Servidor Idioma",
-                "Serveru Jazyka",
-                "Servera Language",
-                "C?????? ????",
-                "C????? ????",
-                "?????? ????",
-                "Serverspråk",
-                "Server Språk",
-                "Server Taal",
-                "Poslužitelj Jezik",
-                "d?a??µ?st? G??ssa",
-                "Server Kieli",
-                "Server Sprog",
-                "?????? ????",
-                "?????? ?????",
-                "Serwer Jezyk",
-                "Server Bahasa",
-              ][l];
-              this.Data["Öffnen"] = [
-                "Öffnen",
-                "Open",
-                "Deschidere",
-                "Nyitás",
-                "Apertura",
-                "Açilis",
-                "Ouverture",
-                "Apertura",
-                "Abertura",
-                "Otevrít",
-                "otvor",
-                "?????????",
-                "????????",
-                "????????",
-                "öppning",
-                "åpning",
-                "opening",
-                "otvaranje",
-                "?????µa",
-                "aukko",
-                "åbning",
-                "?????",
-                "??????",
-                "otwarcie",
-                "pembukaan",
-              ][l];
-              this.Data["Basenwerte"] = [
-                "Basenwerte",
-                "Base values",
-                "Valorile de Baza",
-                "Bázis Értékek",
-                "Valori di Base",
-                "Üs Degerler",
-                "Les valeurs de base",
-                "los valores de base",
-                "valores de base",
-                "Základní hodnoty",
-                "základné hodnoty",
-                "??????? ?????????",
-                "???????? ?????????",
-                "???????? ??????????",
-                "basvärden",
-                "verdigrunnlag",
-                "Base waarden",
-                "Baza vrijednosti",
-                "t?µ?? ß?s??",
-                "tukikohta arvot",
-                "uædle værdier",
-                "?????? ?????????",
-                "??? ?????",
-                "wartosci bazowe",
-                "nilai-nilai dasar",
-              ][l];
-              this.Data["Mitglieder"] = [
-                "Mitglieder",
-                "Members",
-                "Membrii",
-                "Tagok",
-                "Membri",
-                "Üyeler",
-                "membres",
-                "Miembros",
-                "membros",
-                "Clenové",
-                "clenovia",
-                "?????",
-                "?????",
-                "?????",
-                "Medlemmar",
-                "medlemmer",
-                "leden",
-                "clanovi",
-                "????",
-                "jäsenet",
-                "medlemmer",
-                "???????????",
-                "???????",
-                "Uzytkownicy",
-                "anggota",
-              ][l];
-              this.Data["Scriptinfo"] = [
-                "Scriptinfo",
-                "Scripts Info",
-                "Informa?ii Scripturi",
-                "Scripts Információkat",
-                "Informazioni Scripts",
-                "Script bilgisi",
-                "Scripts d'infos",
-                "Información Guión",
-                "Informações Script",
-                "skriptu Informace",
-                "script Informácie",
-                "?????????? ????????",
-                "?????????? ???????",
-                "?????????? ????????",
-                "Skriptinformation",
-                "skriptet Informasjon",
-                "script Informatie",
-                "Skripta informacije",
-                "se????? ?????f???e?",
-                "skripti tiedot",
-                "script oplysninger",
-                "??????? ??????????",
-                "??????? ?????",
-                "Informacje script",
-                "Script Informasi",
-              ][l];
-              this.Data["Allgemeine Informationen"] = [
-                "Allgemeine Informationen",
-                "General Information",
-                "Informa?ii Generale",
-                "Általános Információk",
-                "Informazioni Generali",
-                "Genel bilgi",
-                "Informations Générales",
-                "Información General",
-                "Informação Geral",
-                "Obecná Informace",
-                "Všeobecná Informácie",
-                "???????? ??????????",
-                "???????? ??????????",
-                "????? ??????????",
-                "Allmän Information",
-                "Generell Informasjon",
-                "Algemene Informatie",
-                "Opce Informacije",
-                "Ge????? ?????f???e?",
-                "Yleistiedot",
-                "generelle oplysninger",
-                "???? ??????????",
-                "??????? ????",
-                "Informacje Ogólne",
-                "Informasi Umum",
-              ][l];
-              this.Data["Allgemein"] = [
-                "Allgemein",
-                "General",
-                "Generale",
-                "Általános",
-                "General",
-                "Genel",
-                "Générales",
-                "general",
-                "geralmente",
-                "obecný",
-                "obvykle",
-                "? ??????",
-                "???????????",
-                "???????????",
-                "Allmänt",
-                "Generelt",
-                "algemeen",
-                "obicno",
-                "?e?????",
-                "yleinen",
-                "generelt",
-                "????",
-                "???",
-                "ogólny",
-                "umum",
-              ][l];
-              this.Data["Gesamte Produktion"] = [
-                "Gesamte Produktion",
-                "Total Production",
-                "Produc?ia Totala de",
-                "Összes Termelés",
-                "La Produzione Totale",
-                "Toplam üretim",
-                "La production totale",
-                "La producción total",
-                "A produção total",
-                "celková produkce",
-                "Celková produkcia",
-                "????????? ????? ???????????",
-                "??????? ??'?? ???????????",
-                "????? ????? ????????????",
-                "Den sammanlagda produktionen",
-                "totale produksjonen",
-                "De totale productie",
-                "Ukupna proizvodnja",
-                "S??????? pa?a????",
-                "kokonaistuotanto",
-                "samlet produktion",
-                "?????? ????????????",
-                "?????? ???????",
-                "Calkowita produkcja",
-                "produksi total",
-              ][l];
-              this.Data["Erste Offensive"] = [
-                "Erste Offensive",
-                "First Offense",
-                "Primul Ofensiva",
-                "Elso Támadó",
-                "Prima Attaccante",
-                "Birinci Ofansif",
-                "Première Offensive",
-                "primero Ofensivo",
-                "primeiro Ofensivo",
-                "První Ofenzivní",
-                "prvý Ofenzívny",
-                "??-????? ??????????",
-                "??-?????? ??????????",
-                "??-?????? ??????????????",
-                "första offensiv",
-                "First Offensive",
-                "eerste Offensive",
-                "Prvo Uvredljiva",
-                "???ta ?p??et???",
-                "First Hyökkäävä",
-                "First Offensive",
-                "????? Offensive",
-                "??? ????",
-                "pierwszy Ofensywny",
-                "pertama Serangan",
-              ][l];
-              this.Data["Zweite Offensive"] = [
-                "Zweite Offensive",
-                "Second Offense",
-                "Al Doilea Ofensiva",
-                "Második Támadó",
-                "Secondo Attaccante",
-                "Ikinci bir Ofansif",
-                "Deuxième Offensive",
-                "Segundo Ofensivo",
-                "segundo Ofensivo",
-                "druhý Ofenzivní",
-                "druhý Ofenzívny",
-                "??-????? ??????????",
-                "??-?????? ??????????",
-                "??-?????? ??????????????",
-                "andra Offensive",
-                "Second Offensive",
-                "tweede Offensive",
-                "Drugo Uvredljiva",
-                "de?te?? ?p??et???",
-                "toinen Hyökkäävä",
-                "Second Offensive",
-                "????? Offensive",
-                "???????? ???????",
-                "drugi Ofensywny",
-                "kedua Serangan",
-              ][l];
-              this.Data["Werte übertragen"] = [
-                "Werte übertragen",
-                "Transfer Values",
-                "Valorile de Transfer",
-                "Transfer Értékek",
-                "Valori di Trasferimento",
-                "transferi degerler",
-                "Les valeurs de transfert",
-                "valores de Transferencia",
-                "valores de transferência",
-                "hodnoty Prenos",
-                "hodnoty Prenos",
-                "?????????? ????????",
-                "?????????? ????",
-                "?????????? ?????????",
-                "överföringsvärden",
-                "overføre verdier",
-                "Transfer waarden",
-                "vrijednosti prijenos",
-                "t?µ?? µetaß?ßas??",
-                "siirtoarvoja",
-                "Overfør værdier",
-                "??????????",
-                "????? ???",
-                "wartosci transferowe",
-                "nilai transfer",
-              ][l];
-              this.Data["Weltkarte"] = [
-                "Weltkarte",
-                "Worldmap",
-                "Harta Lumii",
-                "Térkép a Világ",
-                "Mappamondo",
-                "Dünyada Haritasi",
-                "Carte du Monde",
-                "mapa del mundo",
-                "mapa do mundo",
-                "Mapa sveta",
-                "mapa sveta",
-                "????? ?????",
-                "????? ?????",
-                "????? ????",
-                "Karta över världen",
-                "verdenskart",
-                "kaart van de wereld",
-                "karta svijeta",
-                "???t?? t?? ??sµ??",
-                "Maailmankartta",
-                "kort over verden",
-                "????? ?? ?????",
-                "????? ??????",
-                "Mapa swiata",
-                "peta dunia",
-              ][l];
-              this.Data["Allianz Rolle"] = [
-                "Allianz Rolle",
-                "Alliance Role",
-                "Rol Alian?a",
-                "Szövetség Szerepe",
-                "Ruolo Alleanza",
-                "Ittifak rolü",
-                "rôle de l'Alliance",
-                "papel Alianza",
-                "papel Alliance",
-                "Alliance role",
-                "alliance role",
-                "?????? ????",
-                "?????? ????",
-                "?????? ????",
-                "Alliance roll",
-                "Alliance rolle",
-                "Alliance rol",
-                "Savez uloga",
-                "????? t?? S?µµa??a?",
-                "Alliance rooli",
-                "alliance rolle",
-                "Alliance ????",
-                "??? ???????",
-                "rola sojuszu",
-                "peran aliansi",
-              ][l];
-              this.Data["Spielername"] = [
-                "Spielername",
-                "Player Name",
-                "Nume Jucator",
-                "Játékos Neve",
-                "Nome Giocatore",
-                "Oyuncu Adi",
-                "Nom du joueur",
-                "Jugadores Nombre",
-                "Nome Jogadores",
-                "hráci Jméno",
-                "hráci Meno",
-                "?????? ??'?",
-                "?????? ???",
-                "?????? ???",
-                "spelare Namn",
-                "spillere Navn",
-                "spelers Naam",
-                "igraci Ime",
-                "?a??te? ???µa",
-                "Pelaajat Nimi",
-                "spillere Navn",
-                "?????? ???",
-                "???????? ?????",
-                "Gracze Nazwa",
-                "pemain Nama",
-              ][l];
-              this.Data["Spielerklasse"] = [
-                "Spielerklasse",
-                "Player Class",
-                "Clasa Jucator",
-                "Töredék",
-                "Fazione",
-                "Grup",
-                "Faction",
-                "Clase jugador",
-                "Classe jogador",
-                "hrác Class",
-                "hrác Class",
-                "???? ??????",
-                "???? ??????",
-                "????? ??????",
-                "Spelar klass",
-                "spiller Class",
-                "Player Class",
-                "igrac klase",
-                "pa??t?? Class",
-                "Player Class",
-                "Spiller Class",
-                "Player Class",
-                "??? ??????",
-                "Klasa graczem",
-                "pemain Kelas",
-              ][l];
-              this.Data["Aktuelle Uhrzeit"] = [
-                "Aktuelle Uhrzeit",
-                "Current Time",
-                "Ora curenta",
-                "Ido",
-                "Ora Attuale",
-                "simdiki zaman",
-                "Date actuelle",
-                "Tiempo Actual",
-                "Tempo Atual",
-                "Aktuální cas",
-                "aktuálny cas",
-                "??????? ???",
-                "??????? ???",
-                "??????? ?????",
-                "Aktuell tid",
-                "Nåværende Tid",
-                "huidige Tijd",
-                "Trenutno vrijeme",
-                "??????sa ??a",
-                "Nykyinen aika",
-                "Aktuel tid",
-                "Current Time",
-                "????? ??????",
-                "Obecny Czas",
-                "Waktu Saat Ini",
-              ][l];
-              this.Data["Rang"] = [
-                "Rang",
-                "Rank",
-                "Rang",
-                "Helyezés",
-                "rango",
-                "Derece",
-                "Classement",
-                "rango",
-                "categoria",
-                "hodnost",
-                "hodnost",
-                "????",
-                "????",
-                "????",
-                "Placering",
-                "Rank",
-                "rang",
-                "cin",
-                "t???",
-                "arvo",
-                "Rank",
-                "????",
-                "?????",
-                "ranga",
-                "pangkat",
-              ][l];
-              this.Data["Maximale KP"] = [
-                "Maximale KP",
-                "Maximal CP",
-                "Puncte de Comando Maxime",
-                "Maximális Parancsnoki Pont",
-                "Comando il Massimo dei Punti",
-                "Maksimum Komutanligi Puan",
-                "Points de Commandement maximum",
-                "CP máximo",
-                "CP máxima",
-                "Maximální CP",
-                "maximálna CP",
-                "??????????? CP",
-                "???????????? CP",
-                "???????????? CP",
-                "maximal CP",
-                "maksimal CP",
-                "maximale CP",
-                "maksimalna CP",
-                "µ???st? CP",
-                "Suurin CP",
-                "maksimal CP",
-                "?????????? CP",
-                "???? ?????? CP",
-                "Maksymalna CP",
-                "maksimum CP",
-              ][l];
-              this.Data["Maximale Repzeit"] = [
-                "Maximale Repzeit",
-                "Maximal Reptime",
-                "Timp Maxim de Repara?ie",
-                "Maximális Javítási Ido",
-                "Tempo Massimo di Riparazione",
-                "Maksimum onarim süresi",
-                "Temps maximum de réparation",
-                "Repzeit máximo",
-                "Repzeit máxima",
-                "Maximální Repzeit",
-                "maximálna Repzeit",
-                "??????????? Repzeit",
-                "???????????? Repzeit",
-                "???????????? Repzeit",
-                "maximal Repzeit",
-                "maksimal Repzeit",
-                "maximale Repzeit",
-                "maksimalna Repzeit",
-                "µ???st? Repzeit",
-                "Suurin Repzeit",
-                "maksimal Repzeit",
-                "?????????? Repzeit",
-                "???? Repzeit",
-                "Maksymalna Repzeit",
-                "Repzeit maksimum",
-              ][l];
-              this.Data["Stunden"] = [
-                "Stunden",
-                "Hours",
-                "Ore",
-                "Óra",
-                "Orario",
-                "Saatleri",
-                "Heures",
-                "horas",
-                "horas",
-                "hodiny",
-                "hodiny",
-                "?????",
-                "??????",
-                "?????",
-                "timmar",
-                "timer",
-                "Hours",
-                "Radno vrijeme",
-                "??e?",
-                "tuntia",
-                "Timer",
-                "??????",
-                "?????",
-                "godziny",
-                "jam",
-              ][l];
-              this.Data["Basenanzahl"] = [
-                "Basenanzahl",
-                "Basecount",
-                "Numarul de Baza",
-                "Szám Bázisok",
-                "Numero di Base",
-                "Üs Numarasi",
-                "Nombre de base",
-                "Número Base",
-                "Número de base",
-                "Základní Number",
-                "základné Number",
-                "??????? ?????",
-                "?????? ?????",
-                "??????? ?????",
-                "basnummer",
-                "Base Number",
-                "Base Number",
-                "baza broj",
-                "????µ?? ß?s?",
-                "Base Number",
-                "Base Number",
-                "Base Number",
-                "??? ?????",
-                "Ilosc bazowa",
-                "Jumlah dasar",
-              ][l];
-              this.Data["Anzahl Offensiv Basen"] = [
-                "Anzahl Offensiv Basen",
-                "Offense Bases Count",
-                "Baze numar Ofensiva",
-                "Szám Sérto Bázisok",
-                "Basi numero Attaccante",
-                "Numara saldirgan Üs",
-                "Nombre de bases offensives",
-                "Bases Número ofensivas",
-                "Número bases ofensivas",
-                "Pocet ofenzivní základny",
-                "Pocet ofenzívnej základne",
-                "????????? ????????? ??????",
-                "????????? ?????????? ??????",
-                "?????????? ?????????????? ??????",
-                "Antal offensiva baser",
-                "Antall offensive baser",
-                "Aantal offensief bases",
-                "Broj uvredljive baze",
-                "??se?? ????µ?? p??sß??t???",
-                "Numero loukkaavaa emäkset",
-                "Nummer offensive baser",
-                "????? ?????? ????",
-                "??? ??????? ????",
-                "Podstawy Liczba obrazliwe",
-                "Basis Nomor ofensif",
-              ][l];
-              this.Data["Support Gebäude Level Ø"] = [
-                "Support Gebäude Level Ø",
-                "Support Building Level Ø",
-                "Suport de Constructii Nivel Ø",
-                "Támogatás Építési Szint Ø",
-                "Supporto Livello Edificio Ø",
-                "Destek Bina Seviye Ø",
-                "Bâtiment Niveau de soutien",
-                "Soporte Nivel Edificio Ø",
-                "Suporte Nível Edifício Ø",
-                "Podpora budova úroven Ø",
-                "Podpora budova úroven Ø",
-                "????????? ??????????? Ø ??????",
-                "????????? ??????????? Ø ????????",
-                "????????? ????????????? Ø ???????",
-                "Support Building Level Ø",
-                "Support Bygning Nivå Ø",
-                "Ondersteuning Building Level Ø",
-                "Podrška Gradevinska Razina Ø",
-                "?p?st????? ?t???? ?p?ped? Ø",
-                "Tuki Building Level Ø",
-                "Support Building Level Ø",
-                "???????? Building Level Ø",
-                "??? ???? ????? Ø",
-                "Pomoc budynek Poziom Ø",
-                "Dukungan Building Tingkat Ø",
-              ][l];
-              this.Data["VE Ø aller Basen"] = [
-                "VE Ø aller Basen",
-                "DF Ø all Bases",
-                "Ø Unitate de Aparare Toate Bazele",
-                "Védelem Létrehozása Ø Összes Bázisok",
-                "Stazioni di difesa Ø di tutte le basi",
-                "Savunma Tesis Ø bütün Üs",
-                "Fonds de défense Ø de toutes les bases",
-                "DF Ø todas las bases",
-                "DF Ø todas as bases",
-                "DF Ø Všechny základny",
-                "DF Ø Všetky základne",
-                "DF Ø ??? ????????",
-                "DF Ø ??? ????????",
-                "DF Ø ??? ?????????",
-                "DF Ø alla baser",
-                "DF Ø alle baser",
-                "DF Ø alle bases",
-                "DF Ø Svi baze",
-                "DF Ø ??e? t?? ß?se??",
-                "DF Ø kaikki alustat",
-                "DF Ø alle baser",
-                "DF Ø ?????? ????",
-                "DF Ø ?? ???????",
-                "DF Ø wszystkich baz",
-                "DF Ø semua basis",
-              ][l];
-              this.Data["Def Ø aller Basen"] = [
-                "Def Ø aller Basen",
-                "Def Ø all Bases",
-                "Ø Unitate de Def Toate Bazele",
-                "Def Ø Összes Bázisok",
-                "Def Ø di tutte le basi",
-                "Def Ø bütün Üs",
-                "Def Ø de toutes les bases",
-                "Def Ø todas las bases",
-                "Def Ø todas as bases",
-                "Def Ø Všechny základny",
-                "Def Ø Všetky základne",
-                "Def Ø ??? ????????",
-                "Def Ø ??? ????????",
-                "Def Ø ??? ?????????",
-                "Def Ø alla baser",
-                "Def Ø alle baser",
-                "Def Ø alle bases",
-                "Def Ø Svi baze",
-                "Def Ø ??e? t?? ß?se??",
-                "Def Ø kaikki alustat",
-                "Def Ø alle baser",
-                "Def Ø ?????? ????",
-                "Def Ø ?? ???????",
-                "Def Ø wszystkich baz",
-                "Def Ø semua basis",
-              ][l];
-              this.Data["Kristall"] = [
-                "Kristall",
-                "Crystal",
-                "Cristal",
-                "Kristály",
-                "Cristallo",
-                "Kristal",
-                "Cristaux",
-                "cristal",
-                "cristal",
-                "krystal",
-                "kryštál",
-                "???????",
-                "????????",
-                "????????",
-                "kristall",
-                "krystall",
-                "kristal",
-                "kristal",
-                "???sta???",
-                "kristalli",
-                "krystal",
-                "???????",
-                "????",
-                "krysztal",
-                "kristal",
-              ][l];
-              this.Data["Tiberium"] = [
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tibérium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "Tiberium",
-                "tiberium ??",
-                "tyberium",
-                "Tiberium",
-              ][l];
-              this.Data["Strom"] = [
-                "Strom",
-                "Power",
-                "Putere",
-                "Áram",
-                "Energia",
-                "Enerji",
-                "Énergie",
-                "corriente",
-                "atual",
-                "proud",
-                "prúd",
-                "?????",
-                "???",
-                "???",
-                "Aktuell",
-                "Nåværende",
-                "stroom",
-                "struja",
-                "?e?µa",
-                "nykyinen",
-                "nuværende",
-                "???",
-                "????",
-                "prad",
-                "arus",
-              ][l];
-              this.Data["Credit"] = [
-                "Credit",
-                "Credit",
-                "Credit",
-                "Kredit",
-                "Crediti",
-                "Kredi",
-                "Crédit",
-                "crédito",
-                "crédito",
-                "úver",
-                "úver",
-                "??????",
-                "??????",
-                "??????",
-                "kredit",
-                "Credit",
-                "krediet",
-                "kredit",
-                "p?st?s?",
-                "luotto",
-                "Credit",
-                "??????",
-                "??????",
-                "kredyt",
-                "kredit",
-              ][l];
-              this.Data["Kristall Produktion"] = [
-                "Kristall Produktion",
-                "Crystal Production",
-                "Produc?ia de Cristal",
-                "Összes Kristály Termelés",
-                "Produzione del Cristallo",
-                "Toplam Kristal üretimi",
-                "cristaux de production",
-                "la producción de cristal",
-                "produção de cristal",
-                "výroba Crystal",
-                "výroba Crystal",
-                "??????? ???????????",
-                "???????? ???????????",
-                "???????? ????????????",
-                "kristallproduktion",
-                "Crystal produksjon",
-                "Crystal productie",
-                "Crystal proizvodnja",
-                "???st?????a pa?a?????",
-                "Crystal tuotanto",
-                "krystal produktion",
-                "???????????? Crystal",
-                "????? ?????????",
-                "produkcji krysztalu",
-                "produksi kristal",
-              ][l];
-              this.Data["Tiberium Produktion"] = [
-                "Tiberium Produktion",
-                "Tiberium Production",
-                "Produc?ia de Tiberium",
-                "Összes Tibérium Termelés",
-                "Produzione del Tiberium",
-                "Toplam Tiberium üretimi",
-                "Tiberium de production",
-                "producción Tiberium",
-                "produção Tiberium",
-                "výroba Tiberium",
-                "výroba Tiberium",
-                "??????????? Tiberium",
-                "??????????? Tiberium",
-                "???????????? Tiberium",
-                "Tiberium produktion",
-                "Tiberium produksjon",
-                "Tiberium productie",
-                "proizvodnja Tiberium",
-                "pa?a???? Tiberium",
-                "Tiberium tuotanto",
-                "Tiberium produktion",
-                "???????????? Tiberium",
-                "????? tiberium ??",
-                "produkcja tyberium",
-                "produksi Tiberium",
-              ][l];
-              this.Data["Strom Produktion"] = [
-                "Strom Produktion",
-                "Power Production",
-                "Produc?ia de Putere",
-                "Összes Áram Termelés",
-                "Produzione del Energia",
-                "Toplam enerji üretimi",
-                "Énergie de production",
-                "La producción actual",
-                "A produção atual",
-                "Aktuální produkce",
-                "aktuálnej produkcie",
-                "?????????, ?? ????????????",
-                "??????????? ?????????",
-                "??????????? ?????????",
-                "Aktuell produktion",
-                "dagens produksjon",
-                "De huidige productie",
-                "Trenutna proizvodnja",
-                "? t?????sa pa?a????",
-                "Nykyinen tuotanto",
-                "nuværende produktion",
-                "???????? ????????????",
-                "??????? ??????",
-                "Obecna produkcja",
-                "produksi saat ini",
-              ][l];
-              this.Data["Credit Produktion"] = [
-                "Credit Produktion",
-                "Credit Production",
-                "Produc?ia de Credit",
-                "Összes Kredit Termelés",
-                "Produzione del Crediti",
-                "Toplam kredi üretimi",
-                "Crédit de production",
-                "la producción de Crédito",
-                "produção de Crédito",
-                "Credit výroba",
-                "credit výroba",
-                "???????? ???????????",
-                "????????? ???????????",
-                "????????? ????????????",
-                "kredit produktion",
-                "Credit produksjon",
-                "credit productie",
-                "Kreditni proizvodnja",
-                "??st?t???? pa?a?????",
-                "luotto tuotanto",
-                "Credit produktion",
-                "Credit ????????????",
-                "????? ????????",
-                "produkcja kredytowej",
-                "produksi kredit",
-              ][l];
-              this.Data["Gesamte Kristall Produktion"] = [
-                "Gesamte Kristall Produktion",
-                "Total Crystal Production",
-                "Produc?ia Totala de Cristal",
-                "Összes Kristály Termelés",
-                "Produzione del Cristallo totale",
-                "Toplam Kristal üretimi",
-                "cristaux de production",
-                "La producción total de cristal",
-                "A produção total de cristal",
-                "Celková produkce krystal",
-                "Celková produkcia kryštál",
-                "????????? ????? ??????????? ?????????",
-                "??????? ??'?? ??????????? ?????????",
-                "????? ????? ???????????? ??????????",
-                "Totalt kristallproduktion",
-                "Total krystall produksjon",
-                "Totaal kristal productie",
-                "Ukupna proizvodnja kristala",
-                "S??????? pa?a???? ???st?????",
-                "Total kristalli tuotanto",
-                "Samlede krystal produktion",
-                "?????? ???????????? ?? ?????????",
-                "?????? ????? ?????????",
-                "Calkowita produkcja krysztalów",
-                "Total produksi kristal",
-              ][l];
-              this.Data["Gesamte Tiberium Produktion"] = [
-                "Gesamte Tiberium Produktion",
-                "Total Tiberium Production",
-                "Produc?ia Totala de Tiberium",
-                "Összes Tibérium Termelés",
-                "Produzione del Tiberium totale",
-                "Toplam Tiberium üretimi",
-                "Tiberium de production",
-                "La producción total de Tiberium",
-                "A produção total de Tiberium",
-                "Celková výroba Tiberium",
-                "Celková výroba Tiberium",
-                "????????? ????? ??????????? Tiberium",
-                "??????? ??'?? ??????????? Tiberium",
-                "????? ????? ???????????? Tiberium",
-                "Totalt Tiberium produktion",
-                "Total Tiberium produksjon",
-                "Totaal Tiberium productie",
-                "Ukupno Tiberium proizvodnja",
-                "S??????? pa?a???? Tiberium",
-                "Total Tiberium tuotanto",
-                "Total Tiberium produktion",
-                "?????? ???????????? ?? Tiberium",
-                "????? tiberium ?? ?????",
-                "Calkowita produkcja tyberium",
-                "Total produksi Tiberium",
-              ][l];
-              this.Data["Gesamte Strom Produktion"] = [
-                "Gesamte Strom Produktion",
-                "Total Power Production",
-                "Produc?ia Totala de Putere",
-                "Összes Áram Termelés",
-                "Produzione del Energia totale",
-                "Toplam enerji üretimi",
-                "Énergie de production",
-                "La producción total de electricidad",
-                "A produção total de electricidade",
-                "Celková výroba elektrické energie",
-                "Celková výroba elektrickej energie",
-                "????????? ????? ??????????? ??????????????",
-                "??????? ??'?? ??????????? ??????????????",
-                "????? ????? ???????????? ??????????????",
-                "Total elproduktion",
-                "Total produksjon av elektrisitet",
-                "Totale elektriciteitsproductie",
-                "Ukupna proizvodnja elektricne energije",
-                "? s??????? pa?a???? ??e?t????? e????e?a?",
-                "Koko sähköntuotannosta",
-                "Samlet elproduktion",
-                "???? ?????????? ??????????? ??????????????",
-                "?????? ????? ????????",
-                "Calkowita produkcja energii elektrycznej",
-                "Total produksi listrik",
-              ][l];
-              this.Data["Gesamte Credit Produktion"] = [
-                "Gesamte Credit Produktion",
-                "Total Credit Production",
-                "Produc?ia Totala de Credit",
-                "Összes Kredit Termelés",
-                "Produzione del Crediti totale",
-                "Toplam kredi üretimi",
-                "Crédit de production",
-                "La producción total de crédito",
-                "Produção total de crédito",
-                "Celkový kredit výroba",
-                "Celkový kredit výroba",
-                "????????? ????? ??????????? ????????",
-                "??????? ??'?? ??????????? ?????????",
-                "????? ????? ???????????? ?????????",
-                "Total poäng produktion",
-                "Total kreditt produksjon",
-                "Credit totaal productie",
-                "Ukupna kreditna proizvodnja",
-                "? s??????? p?st?t??? pa?a?????",
-                "Kokonaispisteet tuotanto",
-                "Total credit produktion",
-                "???? ??????? ?? ??????????????",
-                "?????? ??????? ????????",
-                "Calkowita produkcja kredytowej",
-                "Produksi total kredit",
-              ][l];
-              this.Data["Basis Name"] = [
-                "Basis Name",
-                "Base Name",
-                "Numele de Baza",
-                "Bázis Név",
-                "Nome di Base",
-                "Üs isim",
-                "nom de la base",
-                "basename",
-                "basename",
-                "basename",
-                "basename",
-                "Basename",
-                "Basename",
-                "Basename",
-                "grundnamn",
-                "basename",
-                "basename",
-                "basename",
-                "basename",
-                "basename",
-                "basename",
-                "Basename",
-                "Basename",
-                "basename",
-                "basename",
-              ][l];
-              this.Data["Basis Level"] = [
-                "Basis Level",
-                "Base Level",
-                "Nivelul de Baza",
-                "Bázis Szint",
-                "Livello Base",
-                "Üs seviye",
-                "Niveau de base",
-                "Nivel Básico",
-                "Nível Básico",
-                "Základní Úroven",
-                "základné Úroven",
-                "?????????? ??????",
-                "????????? ????????",
-                "????????? ???????",
-                "Grundläggande nivå",
-                "grunnleggende nivå",
-                "Basic Level",
-                "Osnovna razina",
-                "?as??? ?p?ped?",
-                "Perustaso",
-                "grundlæggende Level",
-                "??????? ????",
-                "????? ???????",
-                "Poziom Podstawowy",
-                "Tingkat Dasar",
-              ][l];
-              this.Data["Offensiv Level"] = [
-                "Offensiv Level",
-                "Offense Level",
-                "Nivelul Ofensiva",
-                "Támadó Szint",
-                "Livello Attaccante",
-                "Saldirgan Seviye",
-                "Niveau offensive",
-                "Nivel Ofensivo",
-                "Nível ofensivo",
-                "Ofenzivní Level",
-                "ofenzívny Level",
-                "?????? ??????",
-                "?????? ????????",
-                "??????????? ???????",
-                "offensiv Nivå",
-                "offensive nivå",
-                "Offensive Level",
-                "Uvredljiva Razina",
-                "?p??et??? ?p?ped?",
-                "Hyökkäävä Level",
-                "offensiv Level",
-                "Offensive Level",
-                "????? ????????",
-                "Ofensywny Level",
-                "Tingkat Serangan",
-              ][l];
-              this.Data["Defensiv Level"] = [
-                "Defensiv Level",
-                "Defense Level",
-                "Nivelul Defensiv",
-                "Védelmi Szint",
-                "Livello Difensiva",
-                "Defansif Seviye",
-                "Niveau défensif",
-                "Nivel Defensivo",
-                "Nível defensivo",
-                "defenzivní Level",
-                "defenzívne Level",
-                "???????? ??????",
-                "????????? ????????",
-                "?????????????? ???????",
-                "defensiv Nivå",
-                "defensive nivå",
-                "defensieve Level",
-                "Povucen Razina",
-                "aµ??t??? ?p?ped?",
-                "puolustava Level",
-                "defensiv Level",
-                "???????????? Level",
-                "??????? ???????",
-                "Defensywny Level",
-                "Tingkat defensif",
-              ][l];
-              this.Data["Strom Produktion"] = [
-                "Strom Produktion",
-                "Power Produktion",
-                "Produc?ia de Energie",
-                "Áram Termelés",
-                "Produzione di Energia",
-                "enerji üretimi",
-                "la production d'énergie",
-                "La producción actual",
-                "A produção atual",
-                "Aktuální produkce",
-                "aktuálnej produkcie",
-                "?????????, ?? ????????????",
-                "??????????? ?????????",
-                "??????????? ?????????",
-                "Aktuell produktion",
-                "dagens produksjon",
-                "De huidige productie",
-                "Trenutna proizvodnja",
-                "? t?????sa pa?a????",
-                "Nykyinen tuotanto",
-                "nuværende produktion",
-                "???????? ????????????",
-                "??????? ??????",
-                "Obecna produkcja",
-                "produksi saat ini",
-              ][l];
-              this.Data["Fußtruppen Reparaturzeit"] = [
-                "Fußtruppen Reparaturzeit",
-                "Infantry Repairtime",
-                "Timp de Repara?ii de Infanterie",
-                "Gyalogos Javítási Ido",
-                "Tempo di riparazione Fanteria",
-                "Piyade onarim süresi",
-                "Temps de réparation d'infanterie",
-                "El tiempo de reparación de Infantería",
-                "Tempo de reparação de infantaria",
-                "Pechota doba opravy",
-                "Pechota doba opravy",
-                "??? ???????? ??????",
-                "??? ???????? ??????",
-                "????? ???????? ??????",
-                "Infanteri reparationstiden",
-                "Infantry reparasjonstiden",
-                "Infanterie reparatietijd",
-                "Vrijeme Pješacko popravak",
-                "?????? ep?s?e??? ?e?????",
-                "Jalkaväki korjausaika",
-                "Infanteri reparationstid",
-                "????? ?? ?????? ???????",
-                "??? ??????? ??????",
-                "Czas naprawy Piechota",
-                "Waktu perbaikan Infanteri",
-              ][l];
-              this.Data["Fahrzeug Reparaturzeit"] = [
-                "Fahrzeug Reparaturzeit",
-                "Vehicle Repairtime",
-                "Timp de Repara?ii de Vehicul",
-                "Jármu Javítási Ido",
-                "Tempo di riparazione Veicolo",
-                "Araç onarim süresi",
-                "Temps de réparation du véhicule",
-                "El tiempo de reparación de vehículos",
-                "Tempo de reparação de veículos",
-                "Opravy vozidel cas",
-                "Opravy vozidiel cas",
-                "??? ??????? ??????????",
-                "??? ??????? ??????????",
-                "????? ??????? ??????????",
-                "Fordonsreparationstiden",
-                "Vehicle reparasjonstiden",
-                "Voertuig reparatietijd",
-                "Vrijeme za popravak vozila",
-                "?????? ep?s?e??? t?? ???µat??",
-                "Ajoneuvojen korjausaika",
-                "Køretøj reparationstid",
-                "????? ?? ?????? ?? ???????? ????????",
-                "????? ????? ????????",
-                "Czas naprawy pojazdu",
-                "Waktu perbaikan kendaraan",
-              ][l];
-              this.Data["Flugzeug Reparaturzeit"] = [
-                "Flugzeug Reparaturzeit",
-                "Aircraft Repairtime",
-                "Timp de Repara?ii de Avioane",
-                "Repülogép Javítási Ido",
-                "Tempo di riparazione Aeromobile",
-                "Uçak onarim süresi",
-                "Temps de réparation d'aéronefs",
-                "El tiempo de reparación de aeronaves",
-                "Tempo de reparação de aeronaves",
-                "Oprava letadla cas",
-                "Oprava lietadla cas",
-                "??? ??????? ??????",
-                "??? ??????? ????????",
-                "????? ??????? ????????",
-                "Flygplan reparationstiden",
-                "Aircraft reparasjonstiden",
-                "Vliegtuigen reparatietijd",
-                "Vrijeme popravak zrakoplova",
-                "?????? ep?s?e??? t?? ae??s?af??",
-                "Lentokoneiden korjaus- aika",
-                "Aircraft reparationstid",
-                "????? ?? ?????? ?? ????????????????? ????????",
-                "????? ????? ????????",
-                "Samoloty czas naprawy",
-                "Waktu perbaikan Pesawat",
-              ][l];
-              this.Data["Spieler Produktion"] = [
-                "Spieler Produktion",
-                "Players Production",
-                "Jucatori de Produc?ie",
-                "A játékosok Termelés",
-                "Giocatori di produzione",
-                "Oyuncular Üretim",
-                "Les joueurs de production",
-                "Jugadores Producción",
-                "jogadores de Produção",
-                "hráci Production",
-                "hráci Production",
-                "?????? ???????????",
-                "?????? ???????????",
-                "?????? ????????????",
-                "spelare Produktion",
-                "spillere Produksjon",
-                "spelers Production",
-                "igraci Proizvodnja",
-                "?a??te? pa?a?????",
-                "Pelaajat Tuotanto",
-                "",
-                "???????? ????????????",
-                "?????spillere Produktion ??????",
-                "Gracze Produkcja",
-                "Produksi pemain",
-              ][l];
-              this.Data["Gesamte Produktion"] = [
-                "Gesamte Produktion",
-                "Total Production",
-                "Produc?ia totala",
-                "Összes termelés",
-                "La produzione totale",
-                "Toplam Üretim",
-                "La production totale",
-                "La producción total",
-                "A produção total",
-                "celková produkce",
-                "Celková produkcia",
-                "????????? ????? ???????????",
-                "??????? ??'?? ???????????",
-                "????? ????? ????????????",
-                "Total produktion",
-                "Total produksjon",
-                "De totale productie",
-                "Ukupna proizvodnja",
-                "S??????? pa?a????",
-                "kokonaistuotanto",
-                "samlet produktion",
-                "?????? ????????????",
-                "?????? ???????",
-                "Calkowita produkcja",
-                "total produksi",
-              ][l];
-              this.Data["aller Basen"] = [
-                "aller Basen",
-                "all bases",
-                "toate bazele",
-                "minden bázisok",
-                "tutte le basi",
-                "tüm üsleri",
-                "toutes les bases",
-                "todas las bases",
-                "todas as bases",
-                "všechny základny",
-                "všetky základne",
-                "??? ????????",
-                "??? ????????",
-                "??? ?????????",
-                "alla baser",
-                "alle baser",
-                "alle bases",
-                "sve baze",
-                "??e? ?? ß?se??",
-                "kaikki alustat",
-                "alle baser",
-                "?????? ????",
-                "?? ???????",
-                "wszystkie zasady",
-                "semua basis",
-              ][l];
-              this.Data["inklusive POI Bonus"] = [
-                "inklusive POI Bonus",
-                "inclusive Bonus POI",
-                "inclusiv de POI",
-                "beleértve POI Bonus",
-                "compresi POI Bonus",
-                "dahil POI Bonus",
-                "y compris POI Bonus",
-                "incluyendo PDI Bono",
-                "incluindo POI Bonus",
-                "vcetne POI Bonus",
-                "vrátane POI Bonus",
-                "? ???? ????? ??'???? ?? ???????",
-                "? ??? ???? ??'???? ?? ??????",
-                "? ??? ????? ??????? ? ?????",
-                "inklusive POI Bonus",
-                "inkludert POI Bonus",
-                "waaronder POI Bonus",
-                "ukljucujuci POI bonus",
-                "s?µpe???aµßa??µ???? t?? POI ?p?????",
-                "mukaan lukien KP Bonus",
-                "herunder POI Bonus",
-                "??????????? POI Bonus",
-                "??? ?? ??? ?????? POI",
-                "w tym Bonus POI",
-                "termasuk Bonus POI",
-              ][l];
-              this.Data["Name"] = [
-                "Name",
-                "Name",
-                "Numele",
-                "Név",
-                "Nome",
-                "Isim",
-                "Nom",
-                "nombre",
-                "nome",
-                "název",
-                "Názov",
-                "??'?",
-                "??",
-                "???",
-                "namn",
-                "navn",
-                "naam",
-                "naziv",
-                "???µa",
-                "nimi",
-                "navn",
-                "???",
-                "???",
-                "nazwa",
-                "nama",
-              ][l];
-              this.Data["Version"] = [
-                "Version",
-                "Version",
-                "Versiune",
-                "Változat",
-                "Versione",
-                "Versiyon",
-                "Version",
-                "versión",
-                "versão",
-                "verze",
-                "verzia",
-                "??????",
-                "??????",
-                "??????",
-                "version",
-                "versjon",
-                "versie",
-                "verzija",
-                "e?d???",
-                "versio",
-                "Version",
-                "??????",
-                "????",
-                "wersja",
-                "versi",
-              ][l];
-              this.Data["Ersteller"] = [
-                "Ersteller",
-                "Creator",
-                "Creator",
-                "Teremto",
-                "Creatore",
-                "Yaratici",
-                "Créateur",
-                "creador",
-                "criador",
-                "tvurce",
-                "tvorca",
-                "???????",
-                "???????????",
-                "?????????",
-                "Skaparen",
-                "Creator",
-                "Schepper",
-                "tvorac",
-                "d?µ???????",
-                "Luoja",
-                "skaberen",
-                "????????",
-                "??????",
-                "twórca",
-                "pencipta",
-              ][l];
-              this.Data["Webseite"] = [
-                "Webseite",
-                "Homepage",
-                "Pagina de start",
-                "Honlap",
-                "Homepage",
-                "Anasayfa",
-                "Page d'accueil",
-                "sitio web",
-                "site",
-                "webové stránky",
-                "webové stránky",
-                "????",
-                "????",
-                "????",
-                "Webbplats",
-                "nettsted",
-                "website",
-                "website",
-                "d??t?a??? t?p??",
-                "verkkosivusto",
-                "websted",
-                "???????",
-                "??????",
-                "witryna internetowa",
-                "situs web",
-              ][l];
-              this.Data["E-Mail"] = [
-                "E-Mail",
-                "E-Mail",
-                "E-Mail",
-                "E-Mail",
-                "E-Mail",
-                "E-Mail",
-                "E-Mail",
-                "E-mail",
-                "E-mail",
-                "E-mail",
-                "E-mail",
-                "?????????? ?????",
-                "??????????? ?????",
-                "??????????? ?????",
-                "E-post",
-                "E-post",
-                "E-mail",
-                "E-mail",
-                "E-mail",
-                "E-mail",
-                "E-mail",
-                "?-????",
-                "?????? ??????????",
-                "E-mail",
-                "E-mail",
-              ][l];
-              this.Data["Mitglieder Auflistung"] = [
-                "Mitglieder Auflistung",
-                "Members Listing",
-                "Lista de Membrii",
-                "Tagok Listája",
-                "Lista Membri",
-                "Üye Listesini",
-                "Liste des Membres",
-                "lista de Miembros",
-                "lista de membros",
-                "seznam clenu",
-                "zoznam clenov",
-                "???????????",
-                "?????????????",
-                "????????????",
-                "Medlemmar listan",
-                "medlemmer liste",
-                "ledenlijst",
-                "popis clanova",
-                "??sta ?e???",
-                "jäsenluettelo",
-                "medlemmer liste",
-                "?????? ? ?????????",
-                "????? ???????",
-                "lista czlonków",
-                "daftar anggota",
-              ][l];
-              this.Data["Nur für OBH's sichtbar"] = [
-                "Nur für OBH's sichtbar",
-                "Visible only for CiC",
-                "Vizibil doar pentru Commander",
-                "Csak akkor látható, a Commander",
-                "Visibile solo per il Comandante",
-                "Sadece Komutani görebilir",
-                "Visible uniquement pour le commandant",
-                "Visible sólo para CiC",
-                "Visível apenas para CiC",
-                "Viditelné pouze pro CiC",
-                "Viditelné len pre CiC",
-                "??????? ?????? ??? CiC",
-                "????? ?????? ??? CiC",
-                "??????? ?????? ??? CiC",
-                "Synlig endast för CiC",
-                "Bare synlig for CiC",
-                "Alleen zichtbaar voor CiC",
-                "Vidljivo samo za CiC",
-                "??at? µ??? ??a CiC",
-                "Näkyvä ainoastaan CiC",
-                "Kun synlig for CiC",
-                "????? ???? ?? CiC",
-                "???? ??? ??? CiC",
-                "Widoczne tylko dla CiC",
-                "Terlihat hanya untuk CiC dunia",
-              ][l];
-              this.Data["Mitglieder Anpassung"] = [
-                "Mitglieder Anpassung",
-                "Members Adaptation",
-                "Adaptarea Membrilor",
-                "Tagok Adaptáció",
-                "Membri Adattamento",
-                "Üye Adaptasyon",
-                "Membres Adaptation",
-                "Miembros adaptación",
-                "adaptação membros",
-                "Clenové adaptace",
-                "clenovia adaptácia",
-                "??????????? ?????????",
-                "????????????? ?????????",
-                "???????????? ?????????",
-                "medlemmar anpassning",
-                "medlemmer tilpasning",
-                "aanpassing leden",
-                "Clanovi prilagodba",
-                "p??sa?µ??? ????",
-                "jäsenet sopeutuminen",
-                "medlemmer tilpasning",
-                "??????? ?????????",
-                "?????? ???????",
-                "adaptacja czlonków",
-                "anggota adaptasi",
-              ][l];
-              this.Data["Mitgliederliste erneuern"] = [
-                "Mitgliederliste erneuern",
-                "Renew Memberlist",
-                "Reînnoi Membri",
-                "Megújítani Taglista",
-                "Rinnovare Iscritti",
-                "Üye Listesini yenilemek",
-                "Renouveler Membres",
-                "Renovar Miembros",
-                "Renove Membros",
-                "obnovit uživatelu",
-                "obnovit užívatelov",
-                "???????? ???????????",
-                "???????? ?????????????",
-                "???????? ????????????",
-                "förnya Medlems",
-                "Forny Medlems",
-                "Renew Gebruikerslijst",
-                "obnovite Clanstvo",
-                "??a???s? ?e???",
-                "Uudista Ohje",
-                "forny Grupper",
-                "Renew ???????????",
-                "????? ???????",
-                "Odnów Uzytkownicy Uzytkownicy",
-                "Renew Anggota",
-              ][l];
-              this.Data["Du mußt auf der BaseInfo-Seite eingeloggt sein"] = [
-                "Du mußt auf der BaseInfo-Seite eingeloggt sein",
-                "You need to log in on the BaseInfo Page",
-                "Trebuie sa va conecta?i de pe pagina Informa?ii de Baza",
-                "Be kell jelentkezni a Base Információs oldal",
-                "Devi effettuare il login nella pagina Informazioni di base",
-                "Base Bilgileri sayfasinda giris yapmaniz gerekiyor",
-                "Vous devez vous connecter sur la Page d'information de Base",
-                "¡Tienes que entrar en la página de Información de Base",
-                "Você precisa fazer o login na página Information Base",
-                "Musíte se prihlásit na základní stránce Informace",
-                "Musíte sa prihlásit na základnej stránke Informácie",
-                "?? ??????? ?????? ?? ???????? ????????????? ????",
-                "?? ??????? ??????? ?? ???????? ????????????? ????",
-                "?? ?????? ????? ?? ???????? ?????????????? ????",
-                "Du måste logga in på basera informationssidan",
-                "Du må logge inn på Base informasjonssiden",
-                "Je moet inloggen op de Basis Informatie pagina",
-                "Morate se prijaviti na stranicu baze Informacijskog",
-                "Ta p??pe? ?a s??de?e?te st?? se??da ??s? ?????f?????",
-                "Sinun täytyy kirjautua sisään Base Infosivu",
-                "Du er nødt til at logge ind på Base Infoside",
-                "?????????? ? ?? ??????? ? ?? ????????? ?? ??????????????? ?????????? Base",
-                "????? ??? ????? ?????? ??? ?????? ????? ?????????",
-                "Musisz zalogowac sie na stronie Bazy Informacji",
-                "Anda harus login pada halaman Information Base",
-              ][l];
-              this.Data["Account Erstellung"] = [
-                "Account Erstellung",
-                "Account Creation",
-                "Crearea de Conturi",
-                "Fiók Létrehozása",
-                "Creazione di un Account",
-                "Hesap Olusturma",
-                "Création de Compte",
-                "La creación de Cuentas",
-                "A criação de Contas",
-                "Vytvorení úctu",
-                "Vytvorenie úctu",
-                "????????? ?????????? ??????",
-                "????????? ????????? ??????",
-                "???????? ??????? ??????",
-                "skapa konto",
-                "kontoopprettelse",
-                "Aanmaken van een Account",
-                "Izrada Racuna",
-                "d?µ??????a ???a??asµ??",
-                "Tilin Luominen",
-                "Kontooprettelse",
-                "????????? ?? ??????",
-                "????? ????",
-                "Utworzenie Konta",
-                "Pembuatan Akun",
-              ][l];
-              this.Data["Alle Basen"] = [
-                "Alle Basen",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-                "All Bases",
-              ][l];
-              this.Data["Überblick über die Basen"] = [
-                "Überblick über die Basen",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-                "All Bases Overview",
-              ][l];
-              this.Data["BH"] = [
-                "BH",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-                "CY",
-              ][l];
-              this.Data["KZ"] = [
-                "KZ",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-                "CC",
-              ][l];
-              this.Data["VE"] = [
-                "VE",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-                "DF",
-              ][l];
-              this.Data["VZ"] = [
-                "VZ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-                "HQ",
-              ][l];
-            },
-            get: function (ident) {
-              return this.gt(ident);
-            },
-            gt: function (ident) {
-              if (!this.Data || !this.Data[ident]) {
-                return ident;
-              }
-              return this.Data[ident];
-            },
-          },
-        }),
-          qx.Class.define("BaseInfo", {
+        qx.Class.define("BaseInfo", {
             type: "singleton",
             extend: qx.core.Object,
             construct: function () {
               window.addEventListener("click", this.onClick, false);
               window.addEventListener("keyup", this.onKey, false);
               window.addEventListener("mouseover", this.onMouseOver, false);
-              BIVERSION = "1.0.2";
+              BIVERSION = "1.0.3";
               BICLASS = "MM - Player Bases";
               BIUSERLANGUAGE = qx.locale.Manager.getInstance()
                 .getLocale()
@@ -2026,14 +150,11 @@
               initialize: function () {
                 try {
                   wlog("Initialized");
-                  Lang.loadData(
-                    qx.locale.Manager.getInstance().getLocale().split("_")[0]
-                  );
                   // Use the shared MMCommon window factory so position AND visibility persist across
                   // browser refresh (the pack-wide default behavior for floating windows). The factory
                   // handles drag-tracking, the per-player settings key, and the player-id-gated restore.
                   this.BaseinfoFenster = window.MMCommon.ui.Window({
-                    caption: BICLASS + " " + BIVERSION + " (" + Lang.gt("Server Sprache") + ": " + BIUSERLANGUAGE + ")",
+                    caption: BICLASS + " " + BIVERSION + " (" + MMt("Server Language") + ": " + BIUSERLANGUAGE + ")",
                     icon: BIIMAGE,
                     key: "BaseInfo.Window",
                     pos: [280, 10],
@@ -2081,7 +202,7 @@
 
                   // Tab 1
                   this.BaseinfoGeneralPage = new qx.ui.tabview.Page(
-                    Lang.gt("Allgemein")
+                    MMt("General")
                   );
                   this.BaseinfoGeneralPage.setLayout(new qx.ui.layout.VBox(5));
                   this.BaseinfoTab.add(this.BaseinfoGeneralPage);
@@ -2096,7 +217,7 @@
 
                   // Tab 2 (was Tab 3 before the Base Values merge)
                   this.BaseinfoAllBasesPage = new qx.ui.tabview.Page(
-                    Lang.gt("Alle Basen")
+                    MMt("All Bases")
                   );
                   this.BaseinfoAllBasesPage.setLayout(new qx.ui.layout.VBox(5));
                   this.BaseinfoTab.add(this.BaseinfoAllBasesPage);
@@ -2291,7 +412,7 @@
                   GeneralField5.add(
                     new qx.ui.basic.Label(
                       "<big><u><b>" +
-                        Lang.gt("Überblick über die Basen") +
+                        MMt("All Bases Overview") +
                         "</b></u></big>"
                     ).set({
                       rich: true,
@@ -2374,63 +495,63 @@
                   );
                   BasenName.add(
                     new qx.ui.basic.Label(
-                      "<b>" + Lang.gt("Basis Name") + "</b>"
+                      "<b>" + MMt("Base Name") + "</b>"
                     ).set({
                       rich: true,
                       alignX: "center",
                     })
                   );
                   BasenBase.add(
-                    new qx.ui.basic.Label("<b>Lvl</b>").set({
+                    new qx.ui.basic.Label("<b>" + MMt("Lvl") + "</b>").set({
                       rich: true,
                       alignX: "center",
                     })
                   );
                   BasenOffensive.add(
-                    new qx.ui.basic.Label("<b>Off</b>").set({
+                    new qx.ui.basic.Label("<b>" + MMt("Off") + "</b>").set({
                       rich: true,
                       alignX: "center",
                     })
                   );
                   BasenDefensive.add(
-                    new qx.ui.basic.Label("<b>Def</b>").set({
+                    new qx.ui.basic.Label("<b>" + MMt("Def") + "</b>").set({
                       rich: true,
                       alignX: "center",
                     })
                   );
                   BasenBH.add(
-                    new qx.ui.basic.Label("<b>" + Lang.gt("BH") + "</b>").set({
+                    new qx.ui.basic.Label("<b>" + MMt("CY") + "</b>").set({
                       rich: true,
                       alignX: "center",
                     })
                   );
                   BasenCC.add(
-                    new qx.ui.basic.Label("<b>" + Lang.gt("KZ") + "</b>").set({
+                    new qx.ui.basic.Label("<b>" + MMt("CC") + "</b>").set({
                       rich: true,
                       alignX: "center",
                     })
                   );
                   BasenVE.add(
-                    new qx.ui.basic.Label("<b>" + Lang.gt("VE") + "</b>").set({
+                    new qx.ui.basic.Label("<b>" + MMt("DF") + "</b>").set({
                       rich: true,
                       alignX: "center",
                     })
                   );
                   BasenVZ.add(
-                    new qx.ui.basic.Label("<b>" + Lang.gt("VZ") + "</b>").set({
+                    new qx.ui.basic.Label("<b>" + MMt("HQ") + "</b>").set({
                       rich: true,
                       alignX: "center",
                     })
                   );
                   BasenSupport.add(
-                    new qx.ui.basic.Label("<b>Support</b>").set({
+                    new qx.ui.basic.Label("<b>" + MMt("Support") + "</b>").set({
                       rich: true,
                       alignX: "center",
                     })
                   );
                   BasenTiberium.add(
                     new qx.ui.basic.Label(
-                      "<b>" + Lang.gt("Tiberium") + "</b>"
+                      "<b>" + MMt("Tiberium") + "</b>"
                     ).set({
                       rich: true,
                       alignX: "center",
@@ -2438,7 +559,7 @@
                   );
                   BasenCrystal.add(
                     new qx.ui.basic.Label(
-                      "<b>" + Lang.gt("Kristall") + "</b>"
+                      "<b>" + MMt("Crystal") + "</b>"
                     ).set({
                       rich: true,
                       alignX: "center",
@@ -2446,7 +567,7 @@
                   );
                   BasenPower.add(
                     new qx.ui.basic.Label(
-                      "<b>" + Lang.gt("Strom") + "</b>"
+                      "<b>" + MMt("Power") + "</b>"
                     ).set({
                       rich: true,
                       alignX: "center",
@@ -2454,7 +575,7 @@
                   );
                   BasenCredits.add(
                     new qx.ui.basic.Label(
-                      "<b>" + Lang.gt("Credit") + "</b>"
+                      "<b>" + MMt("Credit") + "</b>"
                     ).set({
                       rich: true,
                       alignX: "center",
@@ -2863,7 +984,7 @@
                   GeneralField1.add(
                     new qx.ui.basic.Label(
                       "<big><u><b>" +
-                        Lang.gt("Allgemeine Informationen") +
+                        MMt("General Information") +
                         "</b></u></big>"
                     ).set({
                       rich: true,
@@ -2886,7 +1007,7 @@
                   field2.add(
                     new qx.ui.basic.Label(
                       "<big><u><b>" +
-                        Lang.gt("Gesamte Produktion") +
+                        MMt("Total Production") +
                         "</b></u></big>"
                     ).set({
                       rich: true,
@@ -2916,9 +1037,9 @@
                   playerproduction.add(
                     new qx.ui.basic.Label(
                       "<b>" +
-                        Lang.gt("Spieler Produktion") +
+                        MMt("Players Production") +
                         "</b><br><i>(" +
-                        Lang.gt("aller Basen") +
+                        MMt("all bases") +
                         ")</i>"
                     ).set({
                       rich: true,
@@ -2934,9 +1055,9 @@
                   overallproduction.add(
                     new qx.ui.basic.Label(
                       "<b>" +
-                        Lang.gt("Gesamte Produktion") +
+                        MMt("Total Production") +
                         "</b><br><i>(" +
-                        Lang.gt("inklusive POI Bonus") +
+                        MMt("inclusive Bonus POI") +
                         ")</i>"
                     ).set({
                       rich: true,
@@ -2971,7 +1092,7 @@
                   firstoff.add(
                     new qx.ui.basic.Label(
                       "<big><u><b>" +
-                        Lang.gt("Erste Offensive") +
+                        MMt("First Offense") +
                         "</b></u></big>"
                     ).set({
                       rich: true,
@@ -2993,7 +1114,7 @@
                   secondoff.add(
                     new qx.ui.basic.Label(
                       "<big><u><b>" +
-                        Lang.gt("Zweite Offensive") +
+                        MMt("Second Offense") +
                         "</b></u></big>"
                     ).set({
                       rich: true,
@@ -3025,7 +1146,7 @@
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
                       "<b>" +
-                        Lang.gt("Account Erstellung") +
+                        MMt("Account Creation") +
                         ":</b> " +
                         accountCreate.toString()
                     ).set({
@@ -3036,7 +1157,7 @@
                     GeneralField1.add(
                       new qx.ui.basic.Atom(
                         "<b>" +
-                          Lang.gt("Allianz Rolle") +
+                          MMt("Alliance Role") +
                           ":</b> " +
                           AllianzRolle[PlayerID].toString()
                       ).set({
@@ -3046,14 +1167,14 @@
                   else
                     GeneralField1.add(
                       new qx.ui.basic.Atom(
-                        "<b>" + Lang.gt("Allianz Rolle") + ":</b> ---"
+                        "<b>" + MMt("Alliance Role") + ":</b> ---"
                       ).set({
                         rich: true,
                       })
                     );
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
-                      "<b>" + Lang.gt("Spielername") + ":</b> " + PlayerName
+                      "<b>" + MMt("Player Name") + ":</b> " + PlayerName
                     ).set({
                       rich: true,
                     })
@@ -3061,7 +1182,7 @@
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
                       "<b>" +
-                        Lang.gt("Spielerklasse") +
+                        MMt("Player Class") +
                         ":</b> " +
                         factionArt[faction1]
                     ).set({
@@ -3071,7 +1192,7 @@
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
                       "<b>" +
-                        Lang.gt("Aktuelle Uhrzeit") +
+                        MMt("Current Time") +
                         ":</b> " +
                         Datum +
                         " " +
@@ -3082,7 +1203,7 @@
                   );
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
-                      "<b>" + Lang.gt("Rang") + ":</b> " + playerRank
+                      "<b>" + MMt("Rank") + ":</b> " + playerRank
                     ).set({
                       rich: true,
                     })
@@ -3090,7 +1211,7 @@
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
                       "<b>" +
-                        Lang.gt("Maximale KP") +
+                        MMt("Maximal CP") +
                         ":</b> " +
                         commandpointsMaxStorage
                     ).set({
@@ -3100,18 +1221,18 @@
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
                       "<b>" +
-                        Lang.gt("Maximale Repzeit") +
+                        MMt("Maximal Reptime") +
                         ":</b> " +
                         repairMaxTime / 60 / 60 +
                         " " +
-                        Lang.gt("Stunden")
+                        MMt("Hours")
                     ).set({
                       rich: true,
                     })
                   );
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
-                      "<b>" + Lang.gt("Basenanzahl") + ":</b> " + player_basen
+                      "<b>" + MMt("Basecount") + ":</b> " + player_basen
                     ).set({
                       rich: true,
                     })
@@ -3119,7 +1240,7 @@
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
                       "<b>" +
-                        Lang.gt("Anzahl Offensiv Basen") +
+                        MMt("Offense Bases Count") +
                         ":</b> " +
                         offbasen
                     ).set({
@@ -3129,7 +1250,7 @@
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
                       "<b>" +
-                        Lang.gt("Support Gebäude Level Ø") +
+                        MMt("Support Building Level Ø") +
                         ":</b> " +
                         newAusgabe["support_lvl"]
                     ).set({
@@ -3139,7 +1260,7 @@
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
                       "<b>" +
-                        Lang.gt("VE Ø aller Basen") +
+                        MMt("DF Ø all Bases") +
                         ":</b> " +
                         newAusgabe["ve"]
                     ).set({
@@ -3149,7 +1270,7 @@
                   GeneralField1.add(
                     new qx.ui.basic.Atom(
                       "<b>" +
-                        Lang.gt("Def Ø aller Basen") +
+                        MMt("Def Ø all Bases") +
                         ":</b> " +
                         newAusgabe["def_durchschnitt"]
                     ).set({
@@ -3173,7 +1294,7 @@
                   chrystal.setToolTipIcon(
                     "webfrontend/ui/common/icn_res_chrystal.png"
                   );
-                  chrystal.setToolTipText(Lang.gt("Kristall Produktion"));
+                  chrystal.setToolTipText(MMt("Crystal Production"));
                   chrystal.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3192,7 +1313,7 @@
                   tiberium.setToolTipIcon(
                     "webfrontend/ui/common/icn_res_tiberium.png"
                   );
-                  tiberium.setToolTipText(Lang.gt("Tiberium Produktion"));
+                  tiberium.setToolTipText(MMt("Tiberium Production"));
                   tiberium.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3211,7 +1332,7 @@
                   power.setToolTipIcon(
                     "webfrontend/ui/common/icn_res_power.png"
                   );
-                  power.setToolTipText(Lang.gt("Strom Produktion"));
+                  power.setToolTipText(MMt("Power Produktion"));
                   power.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3230,7 +1351,7 @@
                   dollar.setToolTipIcon(
                     "webfrontend/ui/common/icn_res_dollar.png"
                   );
-                  dollar.setToolTipText(Lang.gt("Credit Produktion"));
+                  dollar.setToolTipText(MMt("Credit Production"));
                   dollar.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3251,7 +1372,7 @@
                     "webfrontend/ui/common/icn_res_chrystal.png"
                   );
                   chrystal.setToolTipText(
-                    Lang.gt("Gesamte Kristall Produktion")
+                    MMt("Total Crystal Production")
                   );
                   chrystal.getChildControl("icon").set({
                     width: 18,
@@ -3272,7 +1393,7 @@
                     "webfrontend/ui/common/icn_res_tiberium.png"
                   );
                   tiberium.setToolTipText(
-                    Lang.gt("Gesamte Tiberium Produktion")
+                    MMt("Total Tiberium Production")
                   );
                   tiberium.getChildControl("icon").set({
                     width: 18,
@@ -3292,7 +1413,7 @@
                   power.setToolTipIcon(
                     "webfrontend/ui/common/icn_res_power.png"
                   );
-                  power.setToolTipText(Lang.gt("Gesamte Strom Produktion"));
+                  power.setToolTipText(MMt("Total Power Production"));
                   power.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3312,7 +1433,7 @@
                   name.setToolTipIcon(
                     "FactionUI/icons/icon_arsnl_base_buildings.png"
                   );
-                  name.setToolTipText("1st-OFF: " + Lang.gt("Basis Name"));
+                  name.setToolTipText(MMt("1st-OFF") + ": " + MMt("Base Name"));
                   name.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3331,7 +1452,7 @@
                   level.setToolTipIcon(
                     "FactionUI/icons/icon_arsnl_base_buildings.png"
                   );
-                  level.setToolTipText("1st-OFF: " + Lang.gt("Basis Level"));
+                  level.setToolTipText(MMt("1st-OFF") + ": " + MMt("Base Level"));
                   level.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3348,7 +1469,7 @@
                     }))
                   );
                   off.setToolTipIcon("FactionUI/icons/icon_army_points.png");
-                  off.setToolTipText("1st-OFF: " + Lang.gt("Offensiv Level"));
+                  off.setToolTipText(MMt("1st-OFF") + ": " + MMt("Offense Level"));
                   off.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3367,7 +1488,7 @@
                   def.setToolTipIcon(
                     "FactionUI/icons/icon_def_army_points.png"
                   );
-                  def.setToolTipText("1st-OFF: " + Lang.gt("Defensiv Level"));
+                  def.setToolTipText(MMt("1st-OFF") + ": " + MMt("Defense Level"));
                   def.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3387,7 +1508,7 @@
                     "webfrontend/ui/common/icn_res_power.png"
                   );
                   strom.setToolTipText(
-                    "1st-OFF: " + Lang.gt("Strom Produktion")
+                    MMt("1st-OFF") + ": " + MMt("Power Produktion")
                   );
                   strom.getChildControl("icon").set({
                     width: 18,
@@ -3408,7 +1529,7 @@
                     "FactionUI/icons/icon_arsnl_off_squad.png"
                   );
                   squad.setToolTipText(
-                    "1st-OFF: " + Lang.gt("Fußtruppen Reparaturzeit")
+                    MMt("1st-OFF") + ": " + MMt("Infantry Repairtime")
                   );
                   squad.getChildControl("icon").set({
                     width: 18,
@@ -3429,7 +1550,7 @@
                     "FactionUI/icons/icon_arsnl_off_vehicle.png"
                   );
                   vehicle.setToolTipText(
-                    "1st-OFF: " + Lang.gt("Fahrzeug Reparaturzeit")
+                    MMt("1st-OFF") + ": " + MMt("Vehicle Repairtime")
                   );
                   vehicle.getChildControl("icon").set({
                     width: 18,
@@ -3450,7 +1571,7 @@
                     "FactionUI/icons/icon_arsnl_off_plane.png"
                   );
                   plane.setToolTipText(
-                    "1st-OFF: " + Lang.gt("Flugzeug Reparaturzeit")
+                    MMt("1st-OFF") + ": " + MMt("Aircraft Repairtime")
                   );
                   plane.getChildControl("icon").set({
                     width: 18,
@@ -3471,7 +1592,7 @@
                   name.setToolTipIcon(
                     "FactionUI/icons/icon_arsnl_base_buildings.png"
                   );
-                  name.setToolTipText("2nd-OFF: " + Lang.gt("Basis Name"));
+                  name.setToolTipText(MMt("2nd-OFF") + ": " + MMt("Base Name"));
                   name.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3490,7 +1611,7 @@
                   level.setToolTipIcon(
                     "FactionUI/icons/icon_arsnl_base_buildings.png"
                   );
-                  level.setToolTipText("2nd-OFF: " + Lang.gt("Basis Level"));
+                  level.setToolTipText(MMt("2nd-OFF") + ": " + MMt("Base Level"));
                   level.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3507,7 +1628,7 @@
                     }))
                   );
                   off.setToolTipIcon("FactionUI/icons/icon_army_points.png");
-                  off.setToolTipText("2nd-OFF: " + Lang.gt("Offensiv Level"));
+                  off.setToolTipText(MMt("2nd-OFF") + ": " + MMt("Offense Level"));
                   off.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3526,7 +1647,7 @@
                   def.setToolTipIcon(
                     "FactionUI/icons/icon_def_army_points.png"
                   );
-                  def.setToolTipText("2nd-OFF: " + Lang.gt("Defensive Level"));
+                  def.setToolTipText(MMt("2nd-OFF") + ": " + MMt("Defensive Level"));
                   def.getChildControl("icon").set({
                     width: 18,
                     height: 18,
@@ -3546,7 +1667,7 @@
                     "webfrontend/ui/common/icn_res_power.png"
                   );
                   strom.setToolTipText(
-                    "2nd-OFF: " + Lang.gt("Strom Produktion")
+                    MMt("2nd-OFF") + ": " + MMt("Power Produktion")
                   );
                   strom.getChildControl("icon").set({
                     width: 18,
@@ -3567,7 +1688,7 @@
                     "FactionUI/icons/icon_arsnl_off_squad.png"
                   );
                   squad.setToolTipText(
-                    "2nd-OFF: " + Lang.gt("Fußtruppen Reparaturzeit")
+                    MMt("2nd-OFF") + ": " + MMt("Infantry Repairtime")
                   );
                   squad.getChildControl("icon").set({
                     width: 18,
@@ -3588,7 +1709,7 @@
                     "FactionUI/icons/icon_arsnl_off_vehicle.png"
                   );
                   vehicle.setToolTipText(
-                    "2nd-OFF: " + Lang.gt("Fahrzeug Reparaturzeit")
+                    MMt("2nd-OFF") + ": " + MMt("Vehicle Repairtime")
                   );
                   vehicle.getChildControl("icon").set({
                     width: 18,
@@ -3609,7 +1730,7 @@
                     "FactionUI/icons/icon_arsnl_off_plane.png"
                   );
                   plane.setToolTipText(
-                    "2nd-OFF: " + Lang.gt("Flugzeug Reparaturzeit")
+                    MMt("2nd-OFF") + ": " + MMt("Aircraft Repairtime")
                   );
                   plane.getChildControl("icon").set({
                     width: 18,
@@ -3709,7 +1830,7 @@
                       if (!kids || !kids.length) return;
                       c._header = kids[0];
                       headerHtml[c.key] = c._header.getValue();
-                      c._header.set({ cursor: "pointer", toolTipText: "Click to sort by this column" });
+                      c._header.set({ cursor: "pointer", toolTipText: MMt("Click to sort by this column") });
                       c._header.addListener("click", function () {
                         if (currentSort.key === c.key) currentSort.dir = -currentSort.dir;
                         else { currentSort.key = c.key; currentSort.dir = 1; }
@@ -3743,7 +1864,6 @@
       } catch (e) {
         wwarn("qx.Class.define failed:", e);
       }
-      var Lang = BaseInfoLang.getInstance();
       BaseInfo.getInstance();
     }
 
