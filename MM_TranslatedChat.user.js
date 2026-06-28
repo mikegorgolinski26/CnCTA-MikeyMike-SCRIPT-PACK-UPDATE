@@ -3,7 +3,7 @@
 // @description     A resizable, dockable mirror of the in-game chat that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Each translated line is tagged with a two-letter source-language code between the [channel] and the [player], with the original text shown dimmed. Stage 1: read-only mirror alongside the native chat.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.0
+// @version         1.0.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -113,6 +113,8 @@
 
             return {
                 supported: supported,
+                // Pre-create the detector so the FIRST message doesn't pay model warm-up at translate time.
+                warm: function () { if (supported) { try { getDetector(); } catch (e) {} } },
                 // Resolve "ready" / "unavailable" / "downloading" for the status line.
                 status: function () {
                     if (!supported) return Promise.resolve("unsupported");
@@ -181,7 +183,7 @@
         // Render one line. tr = translation result (or null = not translated yet).
         // Order: time  [channel]  [LANG]  [player]: text   (original dimmed)
         // ----------------------------------------------------------------------
-        function lineHtml(p, tr) {
+        function lineHtml(p, tr, pending) {
             var s = "";
             if (p.time) s += '<span style="color:#6f8aa3;">' + esc(p.time) + '</span> ';
             if (p.chan) s += '<span style="color:' + (p.chanColor || "#9ab0c0") + ';">[' + esc(p.chan) + ']</span> ';
@@ -194,6 +196,11 @@
             if (tr && tr.translated && showOriginal() && p.raw != null) {
                 s += ' <span style="color:#5d7d9c;font-style:italic;font-size:11px;">(' + esc(p.raw) + ')</span>';
             }
+            // shown only while a translation is still in flight (gated by a short delay, so fast/no-op
+            // resolutions - e.g. messages already in your language - never flash it)
+            if (!tr && pending) {
+                s += ' <span style="color:#5d7d9c;font-style:italic;font-size:11px;">· ' + esc(MMt("translating…")) + '</span>';
+            }
             return s;
         }
 
@@ -202,6 +209,7 @@
         // ----------------------------------------------------------------------
         function build() {
             wlog("building UI");
+            try { Tr.warm(); } catch (e) {}   // pre-create the detector so the first translation is quicker
 
             var rows = [];   // { lbl, p, tr }
             var list = new qx.ui.container.Composite(new qx.ui.layout.VBox(2)).set({ padding: 6, backgroundColor: "#0c1a28" });
@@ -241,7 +249,15 @@
                 var row = addRow(p);
                 if (p.raw && Tr.supported) {
                     var tgt = targetLang();
+                    var done = false;
+                    // only surface a "translating…" hint if it's taking a moment (>400ms): fast resolutions
+                    // and same-language no-ops resolve first and clear the timer, so they never flash it.
+                    var hintTimer = window.setTimeout(function () {
+                        if (!done) { try { row.lbl.setValue(lineHtml(p, null, true)); } catch (e) {} }
+                    }, 400);
                     Tr.process(p.raw, tgt).then(function (tr) {
+                        done = true;
+                        try { window.clearTimeout(hintTimer); } catch (e) {}
                         try {
                             row.tr = tr;
                             row.lbl.setValue(lineHtml(p, tr));
