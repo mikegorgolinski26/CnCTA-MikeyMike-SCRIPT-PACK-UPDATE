@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name            MM - Translated Chat
-// @description     A full replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Alliance / Global / Whisper / ...) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Locks docked lower-left like the native chat, or unlock to move + resize. Hides the native chat (toggle to bring it back).
+// @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.1
+// @version         1.2.0
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -13,40 +13,41 @@
 ================================================================================
  MM - Translated Chat
 ================================================================================
- WHAT IT DOES
-   A full custom chat window that REPLACES the native game chat (the native one is
-   hidden; a header toggle brings it back). It:
-     - Mirrors every message and auto-translates it into your region language,
-       ON-DEVICE (Chrome: Translator + LanguageDetector / Gemini Nano; Edge 148+:
-       Phi-4-mini). The text never leaves your browser (zero-telemetry).
-     - Tags each line:  HH:MM:SS  [Channel]  [LANG]  [Player]: text. The 2-letter
-       LANG code shows only when the message was translated FROM a non-region
-       language (keyed off the DETECTED language); the original is shown dimmed.
-     - Channel tabs (All / Alliance / Global / Whisper / ...) built live from the
-       native chat's own channels. Picking a tab filters the feed AND sets the
-       channel your typed messages go to.
-     - Type + send from the window (routes through the game's own send()).
-     - Locks docked lower-left like the native chat; UNLOCK to move + resize
-       (size/position are remembered).
+ A frameless custom chat window that REPLACES the native game chat (hidden; a
+ header toggle / closing the window brings it back). It mirrors every message and
+ auto-translates it into your region language ON-DEVICE (Chrome: Translator +
+ LanguageDetector / Gemini Nano; Edge 148+: Phi-4-mini) - text never leaves the
+ browser. Each line: HH:MM:SS [Channel] [LANG] [Player]: text (LANG only when
+ translated from a non-region language; original shown dimmed).
+
+ CHROME / UX (matches the native chat)
+   - Custom blue title strip: [minimize ✕] [padlock] "Translated Chat (Channel)".
+   - Padlock: 🔒 = docked lower-left, fixed (locked); 🔓 = free to drag + resize.
+   - Minimize ✕ closes the window; reopen with the "Translated Chat" button in the
+     MM Tools bar (native stays hidden = still replaced).
+   - Channel tabs All / Global / Alliance / Whisper: filter the feed AND set the
+     channel your typed messages go to. The title shows the selected channel.
+   - Everything persists per player+world: locked state, hide-native, window
+     position/size, and open state - restored on next login.
 
  HOW IT HOOKS THE GAME (readable game API - no de-obfuscation)
    Native chat = webfrontend.gui.chat.ChatWindow; .getChatWidget() =
-   webfrontend.gui.chat.ChatWidget. Every message (in + out) is rendered through
-   ONE method: showMessage(html, senderSpan, channelIndex, bool). We wrap it (call
-   original, then mirror): the HTML carries data-chat-message (raw text),
-   data-chat-senderId, sender name, data-chat-messagetype, the [Channel] label +
-   colour and the timestamp; the 3rd arg is the channel/tab index. Channels are
-   the ChatWidget's TabView pages (.getChildren()[0]); we switch channel by
-   setting the TabView selection and send via ChatWidget.send("text"). The native
-   window is hidden with setVisibility("excluded") (the widget stays alive and
-   keeps calling showMessage, so the mirror keeps working).
+   webfrontend.gui.chat.ChatWidget renders every message through showMessage(html,
+   ...). We wrap it (call original, then mirror) and parse the HTML
+   (data-chat-message = raw text, data-chat-senderId, sender name,
+   data-chat-messagetype, channel colour, timestamp). Channel is classified by
+   data-chat-messagetype (6=Global, 8=Alliance, 7=Whisper); Global carries no
+   [label] bracket so we never parse it from text. Channels live in the
+   ChatWidget's TabView (.getChildren()[0]); we switch channel by setting its
+   selection (page resolved by icon) and send via ChatWidget.send("text"). The
+   native window is hidden with setVisibility("excluded") (the widget stays alive
+   and keeps calling showMessage, so the mirror keeps working).
 
  DEPENDENCIES (pack rule: wrapper + Common Library only)
      MMCommon.ui.Window + MMCommon.buttons - the window + HUD toggle
      MMCommon.settings - per player+world persistence
      MMCommon.i18n     - getLang() = the translation target; t() for UI strings
-   No dependency on any other userscript. The on-device translation engine is
-   self-contained here.
+   No dependency on any other userscript. Translation engine is self-contained.
 
  Settings (MMCommon.settings, per player+world): TranslatedChat.* (enabled,
    showOriginal, target, locked, hideNative, window geom + open state).
@@ -76,6 +77,8 @@
         function enabled() { try { return MM.settings.get(SET + "enabled", true) !== false; } catch (e) { return true; } }
         function showOriginal() { try { return MM.settings.get(SET + "showOriginal", true) !== false; } catch (e) { return true; } }
         function targetLang() { try { var o = MM.settings.get(SET + "target", null); return o || MM.i18n.getLang() || "en"; } catch (e) { return "en"; } }
+        function isLocked() { try { return MM.settings.get(SET + "locked", true) !== false; } catch (e) { return true; } }
+        function hideNative() { try { return MM.settings.get(SET + "hideNative", true) !== false; } catch (e) { return true; } }
 
         // ----------------------------------------------------------------------
         // On-device translation engine
@@ -138,11 +141,8 @@
         })();
 
         // ----------------------------------------------------------------------
-        // Channel model. Classification of INCOMING messages is by data-chat-messagetype
-        // (live-sniffed: 6=Global, 8=Alliance, 7=Whisper - language-independent, unlike the
-        // [label] bracket which Global omits entirely). The native page index used for
-        // SENDING/switching is resolved at runtime by matching the page icon (robust to
-        // ordering changes). Colours are the game's own per-channel colours.
+        // Channel model (classify INCOMING by data-chat-messagetype; resolve the
+        // native page index for SENDING by icon).
         // ----------------------------------------------------------------------
         var MTYPE_CHAN = { "6": "global", "8": "alliance", "7": "whisper" };
         var CHAN = {
@@ -157,7 +157,6 @@
         function getWidget() { try { var c = getChat(); return c && c.getChatWidget ? c.getChatWidget() : null; } catch (e) { return null; } }
         function getTabView() { try { var w = getWidget(); var ch = w && w.getChildren && w.getChildren(); return (ch && ch[0]) || null; } catch (e) { return null; } }
         function pagesOf(tv) { try { return (tv.getSelectables ? tv.getSelectables() : tv.getChildren()) || []; } catch (e) { return []; } }
-        // native page index for a channel key, by icon keyword (null if not present)
         function nativeIdxFor(key) {
             try {
                 var keys = (CHAN[key] && CHAN[key].icons) || [];
@@ -180,7 +179,7 @@
         }
 
         // ----------------------------------------------------------------------
-        // Render one line
+        // Parse / render
         // ----------------------------------------------------------------------
         function parseMessage(html) {
             try {
@@ -193,8 +192,6 @@
                 var sender = span ? (span.textContent || "") : "";
                 var tm = String(html).match(/(\d{1,2}:\d{2}:\d{2})/);
                 var time = tm ? tm[1] : "";
-                // first non-white font colour = the game's channel colour (Global has no [label]
-                // bracket, so we classify by message-type, not by parsing the text)
                 var chanColor = null;
                 var fonts = d.querySelectorAll("font");
                 for (var i = 0; i < fonts.length; i++) {
@@ -233,24 +230,19 @@
             wlog("building UI");
             try { Tr.warm(); } catch (e) {}
 
-            var rows = [];              // { lbl, p, tr, chanKey }
-            var activeFilter = "all";  // "all" or a channel key
-            var lastChanKey = "alliance";   // last real channel chosen (send target when viewing All)
+            var rows = [];
+            var activeFilter = "all";
+            var lastChanKey = "alliance";
             var TXT = "#e8e8e8";
 
+            // ---- feed ----
             var list = new qx.ui.container.Composite(new qx.ui.layout.VBox(2)).set({ padding: 6, backgroundColor: "#0c1a28" });
             var scroll = new qx.ui.container.Scroll();
             scroll.add(list);
-
             function atBottom() { try { return (scroll.getScrollY() >= scroll.getScrollMaxY() - 24); } catch (e) { return true; } }
             function scrollBottomSoon(force) { var stick = force || atBottom(); if (!stick) return; window.setTimeout(function () { try { scroll.scrollToY(scroll.getScrollMaxY()); } catch (e) {} }, 0); }
-
             function rowVisible(r) { return (activeFilter === "all") || (r.chanKey === activeFilter); }
-            function applyFilter() {
-                for (var i = 0; i < rows.length; i++) { try { rows[i].lbl.setVisibility(rowVisible(rows[i]) ? "visible" : "excluded"); } catch (e) {} }
-                scrollBottomSoon(true);
-            }
-
+            function applyFilter() { for (var i = 0; i < rows.length; i++) { try { rows[i].lbl.setVisibility(rowVisible(rows[i]) ? "visible" : "excluded"); } catch (e) {} } scrollBottomSoon(true); }
             function addRow(p) {
                 var r = { lbl: null, p: p, tr: null, chanKey: p.chanKey };
                 var lbl = new qx.ui.basic.Label(lineHtml(p, null)).set({ rich: true, selectable: true, allowGrowX: true, font: new qx.bom.Font(12, ["sans-serif"]) });
@@ -263,12 +255,11 @@
                 scrollBottomSoon(wasBottom);
                 return r;
             }
-
             function onMessage(html) {
                 if (!enabled()) return;
                 var p = parseMessage(html);
                 if (!p) return;
-                if (!p.raw || String(p.mtype) === "0") return;   // skip system / command-error / no-text rows
+                if (!p.raw || String(p.mtype) === "0") return;
                 var row = addRow(p);
                 if (p.raw && Tr.supported) {
                     var tgt = targetLang(), done = false;
@@ -279,8 +270,6 @@
                     });
                 }
             }
-
-            // ---- hook the game's chat render ----
             function hookChat() {
                 try {
                     var cw = getWidget();
@@ -288,11 +277,7 @@
                     if (cw.__mmTransHooked) return true;
                     var orig = cw.showMessage;
                     if (typeof orig !== "function") { werr("showMessage not found"); return false; }
-                    cw.showMessage = function () {
-                        var r = orig.apply(this, arguments);
-                        try { onMessage(arguments[0]); } catch (e) { wwarn("onMessage:", e); }
-                        return r;
-                    };
+                    cw.showMessage = function () { var r = orig.apply(this, arguments); try { onMessage(arguments[0]); } catch (e) { wwarn("onMessage:", e); } return r; };
                     cw.__mmTransHooked = true;
                     wlog("showMessage hooked");
                     return true;
@@ -300,7 +285,20 @@
             }
             if (!hookChat()) window.setTimeout(hookChat, 1500);
 
-            // ---- channel tabs: fixed All / Global / Alliance / Whisper ----
+            // ---- title strip (frameless chrome: minimize, padlock, channel-aware title) ----
+            var titleStrip = new qx.ui.container.Composite(new qx.ui.layout.HBox(6)).set({ padding: [3, 7], backgroundColor: "#1c4f7c" });
+            var minBtn = new qx.ui.basic.Label("✕").set({ cursor: "pointer", alignY: "middle", textColor: "#cfe6ff", font: new qx.bom.Font(13, ["sans-serif"]).set({ bold: true }), toolTipText: MMt("Minimize") });
+            var lockLbl = new qx.ui.basic.Label("🔓").set({ cursor: "pointer", alignY: "middle", font: new qx.bom.Font(13, ["sans-serif"]), toolTipText: MMt("Lock") });
+            var titleLbl = new qx.ui.basic.Label("").set({ alignY: "middle", textColor: "#ffffff", font: new qx.bom.Font(12, ["sans-serif"]).set({ bold: true }) });
+            titleStrip.add(minBtn);
+            titleStrip.add(lockLbl);
+            titleStrip.add(titleLbl, { flex: 1 });
+            // clicks on the buttons must not start a drag
+            minBtn.addListener("mousedown", function (e) { e.stopPropagation(); });
+            lockLbl.addListener("mousedown", function (e) { e.stopPropagation(); });
+            function updateTitle() { try { var def = CHAN[activeFilter] || CHAN.all; titleLbl.setValue(MMt("Translated Chat") + " (" + (def ? def.label : MMt("All")) + ")"); } catch (e) {} }
+
+            // ---- channel tabs ----
             var tabsBar = new qx.ui.container.Composite(new qx.ui.layout.Flow(3, 3)).set({ padding: 4, backgroundColor: "#0a1521" });
             var tabGroup = new qx.ui.form.RadioGroup().set({ allowEmptySelection: false });
             var tabBtns = {};
@@ -313,34 +311,27 @@
                 b.addListener("changeValue", function (e) {
                     if (!e.getData()) return;
                     activeFilter = key;
-                    if (key !== "all") { lastChanKey = key; selectChannelIdx(nativeIdxFor(key)); }   // align native send-target with the viewed channel
+                    if (key !== "all") { lastChanKey = key; selectChannelIdx(nativeIdxFor(key)); }
+                    updateTitle();
                     applyFilter();
                 });
                 return b;
             }
-            function buildTabs() {
-                for (var i = 0; i < TAB_ORDER.length; i++) { var k = TAB_ORDER[i]; if (!tabBtns[k]) tabBtns[k] = makeTab(k); }
-                try { tabBtns.all.setValue(true); } catch (e) {}
-            }
+            function buildTabs() { for (var i = 0; i < TAB_ORDER.length; i++) { var k = TAB_ORDER[i]; if (!tabBtns[k]) tabBtns[k] = makeTab(k); } try { tabBtns.all.setValue(true); } catch (e) {} }
 
-            // ---- header ----
-            var header = new qx.ui.container.Composite(new qx.ui.layout.HBox(8)).set({ padding: 5, backgroundColor: "#10243a" });
-            var lockBtn = new qx.ui.form.Button(MMt("Unlock")).set({ focusable: false, padding: [2, 8] });
+            // ---- controls row ----
+            var controls = new qx.ui.container.Composite(new qx.ui.layout.HBox(8)).set({ padding: 5, backgroundColor: "#10243a" });
             var origChk = new qx.ui.form.CheckBox(MMt("Show original")).set({ alignY: "middle", textColor: TXT });
             var nativeChk = new qx.ui.form.CheckBox(MMt("Hide native chat")).set({ alignY: "middle", textColor: TXT });
             var statusLbl = new qx.ui.basic.Label("").set({ alignY: "middle", rich: true, textColor: "#9fb4c0", font: new qx.bom.Font(11, ["sans-serif"]) });
             origChk.setValue(showOriginal());
-            origChk.addListener("changeValue", function () {
-                try { MM.settings.set(SET + "showOriginal", origChk.getValue()); for (var i = 0; i < rows.length; i++) rows[i].lbl.setValue(lineHtml(rows[i].p, rows[i].tr)); } catch (e) {}
-            });
-            header.add(lockBtn);
-            header.add(new qx.ui.basic.Label(MMt("to:")).set({ alignY: "middle", textColor: TXT }));
-            header.add(new qx.ui.basic.Label(String(targetLang()).toUpperCase()).set({ alignY: "middle", textColor: "#cfe6ff", font: new qx.bom.Font(12, ["sans-serif"]).set({ bold: true }) }));
-            header.add(origChk);
-            header.add(nativeChk);
-            header.add(new qx.ui.core.Spacer(), { flex: 1 });
-            header.add(statusLbl);
-
+            origChk.addListener("changeValue", function () { try { MM.settings.set(SET + "showOriginal", origChk.getValue()); for (var i = 0; i < rows.length; i++) rows[i].lbl.setValue(lineHtml(rows[i].p, rows[i].tr)); } catch (e) {} });
+            controls.add(new qx.ui.basic.Label(MMt("to:")).set({ alignY: "middle", textColor: TXT }));
+            controls.add(new qx.ui.basic.Label(String(targetLang()).toUpperCase()).set({ alignY: "middle", textColor: "#cfe6ff", font: new qx.bom.Font(12, ["sans-serif"]).set({ bold: true }) }));
+            controls.add(origChk);
+            controls.add(nativeChk);
+            controls.add(new qx.ui.core.Spacer(), { flex: 1 });
+            controls.add(statusLbl);
             (function () {
                 function setStatus(s) {
                     var map = {
@@ -362,10 +353,10 @@
                 var text = (input.getValue() || "").trim();
                 if (!text) return;
                 try {
-                    var key = (activeFilter === "all") ? lastChanKey : activeFilter;   // "All" view sends to the last channel used (default Alliance)
+                    var key = (activeFilter === "all") ? lastChanKey : activeFilter;
                     selectChannelIdx(nativeIdxFor(key));
                     var cw = getWidget();
-                    if (cw && typeof cw.send === "function") cw.send(text);   // game echoes it back via showMessage -> appears in feed
+                    if (cw && typeof cw.send === "function") cw.send(text);
                     input.setValue("");
                 } catch (e) { werr("send failed:", e); }
             }
@@ -374,62 +365,68 @@
             inputRow.add(input, { flex: 1 });
             inputRow.add(sendBtn);
 
-            // ---- window ----
+            // ---- window (frameless: own title strip is the chrome) ----
             var win = MM.ui.Window({
                 caption: MMt("MM - Translated Chat"),
                 key: "TranslatedChat.Window",
                 layout: new qx.ui.layout.VBox(0),
                 width: 460, height: 320,
-                persistSize: true,
-                restoreOpen: true,
-                resizable: true,
-                dock: true
+                persistSize: true, restoreOpen: true, resizable: true,
+                dock: false, contentPadding: 0
             });
             if (!win) { werr("window creation failed"); return; }
-            win.add(header);
+            // frameless-ish: drop the qx caption bar so our blue title strip is the only chrome
+            // (keep the window decorator so the resize handles still work when unlocked)
+            try { var cb = win.getChildControl("captionbar"); if (cb) cb.exclude(); } catch (e) {}
+            win.add(titleStrip);
+            win.add(controls);
             win.add(tabsBar);
             win.add(scroll, { flex: 1 });
             win.add(inputRow);
-
             buildTabs();
+            updateTitle();
 
-            // ---- lock / unlock (locked = pinned lower-left, not movable/resizable) ----
+            // ---- drag by the title strip (only when unlocked); win captures so moves track ----
+            (function () {
+                var drag = false, ox = 0, oy = 0;
+                titleStrip.addListener("mousedown", function (e) {
+                    if (isLocked()) return;
+                    try { var b = win.getBounds(); if (!b || b.left == null) return; ox = e.getDocumentLeft() - b.left; oy = e.getDocumentTop() - b.top; drag = true; win.capture(true); e.stop(); } catch (er) {}
+                });
+                win.addListener("mousemove", function (e) { if (!drag) return; try { win.moveTo(Math.max(0, e.getDocumentLeft() - ox), Math.max(0, e.getDocumentTop() - oy)); } catch (er) {} });
+                function end() { if (!drag) return; drag = false; try { win.releaseCapture(); } catch (er) {} }
+                win.addListener("mouseup", end);
+                win.addListener("losecapture", end);
+            })();
+
+            // ---- lock / dock ----
             function dockLowerLeft() {
                 try {
                     var root = qx.core.Init.getApplication().getRoot().getBounds() || {};
                     var b = win.getBounds() || {};
                     var vh = root.height || window.innerHeight || 720;
-                    win.moveTo(6, Math.max(0, vh - (b.height || 320) - 6));
+                    win.moveTo(6, Math.max(0, vh - (b.height || 320) - 4));
                 } catch (e) {}
             }
-            function isLocked() { try { return MM.settings.get(SET + "locked", true) !== false; } catch (e) { return true; } }
             function applyLock(locked) {
                 try {
-                    win.setMovable(!locked);
+                    lockLbl.setValue(locked ? "🔒" : "🔓");
+                    lockLbl.setToolTipText(locked ? MMt("Unlock") : MMt("Lock"));
                     win.setResizable(!locked);
-                    lockBtn.setLabel(locked ? MMt("Unlock") : MMt("Lock"));
                     if (locked) dockLowerLeft();
                 } catch (e) { wwarn("applyLock:", e); }
             }
-            lockBtn.addListener("execute", function () {
-                var next = !isLocked();
-                try { MM.settings.set(SET + "locked", next); } catch (e) {}
-                applyLock(next);
-            });
+            lockLbl.addListener("tap", function () { var n = !isLocked(); try { MM.settings.set(SET + "locked", n); } catch (e) {} applyLock(n); });
 
-            // ---- native replace (hide native while our window is open; restore on close) ----
-            function replaceMode() { try { return MM.settings.get(SET + "hideNative", true) !== false; } catch (e) { return true; } }
-            nativeChk.setValue(replaceMode());
-            nativeChk.addListener("changeValue", function () {
-                try { MM.settings.set(SET + "hideNative", nativeChk.getValue()); setNativeHidden(nativeChk.getValue() && win.isVisible()); } catch (e) {}
-            });
+            // ---- minimize (native stays hidden; restore via the MM Tools button) ----
+            minBtn.addListener("tap", function () { try { win.close(); } catch (e) {} });
 
-            win.addListener("appear", function () {
-                buildTabs();
-                applyLock(isLocked());
-                setNativeHidden(replaceMode());   // hide native when our window is up (if replace mode)
-            });
-            win.addListener("disappear", function () { setNativeHidden(false); });   // always restore native when ours closes
+            // ---- native replace (independent of our window's open state) ----
+            nativeChk.setValue(hideNative());
+            nativeChk.addListener("changeValue", function () { try { MM.settings.set(SET + "hideNative", nativeChk.getValue()); setNativeHidden(nativeChk.getValue()); } catch (e) {} });
+            setNativeHidden(hideNative());
+
+            win.addListener("appear", function () { buildTabs(); updateTitle(); applyLock(isLocked()); setNativeHidden(hideNative()); });
 
             MM.buttons.register({
                 id: "mm-translated-chat",
