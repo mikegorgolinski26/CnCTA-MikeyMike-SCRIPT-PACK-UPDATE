@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Adds two readouts to the game's "move base" info panel while you relocate a base: (1) the wall-clock time the move cooldown for the spot under the cursor will expire (or "now"), and (2) how many farmable Forgotten NPC bases sit within attack range of that spot - a total/in-range count, a per-level breakdown, and a rough attack-wave estimate - so you can pick a base location with the best farming around it. Both update as you move the cursor and clear when you drop the base.
-// @version      1.0.0
+// @version      1.0.1
 // @author       MikeyMike (rework of Nogrod / NetquiK's "CityMoveInfoExtend")
 // @contributor  Nogrod
 // @contributor  NetquiK (https://github.com/netquik)
@@ -47,6 +47,9 @@
 (function () {
 	var MI_main = function () {
 		// ---- logger ----------------------------------------------------------------
+		// i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+		// loads after this script (extension injection order isn't guaranteed). Identity in English.
+		function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
 		var LOG = (window.MMCommon && window.MMCommon.makeLogger)
 			? window.MMCommon.makeLogger("Move Info")
 			: {
@@ -77,7 +80,7 @@
 				var oc = ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity();
 				if (!oc || typeof oc.GetCityMoveCooldownTime !== "function") return null;
 				var secs = oc.GetCityMoveCooldownTime(x, y);
-				if (!secs || secs <= 0) return "now";
+				if (!secs || secs <= 0) return MMt("now");
 				var when = new Date(Date.now() + secs * 1000);
 				try { return phe.cnc.Util.getDateTimeString(when); } catch (e) { return when.toLocaleString(); }
 			} catch (e) { werr("cooldownText:", e); return null; }
@@ -116,14 +119,14 @@
 		}
 		// Attack-wave estimate from the in-range count (the original's German-origin heuristic).
 		function waveText(inner) {
-			if (inner <= 20) return "1 wave";
-			if (inner <= 25) return "max 2 waves";
-			if (inner <= 30) return "2 waves";
-			if (inner <= 35) return "max 3 waves";
-			if (inner <= 40) return "3 waves";
-			if (inner <= 44) return "max 4 waves";
-			if (inner <= 50) return "4 waves";
-			return "5+ waves";
+			if (inner <= 20) return MMt("1 wave");
+			if (inner <= 25) return MMt("max 2 waves");
+			if (inner <= 30) return MMt("2 waves");
+			if (inner <= 35) return MMt("max 3 waves");
+			if (inner <= 40) return MMt("3 waves");
+			if (inner <= 44) return MMt("max 4 waves");
+			if (inner <= 50) return MMt("4 waves");
+			return MMt("5+ waves");
 		}
 
 		// ---- readout panel (added to the game's move-info widget) ------------------
@@ -176,16 +179,16 @@
 				var any = false;
 				if (showCooldown()) {
 					var cd = cooldownText(x, y);
-					panel.cd.setValue("Move ready: <b>" + (cd || "?") + "</b>");
+					panel.cd.setValue(MMt("Move ready:") + " <b>" + (cd || "?") + "</b>");
 					panel.cd.show(); any = true;
 				} else { panel.cd.exclude(); }
 				if (showBases()) {
 					var s = surroundingBases(x, y);
-					panel.bases.setValue("NPC bases in range: <b>" + s.count + "</b> (<b>" + s.inner + "</b>)  ·  ~" + waveText(s.inner));
+					panel.bases.setValue(MMt("NPC bases in range:") + " <b>" + s.count + "</b> (<b>" + s.inner + "</b>)  ·  ~" + waveText(s.inner));
 					var keys = Object.keys(s.levels).map(Number).sort(function (a, b) { return b - a; }); // high level first
 					var parts = [];
 					for (var i = 0; i < keys.length; i++) parts.push(s.levels[keys[i]] + "x" + keys[i]);
-					panel.lvl.setValue(parts.length ? "Levels: " + parts.join(" · ") : "");
+					panel.lvl.setValue(parts.length ? MMt("Levels:") + " " + parts.join(" · ") : "");
 					panel.lvl.setVisibility(parts.length ? "visible" : "excluded");
 					panel.bases.show(); any = true;
 				} else { panel.bases.exclude(); panel.lvl.exclude(); }
@@ -225,7 +228,7 @@
 		// ---- options panel ---------------------------------------------------------
 		function buildOptions() {
 			var body = new qx.ui.container.Composite(new qx.ui.layout.VBox(6)).set({ padding: 10, backgroundColor: "#23282b" });
-			body.add(new qx.ui.basic.Label("While moving a base, add to the move panel:").set({
+			body.add(new qx.ui.basic.Label(MMt("While moving a base, add to the move panel:")).set({
 				rich: true, textColor: "#9fb4c0", font: new qx.bom.Font(12, ["sans-serif"]).set({ bold: true })
 			}));
 
@@ -234,11 +237,11 @@
 				cb.addListener("changeValue", function (e) { setS(key, e.getData() === true); redrawLast(); });
 				return cb;
 			}
-			body.add(toggle("Move-cooldown expiry time (when the spot is free to move into)", "MoveInfo.cooldown", true));
-			body.add(toggle("Farmable NPC bases in attack range (+ levels + wave estimate)", "MoveInfo.bases", true));
+			body.add(toggle(MMt("Move-cooldown expiry time (when the spot is free to move into)"), "MoveInfo.cooldown", true));
+			body.add(toggle(MMt("Farmable NPC bases in attack range (+ levels + wave estimate)"), "MoveInfo.bases", true));
 
 			body.add(new qx.ui.core.Widget().set({ height: 1, backgroundColor: "#3a4248", marginTop: 4, marginBottom: 2, allowGrowX: true }));
-			var master = new qx.ui.form.CheckBox("Master: enable the move-panel readout").set({ value: masterOn(), textColor: "#e8e8e8" });
+			var master = new qx.ui.form.CheckBox(MMt("Master: enable the move-panel readout")).set({ value: masterOn(), textColor: "#e8e8e8" });
 			master.addListener("changeValue", function (e) {
 				setS("MoveInfo.enabled", e.getData() === true);
 				if (e.getData() === true) redrawLast(); else hidePanel();
@@ -246,14 +249,14 @@
 			body.add(master);
 
 			var win = MM.ui.Window({
-				caption: "Move Info", key: "MoveInfo.Window",
+				caption: MMt("Move Info"), key: "MoveInfo.Window",
 				layout: new qx.ui.layout.VBox(), pos: [320, 180], resizable: false, restoreOpen: true, dock: true
 			});
 			if (!win) { werr("options window creation failed"); return; }
 			win.add(body);
 			MM.buttons.register({
-				id: "mm-move-info", label: "Move Info",
-				tooltip: "Cooldown expiry + farmable bases in range, shown while you move a base",
+				id: "mm-move-info", label: MMt("Move Info"),
+				tooltip: MMt("Cooldown expiry + farmable bases in range, shown while you move a base"),
 				onExecute: function () { try { if (win.isVisible()) win.close(); else win.open(); } catch (e) { werr("toggle failed:", e); } }
 			});
 			wlog("options panel ready.");

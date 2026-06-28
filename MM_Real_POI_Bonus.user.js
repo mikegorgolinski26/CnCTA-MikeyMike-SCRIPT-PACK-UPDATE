@@ -3,7 +3,7 @@
 // @namespace      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include        https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description    When you select a POI on the region map, shows the REAL gain/loss to your alliance's bonus if you took or lost it - correctly accounting for the alliance rank multiplier (which the game's own POI display ignores).
-// @version        1.0.0
+// @version        1.0.1
 // @license        GPL version 3 or any later version; http://www.gnu.org/copyleft/gpl.html
 // @author         MikeyMike (rework of petui's "Real POI Bonus")
 // @contributor    petui
@@ -54,6 +54,9 @@
 		var OPTIONS_ID = 10023; // MM - Real POI Bonus (CnC Pack registry id; kept from the original)
 
 		// ---- logger ----------------------------------------------------------------
+		// i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+		// loads after this script (extension injection order isn't guaranteed). Identity in English.
+		function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
 		var LOG = (window.MMCommon && window.MMCommon.makeLogger)
 			? window.MMCommon.makeLogger("Real POI Bonus")
 			: {
@@ -180,7 +183,7 @@
 							var gainOrLoss = null;
 
 							if (visObject.get_OwnerAllianceId() === allianceId) {
-								this.titleLabel.setValue('Real loss:');
+								this.titleLabel.setValue(MMt('Real loss:'));
 
 								if (previousAllianceScore <= 0) {
 									// No rank multiplier; no loss by rank
@@ -192,7 +195,7 @@
 									gainOrLoss = currentTotalBonus - ClientLib.Base.PointOfInterestTypes.GetTotalBonusByType(poiType, allianceRank, allianceScore - selectedPoiScore, bonusMultiplier);
 								}
 							} else {
-								this.titleLabel.setValue('Real gain:');
+								this.titleLabel.setValue(MMt('Real gain:'));
 
 								if (!allianceScore) {
 									// Zero bonus; need to use rankings
@@ -213,7 +216,7 @@
 							}
 
 							if (gainOrLoss === null) {
-								this.amountLabel.setValue('Loading...');
+								this.amountLabel.setValue(MMt('Loading...'));
 								this.fetchAndCalculateBonusWithRankingData(poiType, allianceRank, allianceScore, selectedPoiScore, allianceId, visObject.get_OwnerAllianceId());
 							} else {
 								this.amountLabel.setValue(this.formatGainOrLoss(gainOrLoss, poiType));

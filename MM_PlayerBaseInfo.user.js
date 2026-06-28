@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Draws a live on-map overlay of small bubbles showing Offense / Defense level (stacked) over every visible player base in region view (own / alliance / enemy). Off/def for other players' bases is surveyed in the background; a base's bubble only appears once its values are known. Bubbles track the map as you pan and zoom. A HUD options panel toggles which base types show.
-// @version      1.2.8
+// @version      1.2.9
 // @author       XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -60,6 +60,9 @@
 (function () {
 	var PBI_main = function () {
 		// ---- logger ----------------------------------------------------------------
+		// i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+		// loads after this script (extension injection order isn't guaranteed). Identity in English.
+		function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
 		var LOG = (window.MMCommon && window.MMCommon.makeLogger)
 			? window.MMCommon.makeLogger("Off/Def Bubbles")
 			: {
@@ -238,7 +241,7 @@
 				return '<div style="display:flex;justify-content:space-between;gap:10px;line-height:1.25">'
 					+ '<span style="color:#9fb4c0">' + lbl + '</span><span style="color:#fff">' + val + '</span></div>';
 			}
-			return { acc: ACCENT[d.type] || ACCENT.pending, html: line("O", d.off) + line("D", d.def) };
+			return { acc: ACCENT[d.type] || ACCENT.pending, html: line(MMt("O"), d.off) + line(MMt("D"), d.def) };
 		}
 		// Create-or-update a base's bubble, but ONLY if it has surveyed values and its type is enabled;
 		// otherwise ensure no bubble is shown (this is what prevents "loading" clutter).
@@ -392,11 +395,11 @@
 		// ---- options panel ---------------------------------------------------------
 		function buildOptions() {
 			var body = new qx.ui.container.Composite(new qx.ui.layout.VBox(6)).set({ padding: 10, backgroundColor: "#23282b" });
-			body.add(new qx.ui.basic.Label("Show the off/def map bubble for:").set({
+			body.add(new qx.ui.basic.Label(MMt("Show the off/def map bubble for:")).set({
 				rich: true, textColor: "#9fb4c0", font: new qx.bom.Font(12, ["sans-serif"]).set({ bold: true })
 			}));
 			function cb(label, key, def) {
-				var c = new qx.ui.form.CheckBox(label).set({ value: getS(key, def) === true, textColor: "#e8e8e8" });
+				var c = new qx.ui.form.CheckBox(MMt(label)).set({ value: getS(key, def) === true, textColor: "#e8e8e8" });
 				c.addListener("changeValue", function (e) {
 					setS(key, e.getData() === true);
 					try {
@@ -414,14 +417,14 @@
 			body.add(cb("Master: show the overlay at all", "PlayerBaseInfo.bubble", true));
 
 			var win = MM.ui.Window({
-				caption: "Off/Def Bubbles", key: "PlayerBaseInfo.Window",
+				caption: MMt("Off/Def Bubbles"), key: "PlayerBaseInfo.Window",
 				layout: new qx.ui.layout.VBox(), pos: [260, 140], resizable: false, restoreOpen: true, dock: true
 			});
 			if (!win) { werr("options window creation failed"); return; }
 			win.add(body);
 			MM.buttons.register({
-				id: "mm-player-base-info", label: "Off/Def Bubbles",
-				tooltip: "On-map off/def bubbles (enemy / alliance / own)",
+				id: "mm-player-base-info", label: MMt("Off/Def Bubbles"),
+				tooltip: MMt("On-map off/def bubbles (enemy / alliance / own)"),
 				onExecute: function () { try { if (win.isVisible()) win.close(); else win.open(); } catch (e) { werr("toggle failed:", e); } }
 			});
 			wlog("options panel ready.");

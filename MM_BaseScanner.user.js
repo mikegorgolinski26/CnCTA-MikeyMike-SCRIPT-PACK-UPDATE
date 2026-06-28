@@ -3,7 +3,7 @@
 // @description     Scan every attackable base/camp/outpost within range of one of your bases and rank them for farming and capture: loot (Tib/Cry/Credits/Research), command-point cost, loot-per-CP efficiency, resource-field counts, perfect-layout flags, Construction-Yard / Defense-Facility row, and building/defense condition. Rebuilt on the MM - Common Library (no MaelstromTools dependency).
 // @author          BlinDManX, chertosha, Netquik, kad (original Maelstrom ADDON Basescanner AIO)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.2
+// @version         1.0.3
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
@@ -60,6 +60,9 @@
 
 (function () {
     var BaseScanner_main = function () {
+        // i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+        // loads after this script (extension injection order isn't guaranteed). Identity in English.
+        function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
         var LOG = (window.MMCommon && window.MMCommon.makeLogger)
             ? window.MMCommon.makeLogger("Base Scanner")
             : { log: function () {}, warn: function () { try { console.warn.apply(console, arguments); } catch (e) {} }, err: function () { try { console.error.apply(console, arguments); } catch (e) {} } };
@@ -77,30 +80,30 @@
         // ---- column model -------------------------------------------------------------
         // index: header, type ('num' compact-formatted, 'int' plain, 'pct', 'bool', 'str')
         var COLS = [
-            { h: "ID",       t: "int",  hide: true },  // 0
-            { h: "City",     t: "str"  },               // 1
-            { h: "Loc",      t: "str"  },               // 2
-            { h: "Lvl",      t: "int"  },               // 3
-            { h: "Tib",      t: "num"  },               // 4
-            { h: "Cry",      t: "num"  },               // 5
+            { h: MMt("ID"),       t: "int",  hide: true },  // 0
+            { h: MMt("City"),     t: "str"  },               // 1
+            { h: MMt("Loc"),      t: "str"  },               // 2
+            { h: MMt("Lvl"),      t: "int"  },               // 3
+            { h: MMt("Tib"),      t: "num"  },               // 4
+            { h: MMt("Cry"),      t: "num"  },               // 5
             { h: "$",        t: "num"  },               // 6
-            { h: "RP",       t: "num"  },               // 7
-            { h: "Sum",      t: "num"  },               // 8
-            { h: "CP",       t: "int"  },               // 9
-            { h: "Sum/CP",   t: "num"  },               // 10
-            { h: "Bld%",     t: "pct"  },               // 11
-            { h: "Def%",     t: "pct"  },               // 12
-            { h: "TibF",     t: "int"  },               // 13
-            { h: "CryF",     t: "int"  },               // 14
-            { h: "Pow8",     t: "int"  },               // 15
-            { h: "Tib 7|6|5|4", t: "str" },             // 16
-            { h: "Cry 7|6|5|4", t: "str" },             // 17
-            { h: "Mix 7|6|5|4", t: "str" },             // 18
-            { h: "CY",       t: "int"  },               // 19
-            { h: "DF",       t: "int"  },               // 20
-            { h: "Found",    t: "bool" },               // 21
-            { h: "Type",     t: "str"  },               // 22
-            { h: "Rule Out", t: "bool" }                // 23
+            { h: MMt("RP"),       t: "num"  },               // 7
+            { h: MMt("Sum"),      t: "num"  },               // 8
+            { h: MMt("CP"),       t: "int"  },               // 9
+            { h: MMt("Sum/CP"),   t: "num"  },               // 10
+            { h: MMt("Bld%"),     t: "pct"  },               // 11
+            { h: MMt("Def%"),     t: "pct"  },               // 12
+            { h: MMt("TibF"),     t: "int"  },               // 13
+            { h: MMt("CryF"),     t: "int"  },               // 14
+            { h: MMt("Pow8"),     t: "int"  },               // 15
+            { h: MMt("Tib 7|6|5|4"), t: "str" },             // 16
+            { h: MMt("Cry 7|6|5|4"), t: "str" },             // 17
+            { h: MMt("Mix 7|6|5|4"), t: "str" },             // 18
+            { h: MMt("CY"),       t: "int"  },               // 19
+            { h: MMt("DF"),       t: "int"  },               // 20
+            { h: MMt("Found"),    t: "bool" },               // 21
+            { h: MMt("Type"),     t: "str"  },               // 22
+            { h: MMt("Rule Out"), t: "bool" }                // 23
         ];
         var C = { ID: 0, CITY: 1, LOC: 2, LVL: 3, TIB: 4, CRY: 5, GOLD: 6, RP: 7, SUM: 8, CP: 9, SUMCP: 10,
                   BLD: 11, DEF: 12, TIBF: 13, CRYF: 14, POW8: 15, TIBL: 16, CRYL: 17, MIXL: 18,
@@ -130,12 +133,12 @@
         }
 
         function typeLabel(type, campType) {
-            if (type === 1) return "Player";
-            if (type === 2) return "Base";
+            if (type === 1) return MMt("Player");
+            if (type === 2) return MMt("Base");
             if (type === 3) {
-                if (campType === 3) return "Outpost";
-                if (campType === 7) return "Infected";
-                return "Camp";
+                if (campType === 3) return MMt("Outpost");
+                if (campType === 7) return MMt("Infected");
+                return MMt("Camp");
             }
             return "?";
         }
@@ -436,24 +439,24 @@
                 cb.addListener("changeValue", function () { try { MM.settings.set(SET + key, cb.getValue()); } catch (e) {} });
                 return cb;
             }
-            var chkPlayers = makeChk("Players", "tPlayers", false);
-            var chkBases = makeChk("Bases", "tBases", true);
-            var chkOutposts = makeChk("Outposts", "tOutposts", true);
-            var chkCamps = makeChk("Camps", "tCamps", true);
+            var chkPlayers = makeChk(MMt("Players"), "tPlayers", false);
+            var chkBases = makeChk(MMt("Bases"), "tBases", true);
+            var chkOutposts = makeChk(MMt("Outposts"), "tOutposts", true);
+            var chkCamps = makeChk(MMt("Camps"), "tCamps", true);
 
-            var scanBtn = new qx.ui.form.Button("Scan").set({ maxHeight: 26 });
-            var stopBtn = new qx.ui.form.Button("Stop").set({ maxHeight: 26, enabled: false });
+            var scanBtn = new qx.ui.form.Button(MMt("Scan")).set({ maxHeight: 26 });
+            var stopBtn = new qx.ui.form.Button(MMt("Stop")).set({ maxHeight: 26, enabled: false });
             var progress = new qx.ui.basic.Label("").set({ alignY: "middle", rich: true, textColor: TXT });
 
-            controls.add(lbl("From:")); controls.add(baseSelect);
-            controls.add(lbl("CP≤")); controls.add(cpSpin);
-            controls.add(lbl("Lvl≥")); controls.add(lvlSpin);
+            controls.add(lbl(MMt("From:"))); controls.add(baseSelect);
+            controls.add(lbl(MMt("CP≤"))); controls.add(cpSpin);
+            controls.add(lbl(MMt("Lvl≥"))); controls.add(lvlSpin);
             controls.add(chkPlayers); controls.add(chkBases); controls.add(chkOutposts); controls.add(chkCamps);
             controls.add(scanBtn); controls.add(stopBtn); controls.add(progress);
 
             // ---- window ----
             var win = MM.ui.Window({
-                caption: "MM - Base Scanner",
+                caption: MMt("MM - Base Scanner"),
                 key: "BaseScanner.Window",
                 layout: new qx.ui.layout.VBox(4),
                 width: 900, height: 420,
@@ -470,8 +473,8 @@
             // HUD toggle button
             MM.buttons.register({
                 id: "mm-base-scanner",
-                label: "Base Scanner",
-                tooltip: "Scan attackable bases near one of your bases",
+                label: MMt("Base Scanner"),
+                tooltip: MMt("Scan attackable bases near one of your bases"),
                 onExecute: function () {
                     try { if (win.isVisible()) win.close(); else win.open(); } catch (e) { werr("toggle failed:", e); }
                 }
@@ -481,7 +484,7 @@
             function setProgress(done, total, label) {
                 try {
                     if (label) progress.setValue(label);
-                    else if (total) progress.setValue(done + " / " + total + (done < total ? " loading…" : " done"));
+                    else if (total) progress.setValue(done + " / " + total + (done < total ? MMt(" loading…") : MMt(" done")));
                     else progress.setValue("");
                 } catch (e) {}
             }
@@ -499,19 +502,19 @@
             function doScan() {
                 if (scanning) { wlog("scan already running"); return; }
                 var sel = baseSelect.getSelection()[0];
-                if (!sel) { setProgress(0, 0, "<span style='color:#ff8a8a'>Pick an origin base</span>"); return; }
+                if (!sel) { setProgress(0, 0, "<span style='color:#ff8a8a'>" + MMt("Pick an origin base") + "</span>"); return; }
                 var origin = cities().GetCity(sel.getModel());
-                if (!origin) { setProgress(0, 0, "<span style='color:#ff8a8a'>Origin base not loaded</span>"); return; }
+                if (!origin) { setProgress(0, 0, "<span style='color:#ff8a8a'>" + MMt("Origin base not loaded") + "</span>"); return; }
 
                 var types = [];
                 if (chkPlayers.getValue()) types.push(1);
                 if (chkBases.getValue()) types.push(2);
                 if (chkOutposts.getValue() || chkCamps.getValue()) types.push(3);
-                if (!types.length) { setProgress(0, 0, "<span style='color:#ff8a8a'>Select at least one type</span>"); return; }
+                if (!types.length) { setProgress(0, 0, "<span style='color:#ff8a8a'>" + MMt("Select at least one type") + "</span>"); return; }
 
                 scanning = true;
                 scanBtn.setEnabled(false);
-                scanBtn.setLabel("Scanning…");
+                scanBtn.setLabel(MMt("Scanning…"));
                 stopBtn.setEnabled(true);
                 var token = ++fillToken;
 
@@ -524,7 +527,7 @@
                 try { MM.coords.exitToRegion(); } catch (e) { wwarn("exitToRegion failed:", e); }
                 try { scanOriginOwnId = cities().get_CurrentOwnCity().get_Id(); } catch (e) {}
 
-                setProgress(0, 0, "Enumerating…");
+                setProgress(0, 0, MMt("Enumerating…"));
                 var candidates = [];
                 try {
                     candidates = MM.scan.inRange({
@@ -645,11 +648,11 @@
             function finish(token) {
                 if (token !== fillToken) return;
                 scanning = false;
-                try { scanBtn.setEnabled(true); scanBtn.setLabel("Scan"); } catch (e) {}
+                try { scanBtn.setEnabled(true); scanBtn.setLabel(MMt("Scan")); } catch (e) {}
                 try { stopBtn.setEnabled(false); } catch (e) {}
                 // Restore the user's own base as "current" (stays in Region view - doesn't switch back).
                 try { if (scanOriginOwnId != null) cities().set_CurrentCityId(scanOriginOwnId); } catch (e) {}
-                setProgress(data.length, data.length, data.length + " target" + (data.length === 1 ? "" : "s"));
+                setProgress(data.length, data.length, data.length + " " + (data.length === 1 ? MMt("target") : MMt("targets")));
                 rerender();
                 wlog("scan finished:", data.length, "targets");
             }
@@ -660,10 +663,10 @@
                 if (!scanning) return;
                 fillToken++;
                 scanning = false;
-                try { scanBtn.setEnabled(true); scanBtn.setLabel("Scan"); } catch (e) {}
+                try { scanBtn.setEnabled(true); scanBtn.setLabel(MMt("Scan")); } catch (e) {}
                 try { stopBtn.setEnabled(false); } catch (e) {}
                 try { if (scanOriginOwnId != null) cities().set_CurrentCityId(scanOriginOwnId); } catch (e) {}
-                setProgress(data.length, data.length, "Stopped - " + data.length + " loaded");
+                setProgress(data.length, data.length, MMt("Stopped - ") + data.length + MMt(" loaded"));
                 rerender();
                 wlog("scan stopped by user");
             }

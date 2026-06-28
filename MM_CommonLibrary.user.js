@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.26
+// @version         1.0.27
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.26"
+            version: "1.0.27"
         };
 
         // -------------------------------------------------------------------
@@ -154,6 +154,71 @@
                 },
                 set: function (prop, val) { load(); cache[prop] = val; save(); return val; },
                 del: function (prop) { load(); delete cache[prop]; save(); return true; }
+            };
+        })();
+
+        // -------------------------------------------------------------------
+        // i18n - inline translation catalogs (gettext-style). Every user-facing
+        // string in the pack is wrapped as MMt("English text"); t() returns the
+        // ENGLISH SOURCE unchanged when the language is English OR when a catalog
+        // entry is missing, so the pack always renders correctly even with partial
+        // translations and English is a guaranteed zero-change path.
+        //
+        // Language is auto-detected from the GAME's locale (qx.locale.Manager ->
+        // "de_DE" -> "de"), with an optional per-player override stored in settings
+        // ("i18n.lang"). To translate the pack into a language, add a block to
+        // CATALOGS keyed by the 2-letter code, then by the exact English source:
+        //     fr: { "Scan": "Scanner", "Stop": "Arrêter", ... }
+        // Missing keys silently fall back to English.
+        // -------------------------------------------------------------------
+        NS.i18n = (function () {
+            var CATALOGS = {
+                // ---- DEMO catalog (German) - proves the inline-object mechanism and
+                // lets you sanity-check a non-English locale. Extend or replace freely;
+                // untranslated strings just fall back to English. ----
+                de: {
+                    "Scan": "Scannen",
+                    "Stop": "Stopp",
+                    "From:": "Von:",
+                    "Players": "Spieler",
+                    "Bases": "Basen",
+                    "Outposts": "Außenposten",
+                    "Camps": "Lager",
+                    "Base Scanner": "Basis-Scanner"
+                }
+            };
+            var lang = null;
+            function detect() {
+                try { var o = NS.settings.get("i18n.lang", null); if (o) return String(o); } catch (e) {}
+                try { var l = qx.locale.Manager.getInstance().getLocale(); if (l) return String(l).split("_")[0]; } catch (e) {}
+                try { if (navigator && navigator.language) return String(navigator.language).split("-")[0]; } catch (e) {}
+                return "en";
+            }
+            function cur() { if (lang == null) lang = detect(); return lang; }
+            function t(s) {
+                if (s == null) return s;
+                var L = cur();
+                if (L === "en") return s;
+                var d = CATALOGS[L];
+                return (d && d[s] != null) ? d[s] : s;
+            }
+            return {
+                t: t,
+                getLang: function () { return cur(); },
+                // Force a language code ("en","de",...) persisted per player, or pass a
+                // falsy value to clear the override and re-detect from the game locale.
+                setLang: function (l) {
+                    try { if (l) NS.settings.set("i18n.lang", l); else NS.settings.del("i18n.lang"); } catch (e) {}
+                    lang = l || detect();
+                    return lang;
+                },
+                // Merge more strings into a language catalog at runtime.
+                add: function (l, map) {
+                    var d = CATALOGS[l] || (CATALOGS[l] = {});
+                    for (var k in map) if (map.hasOwnProperty(k)) d[k] = map[k];
+                    return d;
+                },
+                catalogs: CATALOGS
             };
         })();
 
@@ -2360,6 +2425,15 @@
 
         window.MMCommon = NS;
         window.MMCommon_IsInstalled = true;
+        // Global translation shorthand used by every pack script: MMt("English text").
+        // Defensive - returns the source string unchanged if i18n isn't ready, so a script
+        // that calls it early never breaks and English is always identity.
+        try {
+            window.MMt = function (s) {
+                try { return (window.MMCommon && window.MMCommon.i18n) ? window.MMCommon.i18n.t(s) : s; }
+                catch (e) { return s; }
+            };
+        } catch (e) {}
         try { NS.menu.init(); } catch (e) { NS.log.err("menu.init:", e); }
         log.log("MMCommon " + NS.version + " ready");
     };

@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  While you use the game's "move base" tool, marks the Points-of-Interest "tunnels" near the cursor: GREEN if your current base's offense level can activate them, RED if it's too low. It also shows your Offense Level vs the highest Required Level in the move-info panel. Range comes from your alliance announcement's [tir]N[/tir] tag (default 6) and can be overridden. Markers follow the map as you pan and zoom and clear when you finish moving.
-// @version      1.0.0
+// @version      1.0.1
 // @author       MikeyMike (rework of KRS_L's "Tiberium Alliances Tunnel Info")
 // @contributor  KRS_L
 // @contributor  leo7044
@@ -46,6 +46,9 @@
 (function () {
 	var TI_main = function () {
 		// ---- logger ----------------------------------------------------------------
+		// i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+		// loads after this script (extension injection order isn't guaranteed). Identity in English.
+		function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
 		var LOG = (window.MMCommon && window.MMCommon.makeLogger)
 			? window.MMCommon.makeLogger("Tunnel Info")
 			: {
@@ -175,9 +178,9 @@
 			if (panel.grid) return panel.grid;
 			try {
 				var grid = new qx.ui.container.Composite(new qx.ui.layout.Grid(5, 5));
-				var offLbl = new qx.ui.basic.Label("Offense Level:").set({ textColor: "#FFF", alignY: "bottom", alignX: "right" });
+				var offLbl = new qx.ui.basic.Label(MMt("Offense Level:")).set({ textColor: "#FFF", alignY: "bottom", alignX: "right" });
 				panel.offVal = new qx.ui.basic.Label("").set({ font: "bold", textColor: "#FFF", alignY: "bottom", alignX: "right" });
-				var reqLbl = new qx.ui.basic.Label("Required Level:").set({ textColor: "#FF6A6A", alignY: "top", alignX: "right" });
+				var reqLbl = new qx.ui.basic.Label(MMt("Required Level:")).set({ textColor: "#FF6A6A", alignY: "top", alignX: "right" });
 				panel.reqVal = new qx.ui.basic.Label("").set({ font: "bold", textColor: "#FF6A6A", alignY: "top", alignX: "right" });
 				grid.add(offLbl, { row: 0, column: 0 });
 				grid.add(panel.offVal, { row: 0, column: 1 });
@@ -314,28 +317,28 @@
 		// ---- options panel ---------------------------------------------------------
 		function buildOptions() {
 			var body = new qx.ui.container.Composite(new qx.ui.layout.VBox(6)).set({ padding: 10, backgroundColor: "#23282b" });
-			body.add(new qx.ui.basic.Label("While moving a base, show tunnel activation:").set({
+			body.add(new qx.ui.basic.Label(MMt("While moving a base, show tunnel activation:")).set({
 				rich: true, textColor: "#9fb4c0", font: new qx.bom.Font(12, ["sans-serif"]).set({ bold: true })
 			}));
-			body.add(new qx.ui.basic.Label("Green = your offense can activate it · Red = blocked (offense too low)").set({
+			body.add(new qx.ui.basic.Label(MMt("Green = your offense can activate it · Red = blocked (offense too low)")).set({
 				rich: true, textColor: "#9fb4c0"
 			}));
 
 			// range override row
 			var rangeRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(6)).set({ marginTop: 4 });
-			rangeRow.add(new qx.ui.basic.Label("Range override:").set({ textColor: "#e8e8e8", alignY: "middle" }));
+			rangeRow.add(new qx.ui.basic.Label(MMt("Range override:")).set({ textColor: "#e8e8e8", alignY: "middle" }));
 			var spin = new qx.ui.form.Spinner(0, getS("TunnelInfo.rangeOverride", 0), 50).set({ width: 60 });
 			spin.addListener("changeValue", function (e) { setS("TunnelInfo.rangeOverride", e.getData() | 0); redrawLast(); });
 			rangeRow.add(spin);
-			rangeRow.add(new qx.ui.basic.Label("(0 = auto from alliance [tir], else 6)").set({ textColor: "#9fb4c0", alignY: "middle", rich: true }));
+			rangeRow.add(new qx.ui.basic.Label(MMt("(0 = auto from alliance [tir], else 6)")).set({ textColor: "#9fb4c0", alignY: "middle", rich: true }));
 			body.add(rangeRow);
 
-			var panelCb = new qx.ui.form.CheckBox("Show the Offense / Required level readout in the move panel").set({ value: showPanel(), textColor: "#e8e8e8" });
+			var panelCb = new qx.ui.form.CheckBox(MMt("Show the Offense / Required level readout in the move panel")).set({ value: showPanel(), textColor: "#e8e8e8" });
 			panelCb.addListener("changeValue", function (e) { setS("TunnelInfo.showPanel", e.getData() === true); if (e.getData() === true) redrawLast(); else hideMoveInfoPanel(); });
 			body.add(panelCb);
 
 			body.add(new qx.ui.core.Widget().set({ height: 1, backgroundColor: "#3a4248", marginTop: 4, marginBottom: 2, allowGrowX: true }));
-			var master = new qx.ui.form.CheckBox("Master: enable the tunnel overlay").set({ value: masterOn(), textColor: "#e8e8e8" });
+			var master = new qx.ui.form.CheckBox(MMt("Master: enable the tunnel overlay")).set({ value: masterOn(), textColor: "#e8e8e8" });
 			master.addListener("changeValue", function (e) {
 				setS("TunnelInfo.enabled", e.getData() === true);
 				if (e.getData() === true) redrawLast(); else { clearMarkers(); hideMoveInfoPanel(); }
@@ -343,14 +346,14 @@
 			body.add(master);
 
 			var win = MM.ui.Window({
-				caption: "Tunnel Info", key: "TunnelInfo.Window",
+				caption: MMt("Tunnel Info"), key: "TunnelInfo.Window",
 				layout: new qx.ui.layout.VBox(), pos: [300, 160], resizable: false, restoreOpen: true, dock: true
 			});
 			if (!win) { werr("options window creation failed"); return; }
 			win.add(body);
 			MM.buttons.register({
-				id: "mm-tunnel-info", label: "Tunnel Info",
-				tooltip: "Show which tunnels you can activate while moving a base",
+				id: "mm-tunnel-info", label: MMt("Tunnel Info"),
+				tooltip: MMt("Show which tunnels you can activate while moving a base"),
 				onExecute: function () { try { if (win.isVisible()) win.close(); else win.open(); } catch (e) { werr("toggle failed:", e); } }
 			});
 			wlog("options panel ready.");

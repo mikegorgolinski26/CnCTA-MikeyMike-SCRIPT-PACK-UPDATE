@@ -3,7 +3,7 @@
 // @description     A small always-on counter showing how close you are to your next MCV (the Research_BaseFound level that lets you found another base): time until you can afford the credits, and your research-point progress. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK (original MaelstromTools MCV popup)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.3.1
+// @version         1.3.2
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
@@ -52,6 +52,9 @@
 
 (function () {
     var NextMCV_main = function () {
+        // i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+        // loads after this script (extension injection order isn't guaranteed). Identity in English.
+        function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
         var LOG = (window.MMCommon && window.MMCommon.makeLogger)
             ? window.MMCommon.makeLogger("Next MCV")
             : { log: function () {}, warn: function () { try { console.warn.apply(console, arguments); } catch (e) {} }, err: function () { try { console.error.apply(console, arguments); } catch (e) {} } };
@@ -118,7 +121,7 @@
                 .set({ padding: 6, backgroundColor: "#23282b", width: 212 });
 
             // centered title (the frameless panel has no caption bar, so draw our own)
-            body.add(new qx.ui.basic.Label("Next MCV").set({
+            body.add(new qx.ui.basic.Label(MMt("Next MCV")).set({
                 rich: true, textAlign: "center", allowGrowX: true, textColor: "#cfe6ff",
                 font: new qx.bom.Font(13, ["sans-serif"]).set({ bold: true })
             }));
@@ -182,21 +185,21 @@
                 if (!mb.built && !buildMenuPanel()) return;
                 if (!mb.panel) return;
                 try {
-                    if (!d) { mb.info.setValue("MCV"); mb.time.setValue("Max bases"); mb.rp.setValue(""); mb.rate.setValue(""); return; }
-                    mb.info.setValue("MCV ($ " + C(d.creditsNeeded) + ")");
-                    var t = (d.creditPct >= 100) ? "OK!" : (!d.doGrow ? "NoGrow" : daysFromHours(d.hoursLeft));
+                    if (!d) { mb.info.setValue(MMt("MCV")); mb.time.setValue(MMt("Max bases")); mb.rp.setValue(""); mb.rate.setValue(""); return; }
+                    mb.info.setValue(MMt("MCV") + " ($ " + C(d.creditsNeeded) + ")");
+                    var t = (d.creditPct >= 100) ? MMt("OK!") : (!d.doGrow ? MMt("NoGrow") : daysFromHours(d.hoursLeft));
                     mb.time.setValue("<span style='color:" + barColor(d.creditPct) + "'>" + t + "</span>");
-                    var r = (d.rpPct >= 100) ? "RP OK!" : "RP: " + d.rpPct.toFixed(1) + "%";
+                    var r = (d.rpPct >= 100) ? MMt("RP OK!") : MMt("RP: ") + d.rpPct.toFixed(1) + "%";
                     mb.rp.setValue("<span style='color:" + barColor(d.rpPct) + "'>" + r + "</span>");
-                    mb.rate.setValue(d.doGrow ? ("at " + C(d.growthPerHour * 24) + "/1d") : "no income");
+                    mb.rate.setValue(d.doGrow ? (MMt("at ") + C(d.growthPerHour * 24) + MMt("/1d")) : MMt("no income"));
                 } catch (e) { werr("renderMenuPanel:", e); }
             }
             // right-click menu (on either panel) to switch between the floating panel and the menu bar.
             function makeDisplayMenu() {
                 var menu = new qx.ui.menu.Menu();
-                var toBar = new qx.ui.menu.Button("Dock in game menu bar");
+                var toBar = new qx.ui.menu.Button(MMt("Dock in game menu bar"));
                 toBar.addListener("execute", function () { setMenuMode(true); });
-                var toFloat = new qx.ui.menu.Button("Use floating panel");
+                var toFloat = new qx.ui.menu.Button(MMt("Use floating panel"));
                 toFloat.addListener("execute", function () { setMenuMode(false); });
                 menu.add(toBar); menu.add(toFloat);
                 return menu;
@@ -211,7 +214,7 @@
             }
 
             var win = MM.ui.Window({
-                caption: "Next MCV",
+                caption: MMt("Next MCV"),
                 key: "NextMCV.Window",
                 layout: new qx.ui.layout.VBox(),
                 pos: [220, 120],
@@ -226,8 +229,8 @@
 
             MM.buttons.register({
                 id: "mm-next-mcv",
-                label: "Next MCV",
-                tooltip: "Time/resources until your next base (MCV)",
+                label: MMt("Next MCV"),
+                tooltip: MMt("Time/resources until your next base (MCV)"),
                 onExecute: function () {
                     try {
                         if (menuOn()) {
@@ -262,15 +265,15 @@
                     // floating panel (only worth updating while it's on screen)
                     if (win.isVisible()) {
                         if (!d) {
-                            creditBar.setValue(barHtml(100, "Max bases founded"));
+                            creditBar.setValue(barHtml(100, MMt("Max bases founded")));
                             rpBar.setValue("");
-                            detailLine.setValue("no further MCV to research");
+                            detailLine.setValue(MMt("no further MCV to research"));
                         } else {
                             // Credits bar: fill = how close credits are to the cost; label = time-to-afford countdown.
-                            var cLabel = (d.creditPct >= 100) ? "Credits  OK!" : (!d.doGrow ? "Credits  NoGrow" : "Credits  " + daysFromHours(d.hoursLeft));
+                            var cLabel = (d.creditPct >= 100) ? MMt("Credits  OK!") : (!d.doGrow ? MMt("Credits  NoGrow") : MMt("Credits  ") + daysFromHours(d.hoursLeft));
                             creditBar.setValue(barHtml(d.creditPct, cLabel));
                             // RP bar: fill = how close RP are to the cost; label = the percent.
-                            var rLabel = (d.rpPct >= 100) ? "RP  OK!" : "RP  " + d.rpPct.toFixed(1) + "%";
+                            var rLabel = (d.rpPct >= 100) ? MMt("RP  OK!") : MMt("RP  ") + d.rpPct.toFixed(1) + "%";
                             rpBar.setValue(barHtml(d.rpPct, rLabel));
                             // detail line: current / needed for each. The current-amount colour tracks the same
                             // red->yellow->green progress as the bars above (the "/ needed" stays muted grey).

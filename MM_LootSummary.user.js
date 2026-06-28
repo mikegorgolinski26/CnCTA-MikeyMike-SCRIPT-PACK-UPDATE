@@ -3,7 +3,7 @@
 // @description     Click any base / camp on the region map and a panel shows its lootable resources, offense/defense/base levels, condition, and where its Defense Facility & Construction Yard sit. Rebuilt on the MM - Common Library (merges the old MHTools "Available Loot Summary + Info" and "PluginsLib mhLoot").
 // @author          MH, netquik (original MHTools / PluginsLib mhLoot)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.2
+// @version         1.1.3
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_LootSummary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_LootSummary.user.js
@@ -54,6 +54,9 @@
 
 (function () {
     var LootSummary_main = function () {
+        // i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+        // loads after this script (extension injection order isn't guaranteed). Identity in English.
+        function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
         var LOG = (window.MMCommon && window.MMCommon.makeLogger)
             ? window.MMCommon.makeLogger("Loot Summary")
             : { log: function () {}, warn: function () { try { console.warn.apply(console, arguments); } catch (e) {} }, err: function () { try { console.error.apply(console, arguments); } catch (e) {} } };
@@ -77,14 +80,14 @@
             var body = new qx.ui.container.Composite(new qx.ui.layout.VBox(5))
                 .set({ padding: 8, backgroundColor: "#23282b", width: 232 });
 
-            var titleLbl = new qx.ui.basic.Label("Loot Summary").set({
+            var titleLbl = new qx.ui.basic.Label(MMt("Loot Summary")).set({
                 rich: true, textAlign: "center", allowGrowX: true, textColor: "#cfe6ff",
                 font: new qx.bom.Font(13, ["sans-serif"]).set({ bold: true })
             });
             body.add(titleLbl);
 
             // hint shown when nothing is selected
-            var hintLbl = new qx.ui.basic.Label("Click a base or camp on the map.").set({
+            var hintLbl = new qx.ui.basic.Label(MMt("Click a base or camp on the map.")).set({
                 rich: true, textAlign: "center", allowGrowX: true, textColor: "#9fb4c0",
                 font: new qx.bom.Font(11, ["sans-serif"])
             });
@@ -116,7 +119,7 @@
             body.add(dataBox);
 
             var win = MM.ui.Window({
-                caption: "Loot Summary",
+                caption: MMt("Loot Summary"),
                 key: "LootSummary.Window",
                 layout: new qx.ui.layout.VBox(),
                 pos: [260, 160],
@@ -130,8 +133,8 @@
 
             MM.buttons.register({
                 id: "mm-loot-summary",
-                label: "Loot Info",
-                tooltip: "Loot + levels of the base you click on the map",
+                label: MMt("Loot Info"),
+                tooltip: MMt("Loot + levels of the base you click on the map"),
                 onExecute: function () {
                     try { if (win.isVisible()) win.close(); else { win.open(); render(MM.map.selectedObject()); } }
                     catch (e) { werr("toggle failed:", e); }
@@ -139,7 +142,7 @@
             });
 
             function showHint(msg) {
-                try { hintLbl.setValue(msg || "Click a base or camp on the map."); hintLbl.show(); dataBox.exclude(); titleLbl.setValue("Loot Summary"); titleLbl.setTextColor("#cfe6ff"); } catch (e) {}
+                try { hintLbl.setValue(msg || MMt("Click a base or camp on the map.")); hintLbl.show(); dataBox.exclude(); titleLbl.setValue(MMt("Loot Summary")); titleLbl.setTextColor("#cfe6ff"); } catch (e) {}
             }
             function compact(n) { try { return MM.num.compact(n || 0); } catch (e) { return String(Math.round(n || 0)); } }
 
@@ -159,34 +162,34 @@
                 try {
                     var name = "";
                     try { name = (vo.get_PlayerName && vo.get_PlayerName()) || (ncity.get_Name && ncity.get_Name()) || ""; } catch (e) {}
-                    titleLbl.setValue(name ? name : "Target");
+                    titleLbl.setValue(name ? name : MMt("Target"));
                     titleLbl.setTextColor(REL_COLOR[rel] || "#ffffff");
 
                     var loot = MM.loot.ofCity(ncity);
                     lootLbl.setValue(
-                        "<span style='color:#ffe14d'>RP " + compact(loot[ER.ResearchPoints]) + "</span>  "
-                        + "<span style='color:#7CFC00'>T " + compact(loot[ER.Tiberium]) + "</span>  "
-                        + "<span style='color:#67c8ff'>C " + compact(loot[ER.Crystal]) + "</span>  "
+                        "<span style='color:#ffe14d'>" + MMt("RP") + " " + compact(loot[ER.ResearchPoints]) + "</span>  "
+                        + "<span style='color:#7CFC00'>" + MMt("T") + " " + compact(loot[ER.Tiberium]) + "</span>  "
+                        + "<span style='color:#67c8ff'>" + MMt("C") + " " + compact(loot[ER.Crystal]) + "</span>  "
                         + "<span style='color:#ff8f00'>$ " + compact(loot[ER.Gold]) + "</span>"
                     );
 
                     var army = MM.base.army(ncity);
-                    lvlLbl.setValue("Base <b>" + army.base.Level + "</b>   Def <b>" + army.defense.Level + "</b>   Off <b>" + army.offense.Level + "</b>");
-                    condBar(bldBar, "Buildings", army.base.HealthInPercent);
-                    condBar(defBar, "Defense", army.defense.HealthInPercent);
-                    condBar(offBar, "Offense", army.offense.HealthInPercent);
+                    lvlLbl.setValue(MMt("Base") + " <b>" + army.base.Level + "</b>   " + MMt("Def") + " <b>" + army.defense.Level + "</b>   " + MMt("Off") + " <b>" + army.offense.Level + "</b>");
+                    condBar(bldBar, MMt("Buildings"), army.base.HealthInPercent);
+                    condBar(defBar, MMt("Defense"), army.defense.HealthInPercent);
+                    condBar(offBar, MMt("Offense"), army.offense.HealthInPercent);
 
                     var kb = MM.base.keyBuildings(ncity);
                     var parts = [];
-                    if (kb.df) parts.push("DF row " + kb.df.row);
-                    if (kb.cy) parts.push("CY row " + kb.cy.row);
-                    if (kb.support) parts.push("Support row " + kb.support.row);
+                    if (kb.df) parts.push(MMt("DF row") + " " + kb.df.row);
+                    if (kb.cy) parts.push(MMt("CY row") + " " + kb.cy.row);
+                    if (kb.support) parts.push(MMt("Support row") + " " + kb.support.row);
                     bldLbl.setValue(parts.length ? parts.join("  ·  ") : "");
                     bldLbl.setVisibility(parts.length ? "visible" : "excluded");
 
                     hintLbl.exclude();
                     dataBox.show();
-                } catch (e) { werr("renderCity failed:", e); showHint("Couldn't read that target."); }
+                } catch (e) { werr("renderCity failed:", e); showHint(MMt("Couldn't read that target.")); }
             }
 
             // True once the base's buildings have actually loaded. Loot AND condition both derive from
@@ -218,7 +221,7 @@
                     var lootable = (t === EO.RegionCityType || t === EO.RegionNPCBase || t === EO.RegionNPCCamp);
                     if (!lootable) { // POIs / ruins / hubs have no lootable base data here
                         var nm = ""; try { nm = (vo.get_PlayerName && vo.get_PlayerName()) || ""; } catch (e) {}
-                        showHint("No loot data for this object" + (nm ? " (" + nm + ")" : "") + ".");
+                        showHint(MMt("No loot data for this object") + (nm ? " (" + nm + ")" : "") + ".");
                         return;
                     }
                     var id = vo.get_Id();
@@ -237,10 +240,10 @@
                         // fetchDetail's set_CurrentCityId targets THIS selected base, so no cross-base eviction),
                         // keep the "Loading..." hint, and poll.
                         if (!triggered) { triggered = true; try { MM.base.fetchDetail(id, function () {}, { intervalMs: 150, tries: 1 }); } catch (e) {} }
-                        showHint("Loading...");
+                        showHint(MMt("Loading..."));
                         if (++tries <= 20) { loadTimer = setTimeout(attempt, 200); return; }    // ~4s ceiling
                         if (ncity && ncity.get_Version() > 0) renderCity(vo, ncity, rel);        // give up: show what we have
-                        else showHint("Couldn't load that target.");
+                        else showHint(MMt("Couldn't load that target."));
                     })();
                 } catch (e) { werr("render failed:", e); }
             }

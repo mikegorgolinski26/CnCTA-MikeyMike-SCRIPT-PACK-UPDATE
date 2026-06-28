@@ -3,7 +3,7 @@
 // @description     Adds a "CnCTAOpt" button to the region right-click menu of any base/camp/outpost. Clicking it encodes that base's full layout (buildings, defense, offense, terrain, levels) into a cnctaopt.com share link and opens it in a new tab so you can analyze or share the base. MikeyMike edition: the encoder now lives in MM - Common Library (MMCommon.cnctaopt); this script is just the button. Faithful rework of zbluebugz's "CnC:TA CnCTAOpt Link".
 // @author          MikeyMike (rework of zbluebugz)
 // @contributor     zbluebugz (https://github.com/zbluebugz/CnC-TA-Opt)
-// @version         1.0.0
+// @version         1.0.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CnCTAOptLink.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CnCTAOptLink.user.js
@@ -35,6 +35,9 @@
 (function () {
 	'use strict';
 	var MM_CnCTAOptLink_main = function () {
+		// i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+		// loads after this script (extension injection order isn't guaranteed). Identity in English.
+		function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
 		function build() {
 			var MM = window.MMCommon;
 			var clog = (MM && MM.makeLogger) ? MM.makeLogger("CnCTAOpt") : { log: function () {}, warn: function () {}, err: function () {} };
@@ -59,7 +62,7 @@
 						for (var k in this) {
 							try {
 								if (this[k] && this[k].basename == "Composite") {
-									var btn = new qx.ui.form.Button("CnCTAOpt");
+									var btn = new qx.ui.form.Button(MMt("CnCTAOpt"));
 									btn.addListener("execute", function () {
 										try {
 											var app = qx.core.Init.getApplication();

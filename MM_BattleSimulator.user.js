@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.6
+// @version         1.1.7
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -83,6 +83,9 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
             // Consistent, filterable logging. Verbose MMlog() is gated behind
             // window.MMBATTLESIM_DEBUG (off by default = clean console); MMwarn()/MMerr()
             // always show. Toggle live from the game console: window.MMBATTLESIM_DEBUG = true
+            // i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+            // loads after this script (extension injection order isn't guaranteed). Identity in English.
+            function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
             var MM_LOG_PREFIX = "[MM BattleSim]";
             if (typeof window.MMBATTLESIM_DEBUG === "undefined") window.MMBATTLESIM_DEBUG = false;
 
@@ -316,7 +319,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                         this.reset();
                                         for (var i in fileObject)
                                             this.set(i, fileObject[i]);
-                                        alert("Game will reload now.");
+                                        alert(MMt("Game will reload now."));
                                         window.location.reload();
                                     } catch (f) {
                                         console.group("Tiberium Alliances Battle Simulator V2");
@@ -1425,7 +1428,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             if (window.MMCommon && MMCommon.menu && MMCommon.menu.registerWindow) {
                                 MMCommon.menu.registerWindow({
                                     id: 10028,
-                                    label: "Battle Sim 2026",
+                                    label: MMt("Battle Sim 2026"),
                                     icon: TABS.RES.IMG.Menu,
                                     run: function () {
                                         try {
@@ -1438,12 +1441,12 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 });
                             } else {
                                 qx.core.Init.getApplication().getMenuBar().getScriptsButton()
-                                    .Add("Battle Simulator V2", TABS.RES.IMG.Menu, this.Menu);
+                                    .Add(MMt("Battle Simulator V2"), TABS.RES.IMG.Menu, this.Menu);
                             }
                         } catch (e) {
                             try {
                                 qx.core.Init.getApplication().getMenuBar().getScriptsButton()
-                                    .Add("Battle Simulator V2", TABS.RES.IMG.Menu, this.Menu);
+                                    .Add(MMt("Battle Simulator V2"), TABS.RES.IMG.Menu, this.Menu);
                             } catch (e2) {}
                         }
                         //SETTINGS
@@ -1465,7 +1468,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         settingsMenu.add(settingsLoad);
                         settingsMenu.add(settingsSave);
                         settingsMenu.add(settingsReset);
-                        this.Menu.add(new qx.ui.menu.Button("Settings", null, null, settingsMenu));
+                        this.Menu.add(new qx.ui.menu.Button(MMt("Settings"), null, null, settingsMenu));
                         //Info
                         this.Menu.add(new qx.ui.menu.Separator());
                         var infoMenu = new qx.ui.menu.Menu(),
@@ -1479,7 +1482,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         }, this);
                         infoMenu.add(infoHomepage);
                         infoMenu.add(infoFacebook);
-                        this.Menu.add(new qx.ui.menu.Button("Info", null, null, infoMenu));
+                        this.Menu.add(new qx.ui.menu.Button(MMt("Info"), null, null, infoMenu));
                     },
                     members: {
                         Menu: null
@@ -2908,7 +2911,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                         r[ClientLib.Base.EResourceType.RepairChargeAir],
                                         r[ClientLib.Base.EResourceType.RepairChargeInf],
                                         r[ClientLib.Base.EResourceType.RepairChargeVeh]);
-                                return "enemy " + pct(stats.Enemy.Overall.HealthPoints) + ", DF " + pct(stats.Enemy.Defense_Facility.HealthPoints) + ", maxRepair " + Math.round(rep);
+                                return MMt("enemy ") + pct(stats.Enemy.Overall.HealthPoints) + MMt(", DF ") + pct(stats.Enemy.Defense_Facility.HealthPoints) + MMt(", maxRepair ") + Math.round(rep);
                             } catch (e) {
                                 return "?";
                             }
@@ -2986,7 +2989,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         },
                         Run: function (presetNum) {
                             if (this.__running) {
-                                this.__log("Optimizer already running...");
+                                this.__log(MMt("Optimizer already running..."));
                                 return;
                             }
                             // 6 = Lowest Repair (must win); 7 = Best Option (balanced). Default 6.
@@ -2995,12 +2998,12 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 ownCity = md.get_Cities().get_CurrentOwnCity(),
                                 tgtCity = md.get_Cities().get_CurrentCity();
                             if (ownCity === null || tgtCity === null) {
-                                this.__log("Open an attack (combat setup) on a target first.");
+                                this.__log(MMt("Open an attack (combat setup) on a target first."));
                                 return;
                             }
                             var live = TABS.UTIL.Formation.Get();
                             if (live === null || live.length === 0) {
-                                this.__log("No army units found to optimize.");
+                                this.__log(MMt("No army units found to optimize."));
                                 return;
                             }
                             this.__ownid = ownCity.get_Id();
@@ -3049,13 +3052,13 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             try {
                                 TABS.PreArmyUnits.AutoSimulate.getInstance().pause();
                             } catch (e) {}
-                            this.__log("Optimizing (" + (this.__presetNum === 7 ? "best DF=0" : "best win") + "): step " + this.__maxStep + " cell(s), climb within " + String.fromCharCode(177) + this.__maxRowDelta + " row(s) of start, kicks may go further if it helps...");
+                            this.__log(MMt("Optimizing (") + (this.__presetNum === 7 ? MMt("best DF=0") : MMt("best win")) + MMt("): step ") + this.__maxStep + MMt(" cell(s), climb within ") + String.fromCharCode(177) + this.__maxRowDelta + MMt(" row(s) of start, kicks may go further if it helps..."));
                             // Step 1: ensure the starting layout is simulated, then begin tweak rounds.
                             this.__evalList([this.__clone(this.__current)], this.__startRound);
                         },
                         Stop: function () {
                             if (!this.__running) return;
-                            this.__log("Optimizer stopped by user.");
+                            this.__log(MMt("Optimizer stopped by user."));
                             this.__finish(true);
                         },
                         // Evaluate a batch of candidate layouts concurrently, then call onDrain().
@@ -3177,7 +3180,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                         finish(live, b);
                                     }), null);
                                 } catch (e) {
-                                    self.__log("Sim send error: " + e);
+                                    self.__log(MMt("Sim send error: ") + e);
                                     finish(null, null);
                                 }
                             };
@@ -3194,7 +3197,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             try {
                                 TABS.UTIL.Formation.Set(cand, this.__cityid, this.__ownid);
                             } catch (e) {
-                                this.__log("Set error: " + e);
+                                this.__log(MMt("Set error: ") + e);
                                 doSim();
                             }
                         },
@@ -3223,7 +3226,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     }
                                 }
                             } catch (e) {
-                                this.__log("Sim result error: " + e);
+                                this.__log(MMt("Sim result error: ") + e);
                             }
                             if (this.__inflight > 0) this.__inflight--;
                             this.__pumpRound(); // launch next / fire onDrain when this batch is done
@@ -3249,7 +3252,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 return;
                             }
                             this.__round++;
-                            this.__log("Round " + this.__round + ": trying " + neighbors.length + " tweaks (" + this.__simsUsed + " sims used)...");
+                            this.__log(MMt("Round ") + this.__round + MMt(": trying ") + neighbors.length + MMt(" tweaks (") + this.__simsUsed + MMt(" sims used)..."));
                             this.__evalList(neighbors, this.__afterRound);
                         },
                         __afterRound: function () {
@@ -3261,8 +3264,8 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             var best = this.__bestEntry(),
                                 s = best ? this.__tuple(best.result.stats) : null,
                                 ext = this.__batchExtremes();
-                            if (ext) this.__log("Round tweaks: " + ext.n + " sims, maxRepair " + ext.minR + ".." + ext.maxR + ", best enemy " + ext.minE + "%");
-                            if (best) this.__log("Best so far: " + this.__describe(best.result.stats) + " (" + this.__simsUsed + " sims)");
+                            if (ext) this.__log(MMt("Round tweaks: ") + ext.n + MMt(" sims, maxRepair ") + ext.minR + ".." + ext.maxR + MMt(", best enemy ") + ext.minE + "%");
+                            if (best) this.__log(MMt("Best so far: ") + this.__describe(best.result.stats) + " (" + this.__simsUsed + MMt(" sims)"));
                             if (s && (this.__lastBest === null || this.__cmp(s, this.__lastBest) < 0)) {
                                 // overall best improved (incl. a lower-repair win) -> keep going, reset kicks
                                 this.__lastBest = s;
@@ -3297,7 +3300,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             } catch (e) {}
                             var batch = this.__genNeighbors(kicked);
                             batch.unshift(kicked); // make sure the kicked layout itself is simulated
-                            this.__log("Kick " + this.__kicksUsed + "/" + this.__maxKicks + ": exploring a new region, " + batch.length + " layouts (" + this.__simsUsed + " sims used)...");
+                            this.__log(MMt("Kick ") + this.__kicksUsed + "/" + this.__maxKicks + MMt(": exploring a new region, ") + batch.length + MMt(" layouts (") + this.__simsUsed + MMt(" sims used)..."));
                             this.__evalList(batch, this.__afterRound);
                         },
                         __finish: function (stopped) {
@@ -3359,12 +3362,12 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     ClientLib.Data.MainData.GetInstance().get_Cities().set_CurrentOwnCityId(chosen.result.ownid);
                                     TABS.UTIL.Formation.Set(chosen.result.formation, chosen.result.cityid, chosen.result.ownid);
                                     var destroyed = targetEnd(chosen) <= 0;
-                                    this.__log((stopped ? "Stopped. " : "Done. ") + (mode === 6 ?
-                                        "Applied cheapest winning layout (lowest max repair time)." :
-                                        (destroyed ? "DF destroyed (DF=0); applied lowest max repair time layout." :
-                                            "DF can't be fully destroyed; applied closest-to-0 DF layout with lowest max repair time.")));
+                                    this.__log((stopped ? MMt("Stopped. ") : MMt("Done. ")) + (mode === 6 ?
+                                        MMt("Applied cheapest winning layout (lowest max repair time).") :
+                                        (destroyed ? MMt("DF destroyed (DF=0); applied lowest max repair time layout.") :
+                                            MMt("DF can't be fully destroyed; applied closest-to-0 DF layout with lowest max repair time."))));
                                 } catch (e) {
-                                    this.__log("Finished, but could not apply layout: " + e);
+                                    this.__log(MMt("Finished, but could not apply layout: ") + e);
                                 }
                             } else {
                                 if (this.__orig) {
@@ -3372,9 +3375,9 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                         TABS.UTIL.Formation.Set(this.__orig, this.__cityid, this.__ownid);
                                     } catch (e) {}
                                 }
-                                this.__log((stopped ? "Stopped. " : "Done. ") + (noWin ?
-                                    "No winning layout found (enemy can't be destroyed) - try 'Best DF 0'. Restored original." :
-                                    "No layout found; restored original."));
+                                this.__log((stopped ? MMt("Stopped. ") : MMt("Done. ")) + (noWin ?
+                                    MMt("No winning layout found (enemy can't be destroyed) - try 'Best DF 0'. Restored original.") :
+                                    MMt("No layout found; restored original.")));
                             }
                             try {
                                 TABS.GUI.Window.Stats.getInstance().__updateStats();
@@ -3420,7 +3423,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                             //this.SaveLoadF = webfrontend.gui.bars.ArmySetupAttackBar.$$original.toString().match(regex)[1];
                                             this.SaveLoad = this.ArmySetupAttackBar[i];
                                             this.SaveLoad.set({
-                                                toolTipText: "Save/Load Formation [NUM ,]",
+                                                toolTipText: MMt("Save/Load Formation [NUM ,]"),
                                                 width: 44,
                                                 height: 44,
                                                 allowGrowX: false,
@@ -5818,7 +5821,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 }
                                 if (this._status) this._status.setValue(this.tr("Saved - applies on the next optimize click."));
                             } catch (e) {
-                                if (this._status) this._status.setValue("Error saving: " + e);
+                                if (this._status) this._status.setValue(MMt("Error saving: ") + e);
                             }
                         },
                         _onResetDefaults: function () {

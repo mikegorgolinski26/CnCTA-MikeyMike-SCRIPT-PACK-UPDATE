@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.32
+// @version         1.4.33
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -61,6 +61,9 @@
 
 (function () {
     var BaseTools_main = function () {
+        // i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+        // loads after this script (extension injection order isn't guaranteed). Identity in English.
+        function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
         var LOG = (window.MMCommon && window.MMCommon.makeLogger)
             ? window.MMCommon.makeLogger("Base Tools")
             : { log: function () {}, warn: function () { try { console.warn.apply(console, arguments); } catch (e) {} }, err: function () { try { console.error.apply(console, arguments); } catch (e) {} } };
@@ -569,7 +572,7 @@
                 try { comp.removeAll(); } catch (e) {}
 
                 if (data.loadState === -1) {
-                    var lblOut = new qx.ui.basic.Label("Target out of range, no attack-loot calculation possible").set({
+                    var lblOut = new qx.ui.basic.Label(MMt("Target out of range, no attack-loot calculation possible")).set({
                         textColor: "#ffb060", font: "font_size_13_bold", rich: true
                     });
                     comp.add(lblOut, { row: 0, column: 0, colSpan: 11 });
@@ -579,7 +582,7 @@
                     var n = widget.__MM_BT_lootPollCount || 0;
                     if (n < LOOT_POLL_MAX) {
                         widget.__MM_BT_lootPollCount = n + 1;
-                        var lblCalc = new qx.ui.basic.Label("Calculating attack loot... (" + (n + 1) + "/" + LOOT_POLL_MAX + ")").set({
+                        var lblCalc = new qx.ui.basic.Label(MMt("Calculating attack loot...") + " (" + (n + 1) + "/" + LOOT_POLL_MAX + ")").set({
                             textColor: "#aaaaaa", font: "font_size_13_bold"
                         });
                         comp.add(lblCalc, { row: 0, column: 0, colSpan: 11 });
@@ -595,7 +598,7 @@
                             } catch (e) { werr("loot poll callback:", e); }
                         }, LOOT_POLL_INTERVAL_MS);
                     } else {
-                        var lblFail = new qx.ui.basic.Label("Attack loot data unavailable").set({
+                        var lblFail = new qx.ui.basic.Label(MMt("Attack loot data unavailable")).set({
                             textColor: "#ffb060", font: "font_size_13_bold"
                         });
                         comp.add(lblFail, { row: 0, column: 0, colSpan: 11 });
@@ -640,14 +643,14 @@
                 }
 
                 // Row 0: "Possible attacks from this base (available CP): N" — single bold header.
-                comp.add(lbl("Possible attacks from this base (available CP): " + possible, true), { row: 0, column: 0, colSpan: 11 });
+                comp.add(lbl(MMt("Possible attacks from this base (available CP):") + " " + possible, true), { row: 0, column: 0, colSpan: 11 });
 
                 // Rows 1..4: Lootable / per CP / 2nd run / 3rd run.
                 var rows = [
-                    { name: "Lootable resources",  div: 1,        bold: true  },
-                    { name: "per CP",              div: cp || 1,  bold: false },
-                    { name: "2nd run",             div: 2 * (cp || 1), bold: false },
-                    { name: "3rd run",             div: 3 * (cp || 1), bold: false }
+                    { name: MMt("Lootable resources"),  div: 1,        bold: true  },
+                    { name: MMt("per CP"),              div: cp || 1,  bold: false },
+                    { name: MMt("2nd run"),             div: 2 * (cp || 1), bold: false },
+                    { name: MMt("3rd run"),             div: 3 * (cp || 1), bold: false }
                 ];
                 for (var ri = 0; ri < rows.length; ri++) {
                     var r = rows[ri];
@@ -1633,7 +1636,7 @@
             function optimize(city, resKey, opts) {
                 opts = opts || {};
                 var snap = snapshot(city, resKey);
-                if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
+                if (!snap || !snap.ok) return { ok: false, reason: MMt("could not read base layout") };
 
                 var allowReductions = !!opts.allowReductions;
                 var alpha = (typeof opts.alpha === "number") ? opts.alpha : 0.5;
@@ -1652,7 +1655,7 @@
                     searchOpts.scoreFn = makeMultiScoreFn(snap, resKey, baselines, alpha, prodLists);
                 } else {
                     searchOpts.scoreFn = makeStrictScoreFn(snap, resKey, baselines, prodLists);
-                    if (!searchOpts.movableList.length) return { ok: false, reason: "no movable buildings on this base" };
+                    if (!searchOpts.movableList.length) return { ok: false, reason: MMt("no movable buildings on this base") };
                 }
 
                 var r = runSearch(snap, null, searchOpts, 0);
@@ -1681,7 +1684,7 @@
             async function optimizeWithSell(city, resKey, opts, sellN) {
                 opts = opts || {};
                 var snap = snapshot(city, resKey);
-                if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
+                if (!snap || !snap.ok) return { ok: false, reason: MMt("could not read base layout") };
 
                 var allowReductions = !!opts.allowReductions;
                 var alpha = (typeof opts.alpha === "number") ? opts.alpha : 0.5;
@@ -1702,7 +1705,7 @@
                     return o;
                 }
                 var fullOpts = mkSearchOpts({ restarts: 4 });
-                if (!fullOpts) return { ok: false, reason: "no movable buildings for this resource" };
+                if (!fullOpts) return { ok: false, reason: MMt("no movable buildings for this resource") };
 
                 var baseR = runSearch(snap, null, fullOpts, 0);
                 var current = baselines[resKey];                      // true current target production
@@ -1838,7 +1841,7 @@
                 opts = opts || {};
                 if (!costApi()) return optimizeWithSell(city, resKey, opts, sellN);  // no cost data -> plain sell
                 var snap = snapshot(city, resKey);
-                if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
+                if (!snap || !snap.ok) return { ok: false, reason: MMt("could not read base layout") };
 
                 var allowReductions = !!opts.allowReductions;
                 var alpha = (typeof opts.alpha === "number") ? opts.alpha : 0.5;
@@ -1966,7 +1969,7 @@
                 opts = opts || {};
                 if (!costApi()) return optimizeWithSell(city, resKey, opts, sellN);
                 var snap = snapshot(city, resKey);
-                if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
+                if (!snap || !snap.ok) return { ok: false, reason: MMt("could not read base layout") };
                 var allowReductions = !!opts.allowReductions;
                 // Aggressive weighting for EXPLICIT multi-selling: when the user sets "Sell up to N>=2" AND
                 // turns on Allow reductions, they've clearly opted into trading other resources for the target,
@@ -2122,8 +2125,8 @@
             async function optimizeMultiBuild(city, resKey, opts, forceSellTechs) {
                 opts = opts || {};
                 var snap = snapshot(city, resKey);
-                if (!snap || !snap.ok) return { ok: false, reason: "could not read base layout" };
-                if (!costApi()) return { ok: false, reason: "could not read the build-cost API (game may have updated)" };
+                if (!snap || !snap.ok) return { ok: false, reason: MMt("could not read base layout") };
+                if (!costApi()) return { ok: false, reason: MMt("could not read the build-cost API (game may have updated)") };
                 forceSellTechs = forceSellTechs || [];
                 var freeSlotMode = !forceSellTechs.length;
                 // Always strict scoring (add target producers without harming other resources); independent of
@@ -2149,7 +2152,7 @@
                         var rf = refundFor(b.obj, N(b.level)); if (rf) { R.tib += rf.tib; R.pow += rf.pow; }
                         sells.push({ id: b.id, techName: b.techName, harvRes: b.harvRes, level: N(b.level), x: N(b.x), y: N(b.y) });
                     }
-                    if (!sells.length) return { ok: false, reason: "none of the selected force-sell buildings are on this base" };
+                    if (!sells.length) return { ok: false, reason: MMt("none of the selected force-sell buildings are on this base") };
                 }
 
                 // 2) candidate producer techs (need a live sibling to clone) + per-level cost/production tables
@@ -2163,7 +2166,7 @@
                     for (var L = 1; L <= maxLvlCap; L++) { cum[L] = cumCost(refB.obj, L) || { tib: 0, pow: 0 }; lm[L] = lmValueAt(def, targetMod, L); }
                     cands.push({ tech: tech, hr: hr, refB: refB, def: def, refLevel: refLevel, cum: cum, lm: lm });
                 }
-                if (!cands.length) return { ok: false, reason: "no buildable " + RES_CFG[resKey].label + " producer exists on this base to clone" };
+                if (!cands.length) return { ok: false, reason: MMt("no buildable") + " " + RES_CFG[resKey].label + " " + MMt("producer exists on this base to clone") };
 
                 // 3) PLACEMENT - greedily drop one producer into the single best EMPTY tile each round (no
                 // rearranging during placement, so two virtuals can never land on the same tile). Cheaper than
@@ -2213,7 +2216,7 @@
                 }
                 if (!virtuals.length) {
                     if (freeSlotMode) return optimize(city, resKey, opts);   // free slot but nothing worth building -> just moves
-                    return { ok: false, reason: "the refund from those sells can't fund any useful new " + RES_CFG[resKey].label + " producer here" };
+                    return { ok: false, reason: MMt("the refund from those sells can't fund any useful new") + " " + RES_CFG[resKey].label + " " + MMt("producer here") };
                 }
 
                 // 4) polish all virtuals + existing producers together
@@ -2301,9 +2304,9 @@
             // emit is a move-into-an-empty-tile (never relies on the game's swap-on-occupied behaviour).
             // Also re-validates the plan isn't stale (base unchanged since optimize).
             function buildApplyPlan(city, res) {
-                if (!res || !res.ok) return { ok: false, reason: "no optimization result to apply" };
+                if (!res || !res.ok) return { ok: false, reason: MMt("no optimization result to apply") };
                 var snap = res.snapshot;
-                var live = readLive(city); if (!live) return { ok: false, reason: "could not read the base" };
+                var live = readLive(city); if (!live) return { ok: false, reason: MMt("could not read the base") };
 
                 // Staleness guard: every building the plan touches must still exist at its snapshot tile.
                 var refIds = {};
@@ -2311,8 +2314,8 @@
                 (res.sells || []).forEach(function (s) { refIds[s.id] = 1; });
                 for (var rid in refIds) {
                     var Lr = live.byId[rid], Br = snap.buildings[rid];
-                    if (!Lr || !Br) return { ok: false, reason: "the base changed since you optimized (a building is gone) - re-run the optimizer" };
-                    if (Lr.x !== N(Br.x) || Lr.y !== N(Br.y)) return { ok: false, reason: "the base changed since you optimized (a building moved) - re-run the optimizer" };
+                    if (!Lr || !Br) return { ok: false, reason: MMt("the base changed since you optimized (a building is gone) - re-run the optimizer") };
+                    if (Lr.x !== N(Br.x) || Lr.y !== N(Br.y)) return { ok: false, reason: MMt("the base changed since you optimized (a building moved) - re-run the optimizer") };
                 }
 
                 var occ = {}; for (var key in live.occ) occ[key] = live.occ[key];           // "x,y" -> id (working)
@@ -2345,7 +2348,7 @@
                         var id = pending[i], t = targetOf[id];
                         if (cur[id].x === t.x && cur[id].y === t.y) { pending.splice(i, 1); i--; continue; }
                         var occId = occ[t.x + "," + t.y];
-                        if (occId != null && targetOf[occId] == null && !sold[occId]) return { ok: false, reason: "a move target is blocked by a fixed building - re-run the optimizer" };
+                        if (occId != null && targetOf[occId] == null && !sold[occId]) return { ok: false, reason: MMt("a move target is blocked by a fixed building - re-run the optimizer") };
                         if (tileFree(t.x, t.y) && legalAt(id, t.x, t.y)) { emit(id, t.x, t.y, false); pending.splice(i, 1); i--; progressed = true; }
                     }
                     if (!pending.length || progressed) continue;
@@ -2360,9 +2363,9 @@
                             emit(sid, x, y, true); staged = true;   // its real target move stays pending
                         }
                     }
-                    if (!staged) return { ok: false, reason: "couldn't sequence the moves automatically (no free staging tile) - apply by hand in move mode" };
+                    if (!staged) return { ok: false, reason: MMt("couldn't sequence the moves automatically (no free staging tile) - apply by hand in move mode") };
                 }
-                if (pending.length) return { ok: false, reason: "couldn't sequence all moves automatically - apply by hand in move mode" };
+                if (pending.length) return { ok: false, reason: MMt("couldn't sequence all moves automatically - apply by hand in move mode") };
 
                 // Builds (self-funded sell->build->upgrade): sells freed the slot + refund, moves settled,
                 // so the target tile is now empty. Append a CreateBuilding step + an upgrade-to-level step.
@@ -2399,16 +2402,16 @@
                 function findByPos(x, y) { try { var bd = city.get_Buildings().d; for (var k in bd) { var b = bd[k]; if (b && b.get_CoordX && N(b.get_CoordX()) === x && N(b.get_CoordY()) === y) return b; } } catch (e) {} return null; }
                 function fail(st, msg) { failed.push({ step: st, msg: msg }); if (hooks.onStep) try { hooks.onStep(i, st, false, msg); } catch (e) {} i++; window.setTimeout(next, 90); }
                 function ok(st) { done.push(st); if (hooks.onStep) try { hooks.onStep(i, st, true, "ok"); } catch (e) {} i++; window.setTimeout(next, 140); }
-                function verify(test, st, maxTries) { var tries = 0, cap = maxTries || 25; (function poll() { try { if (test()) return ok(st); } catch (e) {} if (++tries > cap) return fail(st, "no visible effect after " + Math.round(cap * 0.12) + "s (the game may have rejected it - check resources / build slots)"); window.setTimeout(poll, 120); })(); }
+                function verify(test, st, maxTries) { var tries = 0, cap = maxTries || 25; (function poll() { try { if (test()) return ok(st); } catch (e) {} if (++tries > cap) return fail(st, MMt("no visible effect after") + " " + Math.round(cap * 0.12) + MMt("s (the game may have rejected it - check resources / build slots)")); window.setTimeout(poll, 120); })(); }
                 function next() {
                     if (i >= steps.length) { if (hooks.onDone) try { hooks.onDone({ applied: done.length, failed: failed.length, failedSteps: failed }); } catch (e) {} return; }
                     var st = steps[i];
                     if (st.type === "build") {
                         try {
                             var mgr = city.AKMRLA;
-                            if (!mgr || typeof mgr.OAJKZC !== "function") return fail(st, "build manager unavailable");
-                            if (st.typeId == null) return fail(st, "missing build type id");
-                            if (findByPos(st.toX, st.toY)) return fail(st, "build tile is occupied");
+                            if (!mgr || typeof mgr.OAJKZC !== "function") return fail(st, MMt("build manager unavailable"));
+                            if (st.typeId == null) return fail(st, MMt("missing build type id"));
+                            if (findByPos(st.toX, st.toY)) return fail(st, MMt("build tile is occupied"));
                             mgr.OAJKZC(st.typeId, st.toX, st.toY);
                             verify(function () { return !!findByPos(st.toX, st.toY); }, st, 50);   // builds (esp. harvesters on fields) can take longer to appear than a move
                         } catch (e) { return fail(st, String(e)); }
@@ -2417,7 +2420,7 @@
                     if (st.type === "upgrade") {
                         try {
                             var ub = findByPos(st.toX, st.toY);
-                            if (!ub) return fail(st, "building to upgrade not found");
+                            if (!ub) return fail(st, MMt("building to upgrade not found"));
                             var curLvl = N(ub.get_CurrentLevel ? ub.get_CurrentLevel() : 0);
                             var nLevels = st.level - curLvl;
                             var mgr = city.AKMRLA, hasMulti = !!(mgr && typeof mgr.ZYSGML === "function");
@@ -2434,10 +2437,10 @@
                         return;
                     }
                     var obj = findObj(st.id);
-                    if (!obj) return fail(st, "building not found");
+                    if (!obj) return fail(st, MMt("building not found"));
                     try {
                         if (st.type === "demolish") {
-                            if (obj.CanDemolish && !obj.CanDemolish()) return fail(st, "game refused demolish");
+                            if (obj.CanDemolish && !obj.CanDemolish()) return fail(st, MMt("game refused demolish"));
                             obj.BFHPNB();
                             verify(function () { return findObj(st.id) == null; }, st);
                         } else {
@@ -2476,7 +2479,7 @@
             // ---- main tabbed window ----
             var tabView = new qx.ui.tabview.TabView();
             var win = MM.ui.Window({
-                caption: "Base Tools",
+                caption: MMt("Base Tools"),
                 key: "BaseTools.Window",
                 pos: [260, 140],
                 width: 440,
@@ -2489,18 +2492,18 @@
             win.add(tabView);
 
             // ---- Tab 1: Collect & Repair ----
-            var tabCR = new qx.ui.tabview.Page("Collect & Repair");
+            var tabCR = new qx.ui.tabview.Page(MMt("Collect & Repair"));
             tabCR.setLayout(new qx.ui.layout.VBox(8));
             tabCR.setPadding(8);
             tabView.add(tabCR);
 
-            var statusLbl = new qx.ui.basic.Label("(refreshing...)").set({ rich: true, textColor: "#cccccc" });
+            var statusLbl = new qx.ui.basic.Label(MMt("(refreshing...)")).set({ rich: true, textColor: "#cccccc" });
             tabCR.add(statusLbl);
 
             var rowActions = new qx.ui.container.Composite(new qx.ui.layout.HBox(6));
-            var btnCollectInWin = new qx.ui.form.Button("Collect All Packages").set({ enabled: false, toolTipText: "Collect packages from every base that has them ready" });
-            var btnRepBldInWin = new qx.ui.form.Button("Repair All Buildings").set({ enabled: false, toolTipText: "Repair buildings (where allowed) across every base" });
-            var btnRepUnitsInWin = new qx.ui.form.Button("Repair All Units").set({ enabled: false, toolTipText: "Repair units across every base" });
+            var btnCollectInWin = new qx.ui.form.Button(MMt("Collect All Packages")).set({ enabled: false, toolTipText: MMt("Collect packages from every base that has them ready") });
+            var btnRepBldInWin = new qx.ui.form.Button(MMt("Repair All Buildings")).set({ enabled: false, toolTipText: MMt("Repair buildings (where allowed) across every base") });
+            var btnRepUnitsInWin = new qx.ui.form.Button(MMt("Repair All Units")).set({ enabled: false, toolTipText: MMt("Repair units across every base") });
             btnCollectInWin.addListener("execute", function () { collectAll(); window.setTimeout(refresh, 500); });
             btnRepBldInWin.addListener("execute", function () { repairAll(ClientLib.Vis.Mode.City); window.setTimeout(refresh, 500); });
             btnRepUnitsInWin.addListener("execute", function () { repairAll(ClientLib.Vis.Mode.ArmySetup); window.setTimeout(refresh, 500); });
@@ -2511,12 +2514,12 @@
 
             // Auto-collect / auto-repair section
             tabCR.add(new qx.ui.core.Spacer(null, 6));
-            tabCR.add(new qx.ui.basic.Label("<b>Auto-collect / auto-repair</b>").set({ rich: true, textColor: "#ffffff" }));
-            tabCR.add(new qx.ui.basic.Label("Run periodically across every base. Off by default for units to avoid surprise resource spend.").set({ rich: true, textColor: "#aaaaaa" }));
+            tabCR.add(new qx.ui.basic.Label("<b>" + MMt("Auto-collect / auto-repair") + "</b>").set({ rich: true, textColor: "#ffffff" }));
+            tabCR.add(new qx.ui.basic.Label(MMt("Run periodically across every base. Off by default for units to avoid surprise resource spend.")).set({ rich: true, textColor: "#aaaaaa" }));
 
-            var cbCollect = new qx.ui.form.CheckBox("Auto-collect packages").set({ value: AUTO_COLLECT });
-            var cbRepBldg = new qx.ui.form.CheckBox("Auto-repair buildings").set({ value: AUTO_REP_BLDG });
-            var cbRepUnits = new qx.ui.form.CheckBox("Auto-repair units").set({ value: AUTO_REP_UNITS });
+            var cbCollect = new qx.ui.form.CheckBox(MMt("Auto-collect packages")).set({ value: AUTO_COLLECT });
+            var cbRepBldg = new qx.ui.form.CheckBox(MMt("Auto-repair buildings")).set({ value: AUTO_REP_BLDG });
+            var cbRepUnits = new qx.ui.form.CheckBox(MMt("Auto-repair units")).set({ value: AUTO_REP_UNITS });
             cbCollect.addListener("changeValue", function (e) { AUTO_COLLECT = !!e.getData(); MM.settings.set("BaseTools.autoCollectPackages", AUTO_COLLECT); wlog("autoCollect =", AUTO_COLLECT); });
             cbRepBldg.addListener("changeValue", function (e) { AUTO_REP_BLDG = !!e.getData(); MM.settings.set("BaseTools.autoRepairBuildings", AUTO_REP_BLDG); wlog("autoRepBldg =", AUTO_REP_BLDG); });
             cbRepUnits.addListener("changeValue", function (e) { AUTO_REP_UNITS = !!e.getData(); MM.settings.set("BaseTools.autoRepairUnits", AUTO_REP_UNITS); wlog("autoRepUnits =", AUTO_REP_UNITS); });
@@ -2525,7 +2528,7 @@
             tabCR.add(cbRepUnits);
 
             var timerRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(6));
-            timerRow.add(new qx.ui.basic.Label("Interval (minutes):").set({ alignY: "middle" }));
+            timerRow.add(new qx.ui.basic.Label(MMt("Interval (minutes):")).set({ alignY: "middle" }));
             var spinTimer = new qx.ui.form.Spinner(1, AUTO_TIMER_MIN, 360);
             spinTimer.addListener("changeValue", function (e) {
                 var v = Math.max(1, Math.min(360, Number(e.getData()) || 5));
@@ -2543,12 +2546,12 @@
             // uses Up/Down/Reset (simpler than the original's drag-drop, same end result).
             tabCR.add(new qx.ui.core.Spacer(null, 6));
             var prioHeader = new qx.ui.container.Composite(new qx.ui.layout.HBox(6));
-            var cbPrio = new qx.ui.form.CheckBox("Auto-repair by priority + ROI").set({ value: REP_PRIORITY, toolTipText: "When on, the auto-repair tick walks the priority list below and ROI-sorts damaged buildings within each tier. Off = call the game's RepairAll in its default order." });
+            var cbPrio = new qx.ui.form.CheckBox(MMt("Auto-repair by priority + ROI")).set({ value: REP_PRIORITY, toolTipText: MMt("When on, the auto-repair tick walks the priority list below and ROI-sorts damaged buildings within each tier. Off = call the game's RepairAll in its default order.") });
             prioHeader.add(cbPrio, { flex: 1 });
             tabCR.add(prioHeader);
 
             var prioGroup = new qx.ui.container.Composite(new qx.ui.layout.VBox(4));
-            prioGroup.add(new qx.ui.basic.Label("Highest first &middot; select then Up/Down to reorder").set({ rich: true, textColor: "#aaaaaa" }));
+            prioGroup.add(new qx.ui.basic.Label(MMt("Highest first &middot; select then Up/Down to reorder")).set({ rich: true, textColor: "#aaaaaa" }));
             var prioList = new qx.ui.form.List().set({ height: 160, selectionMode: "single" });
             prioGroup.add(prioList);
 
@@ -2587,9 +2590,9 @@
             repaintPrioList(REP_ORDER);
 
             var btnRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(4));
-            var btnUp = new qx.ui.form.Button("Up").set({ width: 60 });
-            var btnDown = new qx.ui.form.Button("Down").set({ width: 60 });
-            var btnReset = new qx.ui.form.Button("Reset to default").set({ width: 130 });
+            var btnUp = new qx.ui.form.Button(MMt("Up")).set({ width: 60 });
+            var btnDown = new qx.ui.form.Button(MMt("Down")).set({ width: 60 });
+            var btnReset = new qx.ui.form.Button(MMt("Reset to default")).set({ width: 130 });
             btnUp.addListener("execute", function () {
                 var sel = prioList.getSelection()[0];
                 if (!sel) return;
@@ -2634,10 +2637,10 @@
             // Default ON. The widget patches are always installed; the wrapper no-ops when
             // this setting is off.
             tabCR.add(new qx.ui.core.Spacer(null, 6));
-            tabCR.add(new qx.ui.basic.Label("<b>Region map</b>").set({ rich: true, textColor: "#ffffff" }));
-            var cbAttackLoot = new qx.ui.form.CheckBox("Show attack loot summary in region base popups").set({
+            tabCR.add(new qx.ui.basic.Label("<b>" + MMt("Region map") + "</b>").set({ rich: true, textColor: "#ffffff" }));
+            var cbAttackLoot = new qx.ui.form.CheckBox(MMt("Show attack loot summary in region base popups")).set({
                 value: MM.settings.get("BaseTools.AttackLootPanel", true),
-                toolTipText: "When on, opening the info popup for any non-own base on the region map (camp / outpost / forgotten / enemy player) appends a quick loot summary: 'Possible attacks (available CP)', 'Lootable resources', 'per CP', '2nd run' and '3rd run' breakdowns of Tiberium / Crystal / Credits / Research Points - so you can pick the best farm/attack target without opening each base's attack screen."
+                toolTipText: MMt("When on, opening the info popup for any non-own base on the region map (camp / outpost / forgotten / enemy player) appends a quick loot summary: 'Possible attacks (available CP)', 'Lootable resources', 'per CP', '2nd run' and '3rd run' breakdowns of Tiberium / Crystal / Credits / Research Points - so you can pick the best farm/attack target without opening each base's attack screen.")
             });
             cbAttackLoot.addListener("changeValue", function (e) {
                 MM.settings.set("BaseTools.AttackLootPanel", !!e.getData());
@@ -2661,12 +2664,12 @@
             // is Total / BaseLevel (production per base level - a quick "is this base pulling its
             // weight" metric the original had). Ported from the original tool's production view.
             function buildProductionTab() {
-                var page = new qx.ui.tabview.Page("Production");
+                var page = new qx.ui.tabview.Page(MMt("Production"));
                 page.setLayout(new qx.ui.layout.VBox(6));
                 page.setPadding(8);
 
                 var headerRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8));
-                var btnRefresh = new qx.ui.form.Button("Refresh").set({ toolTipText: "Recompute the table from the current game state" });
+                var btnRefresh = new qx.ui.form.Button(MMt("Refresh")).set({ toolTipText: MMt("Recompute the table from the current game state") });
                 var tsLbl = new qx.ui.basic.Label("").set({ textColor: "#888888", alignY: "middle" });
                 headerRow.add(btnRefresh);
                 headerRow.add(tsLbl, { flex: 1 });
@@ -2683,10 +2686,10 @@
                 // then a third row that's "Alliance Bonus" (POI) for resources, or "Total / BaseLevel"
                 // for Credits (which has no alliance bonus), then "Total / h".
                 var SECTIONS = [
-                    { k: "Tib", title: "Tiberium",   third: "Alliance Bonus" },
-                    { k: "Cry", title: "Crystal",    third: "Alliance Bonus" },
-                    { k: "Pow", title: "Power",      third: "Alliance Bonus" },
-                    { k: "Dol", title: "Credits ($)", third: "Total / BaseLevel" }
+                    { k: "Tib", title: MMt("Tiberium"),   third: MMt("Alliance Bonus") },
+                    { k: "Cry", title: MMt("Crystal"),    third: MMt("Alliance Bonus") },
+                    { k: "Pow", title: MMt("Power"),      third: MMt("Alliance Bonus") },
+                    { k: "Dol", title: MMt("Credits ($)"), third: MMt("Total / BaseLevel") }
                 ];
                 var RED = "#ff9d3c";    // high-contrast orange for stopped/held/excluded/zero values
                                         // (replaced the dim red; Mike picked it from the live preview)
@@ -2750,7 +2753,7 @@
                 }
 
                 function accessBtn(cityId) {
-                    var b = new qx.ui.form.Button("→").set({ width: 24, height: 20, toolTipText: "Open this base" });
+                    var b = new qx.ui.form.Button("→").set({ width: 24, height: 20, toolTipText: MMt("Open this base") });
                     b.addListener("execute", function () {
                         try { webfrontend.gui.UtilView.openCityInMainWindow(cityId); } catch (e) { werr("openCity failed:", e); }
                     });
@@ -2774,10 +2777,10 @@
                     addLbl(row++, 0, "");
                     for (var s = 0; s < SECTIONS.length; s++) {
                         addLbl(row++, 0, SECTIONS[s].title, { bold: true, color: "#ffffff" });
-                        addLbl(row++, 0, "Package Production",    { color: "#a9c4e0", bold: true });
-                        addLbl(row++, 0, "Continuous Production", { color: "#a9c4e0", bold: true });
+                        addLbl(row++, 0, MMt("Package Production"),    { color: "#a9c4e0", bold: true });
+                        addLbl(row++, 0, MMt("Continuous Production"), { color: "#a9c4e0", bold: true });
                         addLbl(row++, 0, SECTIONS[s].third,       { color: "#a9c4e0", bold: true });
-                        addLbl(row++, 0, "Total / h",             { color: TOTAL, big: true });
+                        addLbl(row++, 0, MMt("Total / h"),             { color: TOTAL, big: true });
                     }
                     addLbl(row, 0, ""); // access-button row
 
@@ -2818,7 +2821,7 @@
 
                     // Grand-totals column.
                     var tr = 0;
-                    addLbl(tr++, col, "Total / h", { big: true, align: "right", color: TOTAL });
+                    addLbl(tr++, col, MMt("Total / h"), { big: true, align: "right", color: TOTAL });
                     for (var ti = 0; ti < SECTIONS.length; ti++) {
                         var tk = SECTIONS[ti].k;
                         var T = snap.totals[tk] || { delta: 0, bonus: 0, poi: 0, total: 0 };
@@ -2834,7 +2837,7 @@
                 function refreshTab() {
                     try {
                         render(snapshot());
-                        tsLbl.setValue("Last update: " + new Date().toLocaleTimeString());
+                        tsLbl.setValue(MMt("Last update:") + " " + new Date().toLocaleTimeString());
                     } catch (e) { werr("Production refreshTab failed:", e); }
                 }
 
@@ -2850,7 +2853,7 @@
             // affordability; sort by any column; one-click per-row upgrade plus a batch
             // "Upgrade Top N" that walks the currently-visible, sorted list.
             function buildUpgradeTab() {
-                var page = new qx.ui.tabview.Page("Upgrade Priority");
+                var page = new qx.ui.tabview.Page(MMt("Upgrade Priority"));
                 page.setLayout(new qx.ui.layout.VBox(6));
                 page.setPadding(8);
 
@@ -2862,9 +2865,9 @@
                 // refreshTab, NOT here - at window-build time the city data may not be loaded yet, which
                 // is why it would otherwise show only "All Bases". Rebuilding on each refresh also means
                 // destroyed (ghosted) bases correctly drop off the list.
-                ctrls.add(new qx.ui.basic.Label("Base:").set({ alignY: "middle" }));
+                ctrls.add(new qx.ui.basic.Label(MMt("Base:")).set({ alignY: "middle" }));
                 var baseSelect = new qx.ui.form.SelectBox().set({ width: 150, alignY: "middle" });
-                var allItem0 = new qx.ui.form.ListItem("All Bases"); allItem0.setModel("All"); baseSelect.add(allItem0);
+                var allItem0 = new qx.ui.form.ListItem(MMt("All Bases")); allItem0.setModel("All"); baseSelect.add(allItem0);
                 var suppressBaseEvent = false; // guard so rebuilding options doesn't recurse into refreshTab
                 var baseListBuilt = false;
                 function rebuildBaseOptions() {
@@ -2876,8 +2879,8 @@
                         try { baseSelect.removeAll(); } catch (e) {}
                         // "Current Base" tracks whichever base you're viewing - switch bases in-game and the
                         // table follows. "All Bases" spans every base. Then each base by name.
-                        var curItem = new qx.ui.form.ListItem("Current Base"); curItem.setModel("current"); baseSelect.add(curItem);
-                        var allItem = new qx.ui.form.ListItem("All Bases"); allItem.setModel("All"); baseSelect.add(allItem);
+                        var curItem = new qx.ui.form.ListItem(MMt("Current Base")); curItem.setModel("current"); baseSelect.add(curItem);
+                        var allItem = new qx.ui.form.ListItem(MMt("All Bases")); allItem.setModel("All"); baseSelect.add(allItem);
                         var list = [];
                         eachOwnCity(function (c) {
                             try {
@@ -2897,11 +2900,11 @@
                 }
                 ctrls.add(baseSelect);
 
-                ctrls.add(new qx.ui.basic.Label("Resource:").set({ alignY: "middle" }));
+                ctrls.add(new qx.ui.basic.Label(MMt("Resource:")).set({ alignY: "middle" }));
                 var resSelect = new qx.ui.form.SelectBox().set({ width: 110 });
                 var savedRes = MM.settings.get("BaseTools.UpgradeResourceFilter", "All");
                 [["All", "All"], ["Tiberium", "Tib"], ["Crystal", "Cry"], ["Power", "Pow"], ["Credits", "Dol"]].forEach(function (o) {
-                    var it = new qx.ui.form.ListItem(o[0]); it.setModel(o[1]); resSelect.add(it);
+                    var it = new qx.ui.form.ListItem(MMt(o[0])); it.setModel(o[1]); resSelect.add(it);
                     if (o[1] === savedRes) resSelect.setSelection([it]);
                 });
                 ctrls.add(resSelect);
@@ -2909,11 +2912,11 @@
                 // Availability filter (persisted): "now" = only what you can upgrade right now;
                 // "transfer" = that plus rows you can afford by auto-transferring Tiberium in (and can
                 // pay the transfer fee); "all" = every candidate including not-yet-affordable ones.
-                ctrls.add(new qx.ui.basic.Label("Show:").set({ alignY: "middle" }));
+                ctrls.add(new qx.ui.basic.Label(MMt("Show:")).set({ alignY: "middle" }));
                 var showMode = MM.settings.get("BaseTools.UpgradeShowMode", "transfer");
                 var showSelect = new qx.ui.form.SelectBox().set({ width: 190, alignY: "middle" });
                 [["Affordable now", "now"], ["Affordable now + transfer", "transfer"], ["All candidates", "all"]].forEach(function (o) {
-                    var it = new qx.ui.form.ListItem(o[0]); it.setModel(o[1]); showSelect.add(it);
+                    var it = new qx.ui.form.ListItem(MMt(o[0])); it.setModel(o[1]); showSelect.add(it);
                     if (o[1] === showMode) showSelect.setSelection([it]);
                 });
                 ctrls.add(showSelect);
@@ -2922,28 +2925,28 @@
                 // row stays, marked "✓ Upgraded", until you click Refresh (so you can see what took).
                 // OFF = the row disappears the moment its upgrade succeeds (like the original tool).
                 var keepUpgraded = MM.settings.get("BaseTools.UpgradeKeepRows", true);
-                var cbKeep = new qx.ui.form.CheckBox("Keep upgraded rows (clear on Refresh)").set({
+                var cbKeep = new qx.ui.form.CheckBox(MMt("Keep upgraded rows (clear on Refresh)")).set({
                     value: keepUpgraded, alignY: "middle",
-                    toolTipText: "On: upgraded rows stay marked '✓ Upgraded' until you Refresh.\nOff: each row vanishes the instant its upgrade succeeds (the classic behavior)."
+                    toolTipText: MMt("On: upgraded rows stay marked '✓ Upgraded' until you Refresh.\nOff: each row vanishes the instant its upgrade succeeds (the classic behavior).")
                 });
                 ctrls.add(cbKeep);
 
-                var btnRefresh = new qx.ui.form.Button("Refresh").set({ toolTipText: "Recompute the list (clears the '✓ Upgraded' marks and rescans every base)" });
+                var btnRefresh = new qx.ui.form.Button(MMt("Refresh")).set({ toolTipText: MMt("Recompute the list (clears the '✓ Upgraded' marks and rescans every base)") });
                 ctrls.add(btnRefresh);
 
-                ctrls.add(new qx.ui.basic.Label("Upgrade top").set({ alignY: "middle" }));
+                ctrls.add(new qx.ui.basic.Label(MMt("Upgrade top")).set({ alignY: "middle" }));
                 var spinTopN = new qx.ui.form.Spinner(0, MM.settings.get("BaseTools.UpgradeTopN", 5), 99).set({ width: 60,
-                    toolTipText: "How many of the top rows Go will upgrade. Auto-capped to how many will actually succeed (a batch never fails), and reset to 5 (or fewer) on Refresh and whenever you toggle 'Transfer as needed'." });
+                    toolTipText: MMt("How many of the top rows Go will upgrade. Auto-capped to how many will actually succeed (a batch never fails), and reset to 5 (or fewer) on Refresh and whenever you toggle 'Transfer as needed'.") });
                 var suppressSpinSave = false; // true while we set the spinner programmatically (don't persist it)
                 ctrls.add(spinTopN);
                 // "Transfer as needed" - when a row in the batch would otherwise fail because the
                 // local base is short on Tiberium, fall back to transfer-and-upgrade (cheapest sources
                 // first) if the player can afford the fee. Default OFF so transfers never happen
                 // unless the user explicitly opts in (transfers cost credits).
-                var cbTopXfer = new qx.ui.form.CheckBox("Transfer as needed").set({
+                var cbTopXfer = new qx.ui.form.CheckBox(MMt("Transfer as needed")).set({
                     value: MM.settings.get("BaseTools.UpgradeTopXfer", false),
                     alignY: "middle",
-                    toolTipText: "When a row in the batch would otherwise fail because the local base is short on Tiberium, transfer from your other bases (cheapest first) before upgrading. Skipped if no transfer plan covers the gap or you can't afford the transfer fee. Off by default - transfers cost credits."
+                    toolTipText: MMt("When a row in the batch would otherwise fail because the local base is short on Tiberium, transfer from your other bases (cheapest first) before upgrading. Skipped if no transfer plan covers the gap or you can't afford the transfer fee. Off by default - transfers cost credits.")
                 });
                 cbTopXfer.addListener("changeValue", function (e) {
                     MM.settings.set("BaseTools.UpgradeTopXfer", !!e.getData());
@@ -2956,14 +2959,14 @@
                 // On-grid overlay (Ctrl-hold). Default ON. Salvaged from xTr1m's Base Overlay
                 // (DR 4:3), retired 2026-06-21. Just toggles the BaseTools.UpgradeOverlay
                 // setting - the listeners are always installed but no-op when this is off.
-                var cbOverlay = new qx.ui.form.CheckBox("On-grid overlay (Ctrl-hold)").set({
+                var cbOverlay = new qx.ui.form.CheckBox(MMt("On-grid overlay (Ctrl-hold)")).set({
                     value: MM.settings.get("BaseTools.UpgradeOverlay", true),
                     alignY: "middle",
-                    toolTipText: "When on, hold Ctrl while viewing your own base to see a translucent gain/cost overlay on each resource-producing tile (Harvester, Silo, PowerPlant, Accumulator, Refinery). Best = green, worst = red, label is the ratio. Release Ctrl to hide. Salvaged from xTr1m's Base Overlay (retired)."
+                    toolTipText: MMt("When on, hold Ctrl while viewing your own base to see a translucent gain/cost overlay on each resource-producing tile (Harvester, Silo, PowerPlant, Accumulator, Refinery). Best = green, worst = red, label is the ratio. Release Ctrl to hide. Salvaged from xTr1m's Base Overlay (retired).")
                 });
                 cbOverlay.addListener("changeValue", function (e) { MM.settings.set("BaseTools.UpgradeOverlay", !!e.getData()); });
                 ctrls.add(cbOverlay);
-                var btnUpgradeTop = new qx.ui.form.Button("Go").set({ toolTipText: "Upgrade the top N rows in the list below (in the current sort order). Re-validates each row before firing it so resource drains from earlier rows are accounted for; if 'Transfer as needed' is on, will transfer Tiberium in from other bases when the local base is short." });
+                var btnUpgradeTop = new qx.ui.form.Button(MMt("Go")).set({ toolTipText: MMt("Upgrade the top N rows in the list below (in the current sort order). Re-validates each row before firing it so resource drains from earlier rows are accounted for; if 'Transfer as needed' is on, will transfer Tiberium in from other bases when the local base is short.") });
                 ctrls.add(btnUpgradeTop);
                 // Live feasibility hint next to Go: "N of M will succeed" - kept current by renderRows.
                 var feasHint = new qx.ui.basic.Label("").set({ alignY: "middle", textColor: "#9fd49f", paddingLeft: 4 });
@@ -2981,19 +2984,19 @@
 
                 // Column definitions: key into the candidate object, header text, how to render, sort accessor.
                 var COLS = [
-                    { key: "res",        title: "Res",      tip: "Which RESOURCE this upgrade boosts (Tib / Cry / Pow / $=Credits). The building type itself is in the Building column.", get: function (c) { return resTag(c.res); }, sort: function (c) { return c.res; }, align: "left" },
-                    { key: "cityName",   title: "Base",     get: function (c) { return c.cityName; },   sort: function (c) { return String(c.cityName).toLowerCase(); }, align: "left" },
-                    { key: "typeName",   title: "Building", get: function (c) { return c.typeName + " (" + c.posX + ":" + c.posY + ")"; }, sort: function (c) { return c.typeName; }, align: "left" },
-                    { key: "targetLevel",title: "→Lvl", get: function (c) { return String(c.targetLevel); }, sort: function (c) { return c.targetLevel; }, align: "right" },
-                    { key: "gainPerHour",title: "Gain/h",   get: function (c) { return fmtNum(c.gainPerHour); }, sort: function (c) { return c.gainPerHour; }, align: "right" },
-                    { key: "costTib",    title: "Tib cost", get: function (c) { return c.costTib ? fmtNum(c.costTib) : "-"; }, sort: function (c) { return c.costTib; }, align: "right" },
-                    { key: "costPow",    title: "Pow cost", get: function (c) { return c.costPow ? fmtNum(c.costPow) : "-"; }, sort: function (c) { return c.costPow; }, align: "right" },
-                    { key: "tibPerGain", title: "Tib/gain", get: function (c) { return c.costTib ? fmtNum(c.tibPerGain) : "-"; }, sort: function (c) { return c.tibPerGain; }, align: "right" },
-                    { key: "powPerGain", title: "Pow/gain", get: function (c) { return c.costPow ? fmtNum(c.powPerGain) : "-"; }, sort: function (c) { return c.powPerGain; }, align: "right" },
-                    { key: "etaSeconds", title: "ETA",      get: function (c) { return c.etaSeconds > 0 ? fmtTime(c.etaSeconds) : "now"; }, sort: function (c) { return c.etaSeconds; }, align: "right" },
+                    { key: "res",        title: MMt("Res"),      tip: MMt("Which RESOURCE this upgrade boosts (Tib / Cry / Pow / $=Credits). The building type itself is in the Building column."), get: function (c) { return resTag(c.res); }, sort: function (c) { return c.res; }, align: "left" },
+                    { key: "cityName",   title: MMt("Base"),     get: function (c) { return c.cityName; },   sort: function (c) { return String(c.cityName).toLowerCase(); }, align: "left" },
+                    { key: "typeName",   title: MMt("Building"), get: function (c) { return c.typeName + " (" + c.posX + ":" + c.posY + ")"; }, sort: function (c) { return c.typeName; }, align: "left" },
+                    { key: "targetLevel",title: MMt("→Lvl"), get: function (c) { return String(c.targetLevel); }, sort: function (c) { return c.targetLevel; }, align: "right" },
+                    { key: "gainPerHour",title: MMt("Gain/h"),   get: function (c) { return fmtNum(c.gainPerHour); }, sort: function (c) { return c.gainPerHour; }, align: "right" },
+                    { key: "costTib",    title: MMt("Tib cost"), get: function (c) { return c.costTib ? fmtNum(c.costTib) : "-"; }, sort: function (c) { return c.costTib; }, align: "right" },
+                    { key: "costPow",    title: MMt("Pow cost"), get: function (c) { return c.costPow ? fmtNum(c.costPow) : "-"; }, sort: function (c) { return c.costPow; }, align: "right" },
+                    { key: "tibPerGain", title: MMt("Tib/gain"), get: function (c) { return c.costTib ? fmtNum(c.tibPerGain) : "-"; }, sort: function (c) { return c.tibPerGain; }, align: "right" },
+                    { key: "powPerGain", title: MMt("Pow/gain"), get: function (c) { return c.costPow ? fmtNum(c.powPerGain) : "-"; }, sort: function (c) { return c.powPerGain; }, align: "right" },
+                    { key: "etaSeconds", title: MMt("ETA"),      get: function (c) { return c.etaSeconds > 0 ? fmtTime(c.etaSeconds) : MMt("now"); }, sort: function (c) { return c.etaSeconds; }, align: "right" },
                     // Credit fee to transfer in the missing Tiberium (only on qualified transfer rows).
                     // Sort puts the cheapest transfers first; non-transfer rows sink to the bottom.
-                    { key: "transferCost", title: "Xfer $", get: function (c) { return (c.state === 2 && c.transferQualified) ? fmtNum(c.transferCost) : "-"; }, sort: function (c) { return (c.state === 2 && c.transferQualified) ? c.transferCost : Infinity; }, align: "right" }
+                    { key: "transferCost", title: MMt("Xfer $"), get: function (c) { return (c.state === 2 && c.transferQualified) ? fmtNum(c.transferCost) : "-"; }, sort: function (c) { return (c.state === 2 && c.transferQualified) ? c.transferCost : Infinity; }, align: "right" }
                 ];
                 var ACTION_COL = COLS.length; // the upgrade button column index
 
@@ -3086,7 +3089,7 @@
                     if (sortCol === idx) arrow = sortDir > 0 ? " ▲" : " ▼";
                     var h = new qx.ui.basic.Label("<b>" + col.title + arrow + "</b>").set({
                         rich: true, textColor: "#ffffff", cursor: "pointer",
-                        toolTipText: (col.tip ? col.tip + "\n\n" : "") + "Click to sort by " + col.title
+                        toolTipText: (col.tip ? col.tip + "\n\n" : "") + MMt("Click to sort by") + " " + col.title
                     });
                     h.addListener("click", function () {
                         if (sortCol === idx) { sortDir = -sortDir; } else { sortCol = idx; sortDir = 1; }
@@ -3106,11 +3109,11 @@
 
                     // header
                     for (var c = 0; c < COLS.length; c++) grid.add(headerLabel(COLS[c], c), { row: 0, column: c });
-                    grid.add(new qx.ui.basic.Label("<b>Action</b>").set({ rich: true, textColor: "#ffffff" }), { row: 0, column: ACTION_COL });
+                    grid.add(new qx.ui.basic.Label("<b>" + MMt("Action") + "</b>").set({ rich: true, textColor: "#ffffff" }), { row: 0, column: ACTION_COL });
 
                     var rows = sortedData();
                     if (!rows.length) {
-                        grid.add(new qx.ui.basic.Label("(nothing to show - try the 'Show' filter, e.g. 'All candidates')").set({ textColor: "#888888" }), { row: 1, column: 0, colSpan: ACTION_COL + 1 });
+                        grid.add(new qx.ui.basic.Label(MMt("(nothing to show - try the 'Show' filter, e.g. 'All candidates')")).set({ textColor: "#888888" }), { row: 1, column: 0, colSpan: ACTION_COL + 1 });
                         updateTopNControls();
                         return;
                     }
@@ -3134,7 +3137,7 @@
                     if (cand._btn) {
                         try {
                             cand._btn.setEnabled(false);
-                            cand._btn.setLabel(ok ? "✓ Upgraded" : "✗ failed");
+                            cand._btn.setLabel(ok ? MMt("✓ Upgraded") : MMt("✗ failed"));
                         } catch (e) {}
                     }
                 }
@@ -3234,23 +3237,23 @@
                             var powHave = (pow[cid] != null) ? pow[cid] : Infinity;
                             var tibHave = (tib[cid] != null) ? tib[cid] : 0;
                             var soLocal = (cand.state === 1), soXfer = (cand.state === 2 && cand.transferQualified);
-                            if (costPow && powHave < costPow) { mkBlocked(cand, soLocal, soXfer, "not enough power"); continue; }
+                            if (costPow && powHave < costPow) { mkBlocked(cand, soLocal, soXfer, MMt("not enough power")); continue; }
                             if (!costTib || tibHave >= costTib) {
                                 cand._feasible = { kind: "upgrade" };
                                 tib[cid] = tibHave - costTib; pow[cid] = powHave - costPow; feasible++; continue;
                             }
                             if (!xferOn) {
-                                if (soLocal) { mkBlocked(cand, soLocal, soXfer, "base drained by the upgrades above"); }
+                                if (soLocal) { mkBlocked(cand, soLocal, soXfer, MMt("base drained by the upgrades above")); }
                                 else {
                                     var p0 = simPlanTransfer(cand, tib);
                                     if (p0 && p0.feasible) mkBlocked(cand, soLocal, soXfer, null, true, p0.totalCost);
-                                    else mkBlocked(cand, soLocal, soXfer, "no base can transfer enough Tiberium");
+                                    else mkBlocked(cand, soLocal, soXfer, MMt("no base can transfer enough Tiberium"));
                                 }
                                 continue;
                             }
                             var pl = simPlanTransfer(cand, tib);
-                            if (!pl.feasible) { mkBlocked(cand, soLocal, soXfer, "no base can transfer enough Tiberium"); continue; }
-                            if (credits < pl.totalCost) { mkBlocked(cand, soLocal, soXfer, "can't afford transfer fee (" + MM.num.compact(Math.round(pl.totalCost), 1) + ")"); continue; }
+                            if (!pl.feasible) { mkBlocked(cand, soLocal, soXfer, MMt("no base can transfer enough Tiberium")); continue; }
+                            if (credits < pl.totalCost) { mkBlocked(cand, soLocal, soXfer, MMt("can't afford transfer fee") + " (" + MM.num.compact(Math.round(pl.totalCost), 1) + ")"); continue; }
                             cand._feasible = { kind: "transfer", transferCost: pl.totalCost };
                             for (var k = 0; k < pl.plan.length; k++) tib[pl.plan[k].id] = (tib[pl.plan[k].id] || 0) - pl.plan[k].amount;
                             tib[cid] = (tibHave + pl.need) - costTib; pow[cid] = powHave - costPow; credits -= pl.totalCost; feasible++;
@@ -3273,7 +3276,7 @@
                             // Only show the hint when something IS feasible; "0 will succeed" is just noise
                             // (Go is already disabled), and it was the hard-to-read yellow line.
                             feasHint.setValue(fc > 0
-                                ? (fc + " of " + lastActiveCount + " will succeed" + (cbTopXfer.getValue() ? " (via transfers)" : ""))
+                                ? (fc + " " + MMt("of") + " " + lastActiveCount + " " + MMt("will succeed") + (cbTopXfer.getValue() ? " " + MMt("(via transfers)") : ""))
                                 : "");
                             feasHint.setTextColor("#9fd49f");
                         }
@@ -3296,15 +3299,15 @@
                 // A clickable action button (⬆ Upgrade / ⇄ Transfer & Upgrade). `warn` flags a row that
                 // works on its own but would fail inside a batch (drained by the rows above).
                 function makeActionButton(cand, viaTransfer, fee, warn) {
-                    var label = viaTransfer ? ("⇄ Transfer & Upgrade" + (fee != null ? " (" + fmtNum(fee) + ")" : "")) : "⬆ Upgrade";
+                    var label = viaTransfer ? (MMt("⇄ Transfer & Upgrade") + (fee != null ? " (" + fmtNum(fee) + ")" : "")) : MMt("⬆ Upgrade");
                     var tip = viaTransfer
-                        ? ("Pull the missing Tiberium from your other bases (cheapest first), then upgrade.\nTransfer fee: " + fmtNum(fee || 0) + " credits.")
-                        : "Upgrade this building now";
+                        ? (MMt("Pull the missing Tiberium from your other bases (cheapest first), then upgrade.\nTransfer fee:") + " " + fmtNum(fee || 0) + " " + MMt("credits."))
+                        : MMt("Upgrade this building now");
                     if (warn) {
                         // Colour ONLY the warning glyph (rich label); the rest of the button stays as-is.
                         // Red = it will fail if batched. (Swap #ff5b5b for #ffd23f to make it yellow.)
                         label = "<span style='color:#ff5b5b'>⚠</span> " + label;
-                        tip = "Works on its OWN, but the upgrades above drain this base first - it will FAIL if you batch them with Go. Lower 'Upgrade top', or click this row by itself.\n\n" + tip;
+                        tip = MMt("Works on its OWN, but the upgrades above drain this base first - it will FAIL if you batch them with Go. Lower 'Upgrade top', or click this row by itself.") + "\n\n" + tip;
                     }
                     var btn = new qx.ui.form.Button(label).set({ appearance: "button-text-small", rich: !!warn, toolTipText: tip });
                     cand._btn = btn;
@@ -3316,7 +3319,7 @@
                     // Already acted on this render-cycle? Show the sticky status as a readable badge.
                     if (doneState[cand.id]) {
                         var ok = doneState[cand.id] === "done";
-                        return makeBadge(ok ? "✓ Upgraded" : "✗ failed", ok ? "#bff5bf" : "#ffc9c9", ok ? "#1e4d1e" : "#5a1e1e");
+                        return makeBadge(ok ? MMt("✓ Upgraded") : MMt("✗ failed"), ok ? "#bff5bf" : "#ffc9c9", ok ? "#1e4d1e" : "#5a1e1e");
                     }
                     // The Action column previews exactly what Go would do, from the cumulative dry-run.
                     var fv = cand._feasible;
@@ -3325,17 +3328,17 @@
                     if (fv && fv.kind === "blocked") {
                         if (fv.xferoff) {
                             // Needs a transfer, but "Transfer as needed" is off: disabled ⇄ button + hint.
-                            return new qx.ui.form.Button("⇄ Transfer & Upgrade" + (fv.transferCost != null ? " (" + fmtNum(fv.transferCost) + ")" : "")).set({
+                            return new qx.ui.form.Button(MMt("⇄ Transfer & Upgrade") + (fv.transferCost != null ? " (" + fmtNum(fv.transferCost) + ")" : "")).set({
                                 appearance: "button-text-small", enabled: false,
-                                toolTipText: "Needs a Tiberium transfer" + (fv.transferCost != null ? " (" + fmtNum(fv.transferCost) + " credits)" : "") + ". Tick \"Transfer as needed\" above to allow it."
+                                toolTipText: MMt("Needs a Tiberium transfer") + (fv.transferCost != null ? " (" + fmtNum(fv.transferCost) + " " + MMt("credits") + ")" : "") + ". " + MMt("Tick \"Transfer as needed\" above to allow it.")
                             });
                         }
                         if (fv.drain) return makeActionButton(cand, !!fv.viaTransfer, fv.transferCost, true);
-                        return makeBadge("⚠ " + (fv.reason || "blocked"), "#ffd2a6", "#5a3a14", fv.reason || "Can't be upgraded right now");
+                        return makeBadge("⚠ " + (fv.reason || MMt("blocked")), "#ffd2a6", "#5a3a14", fv.reason || MMt("Can't be upgraded right now"));
                     }
                     // No verdict (state-3 wait, or sim unavailable): show the production countdown badge.
-                    var waitTxt = (cand.etaSeconds > 0) ? ("⏳ " + fmtTime(cand.etaSeconds)) : "wait";
-                    return makeBadge(waitTxt, "#ffe08a", "#4a3814", "Affordable in about " + (cand.etaSeconds > 0 ? fmtTime(cand.etaSeconds) : "?") + " from this base's production");
+                    var waitTxt = (cand.etaSeconds > 0) ? ("⏳ " + fmtTime(cand.etaSeconds)) : MMt("wait");
+                    return makeBadge(waitTxt, "#ffe08a", "#4a3814", MMt("Affordable in about") + " " + (cand.etaSeconds > 0 ? fmtTime(cand.etaSeconds) : "?") + " " + MMt("from this base's production"));
                 }
 
                 // ---- batch upgrade: walk the visible, sorted rows; re-validate each before firing ----
@@ -3363,21 +3366,21 @@
                 function liveEvalCandidate(cand, xferOn) {
                     try {
                         var city = getCityById(cand.cityId);
-                        if (!city) return { action: 'skip', reason: 'base unavailable' };
+                        if (!city) return { action: 'skip', reason: MMt('base unavailable') };
                         var ERT = ClientLib.Base.EResourceType;
-                        if (city.get_IsLocked && city.get_IsLocked()) return { action: 'skip', reason: 'base is locked' };
+                        if (city.get_IsLocked && city.get_IsLocked()) return { action: 'skip', reason: MMt('base is locked') };
                         if (cand.costPow && city.GetResourceCount(ERT.Power) < cand.costPow) {
-                            return { action: 'skip', reason: 'not enough power' };
+                            return { action: 'skip', reason: MMt('not enough power') };
                         }
                         var tibHave = cand.costTib ? city.GetResourceCount(ERT.Tiberium) : Infinity;
                         if (!cand.costTib || tibHave >= cand.costTib) return { action: 'upgrade' };
                         // Local Tib short. Try transfer only if the user enabled it.
-                        if (!xferOn) return { action: 'skip', reason: 'not enough tiberium (enable "Transfer as needed" to pull from other bases)' };
+                        if (!xferOn) return { action: 'skip', reason: MMt('not enough tiberium (enable "Transfer as needed" to pull from other bases)') };
                         var pl = planTransfer(cand);
-                        if (!pl || !pl.feasible) return { action: 'skip', reason: 'no transfer plan can cover the gap' };
-                        if (playerCredits() < pl.totalCost) return { action: 'skip', reason: "can't afford transfer fee (" + MM.num.compact(Math.round(pl.totalCost), 1) + " credits)" };
+                        if (!pl || !pl.feasible) return { action: 'skip', reason: MMt('no transfer plan can cover the gap') };
+                        if (playerCredits() < pl.totalCost) return { action: 'skip', reason: MMt("can't afford transfer fee") + " (" + MM.num.compact(Math.round(pl.totalCost), 1) + " " + MMt("credits") + ")" };
                         return { action: 'transfer-upgrade', plan: pl };
-                    } catch (e) { werr("liveEvalCandidate:", e); return { action: 'skip', reason: 'eval error - see console' }; }
+                    } catch (e) { werr("liveEvalCandidate:", e); return { action: 'skip', reason: MMt('eval error - see console') }; }
                 }
 
                 // After an accepted upgrade, the spent Tiberium drains a tick LATE. The NEXT row's
@@ -3417,8 +3420,8 @@
                     }).slice(0, n);
                     if (!queue.length) {
                         infoLbl.setValue(!xferOn
-                            ? "Nothing to upgrade without transfers - tick \"Transfer as needed\" to allow them, or wait for this base to produce more Tiberium."
-                            : "Nothing to upgrade right now - not enough resources (or credits for the transfer fees).");
+                            ? MMt("Nothing to upgrade without transfers - tick \"Transfer as needed\" to allow them, or wait for this base to produce more Tiberium.")
+                            : MMt("Nothing to upgrade right now - not enough resources (or credits for the transfer fees)."));
                         return;
                     }
                     batchRunning = true;
@@ -3432,11 +3435,11 @@
                             queue.forEach(function (c) { if (doneState[c.id] === "done") delete doneState[c.id]; });
                             renderRows();
                         }
-                        var parts = ["Processed " + processed + " of " + queue.length];
-                        if (transferred) parts.push(transferred + " via transfer");
-                        if (failed)      parts.push(failed + " failed");
-                        if (skipped)     parts.push(skipped + " skipped" + (lastSkipReason ? " (last: " + lastSkipReason + ")" : ""));
-                        infoLbl.setValue("Done. " + parts.join(", ") + "." + (keepUpgraded ? " Click Refresh to recompute the list." : ""));
+                        var parts = [MMt("Processed") + " " + processed + " " + MMt("of") + " " + queue.length];
+                        if (transferred) parts.push(transferred + " " + MMt("via transfer"));
+                        if (failed)      parts.push(failed + " " + MMt("failed"));
+                        if (skipped)     parts.push(skipped + " " + MMt("skipped") + (lastSkipReason ? " (" + MMt("last:") + " " + lastSkipReason + ")" : ""));
+                        infoLbl.setValue(MMt("Done.") + " " + parts.join(", ") + "." + (keepUpgraded ? " " + MMt("Click Refresh to recompute the list.") : ""));
                     }
                     function step() {
                         if (i >= queue.length) { finish(); return; }
@@ -3449,13 +3452,13 @@
                             markDone(cand, false);
                             // Override the "✗ failed" label with the skip reason so the row is honest.
                             if (cand._btn) { try { cand._btn.setLabel("⏭ " + ev.reason); cand._btn.setToolTipText(ev.reason); } catch (e) {} }
-                            infoLbl.setValue("Skipped " + i + "/" + queue.length + " (" + ev.reason + "): " + cand.typeName + " in " + cand.cityName);
+                            infoLbl.setValue(MMt("Skipped") + " " + i + "/" + queue.length + " (" + ev.reason + "): " + cand.typeName + " " + MMt("in") + " " + cand.cityName);
                             window.setTimeout(step, 50);
                             return;
                         }
                         var viaTransfer = ev.action === 'transfer-upgrade';
                         var fn = viaTransfer ? autoTransferAndUpgrade : sendUpgrade;
-                        infoLbl.setValue((viaTransfer ? "Transfer + upgrade " : "Upgrading ") + i + "/" + queue.length + ": " + cand.typeName + " in " + cand.cityName + "...");
+                        infoLbl.setValue((viaTransfer ? MMt("Transfer + upgrade") + " " : MMt("Upgrading") + " ") + i + "/" + queue.length + ": " + cand.typeName + " " + MMt("in") + " " + cand.cityName + "...");
                         fn(cand, function (ok) {
                             markDone(cand, ok);
                             if (ok) { processed++; if (viaTransfer) transferred++; }
@@ -3519,7 +3522,7 @@
                         renderRows();
                         var aff = 0, xfer = 0;
                         for (var i = 0; i < data.length; i++) { if (data[i].state === 1) aff++; else if (data[i].state === 2 && data[i].transferQualified) xfer++; }
-                        infoLbl.setValue(data.length + " candidate(s), " + aff + " upgradeable now" + (xfer ? ", " + xfer + " via transfer" : "") + ". Click a column header to sort (try 'Xfer $' for cheapest transfers).");
+                        infoLbl.setValue(data.length + " " + MMt("candidate(s),") + " " + aff + " " + MMt("upgradeable now") + (xfer ? ", " + xfer + " " + MMt("via transfer") : "") + ". " + MMt("Click a column header to sort (try 'Xfer $' for cheapest transfers)."));
                         resetTopNToDefault(); // default ceiling (5), capped at what the dry-run says is feasible
                     } catch (e) { werr("upgrade refreshTab failed:", e); }
                 }
@@ -3573,7 +3576,7 @@
             // and (c) an in-tab mini-map of the base with the proposed layout highlighted. Nothing is
             // applied to the game - this is advice only (Phase B auto-apply is a later batch).
             function buildOptimizerTab() {
-                var page = new qx.ui.tabview.Page("Layout Optimizer");
+                var page = new qx.ui.tabview.Page(MMt("Layout Optimizer"));
                 page.setLayout(new qx.ui.layout.VBox(6));
                 page.setPadding(8);
                 var TILE = 38; // grid tile size in px
@@ -3607,9 +3610,9 @@
                 }
 
                 // ---- STEP 1: pick a base, then a resource to maximize ----
-                var step1 = sectionPanel("<b style='color:#7fd0ff'>1 &middot; Pick a base, then a resource to maximize</b>");
+                var step1 = sectionPanel("<b style='color:#7fd0ff'>" + MMt("1 &middot; Pick a base, then a resource to maximize") + "</b>");
                 var baseGroup = new qx.ui.container.Composite(new qx.ui.layout.HBox(6)).set({ alignY: "middle" });
-                baseGroup.add(new qx.ui.basic.Label("Base:").set({ alignY: "middle", textColor: "#cfcfcf" }));
+                baseGroup.add(new qx.ui.basic.Label(MMt("Base:")).set({ alignY: "middle", textColor: "#cfcfcf" }));
                 var baseSelect = new qx.ui.form.SelectBox().set({ width: 160, alignY: "middle" });
                 var suppressBase = false, baseBuilt = false;
                 function selectedBaseId() { var s = baseSelect.getSelection()[0]; return s ? s.getModel() : "current"; }
@@ -3619,7 +3622,7 @@
                     baseBuilt = true; suppressBase = true;
                     try {
                         try { baseSelect.removeAll(); } catch (e) {}
-                        var itC = new qx.ui.form.ListItem("Current base"); itC.setModel("current"); baseSelect.add(itC);
+                        var itC = new qx.ui.form.ListItem(MMt("Current base")); itC.setModel("current"); baseSelect.add(itC);
                         var list = [];
                         eachOwnCity(function (c) { try { if (c.get_IsGhostMode && c.get_IsGhostMode()) return; list.push({ id: String(c.get_Id()), name: c.get_Name() }); } catch (e) {} });
                         list.sort(byCreated); // creation order (matches Player Info > Bases)
@@ -3634,14 +3637,14 @@
                 step1.add(baseGroup);
 
                 var RESBTN = [
-                    { key: "Tib", label: "Tiberium", color: "#8fe08f" },
-                    { key: "Cry", label: "Crystal",  color: "#8fc4ff" },
-                    { key: "Pow", label: "Power",    color: "#ece28a" },
-                    { key: "Dol", label: "Credits",  color: "#e6c08f" }
+                    { key: "Tib", label: MMt("Tiberium"), color: "#8fe08f" },
+                    { key: "Cry", label: MMt("Crystal"),  color: "#8fc4ff" },
+                    { key: "Pow", label: MMt("Power"),    color: "#ece28a" },
+                    { key: "Dol", label: MMt("Credits"),  color: "#e6c08f" }
                 ];
                 var resRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8));
                 RESBTN.forEach(function (r) {
-                    var b = new qx.ui.form.Button(r.label).set({ toolTipText: "Optimize this base's layout to maximize " + r.label + " production", center: true });
+                    var b = new qx.ui.form.Button(r.label).set({ toolTipText: MMt("Optimize this base's layout to maximize") + " " + r.label + " " + MMt("production"), center: true });
                     try { b.setTextColor(r.color); } catch (e) {}
                     b.addListener("execute", function () { runOptimize(r.key); });
                     resRow.add(b, { flex: 1 });
@@ -3650,19 +3653,19 @@
                 page.add(step1);
 
                 // ---- STEP 2: selling options (what gets proposed) ----
-                var step2 = sectionPanel("<b style='color:#ff9d9d'>2 &middot; Selling</b> <span style='color:#9a9a9a'>&ndash; optional; changes what gets proposed</span>");
+                var step2 = sectionPanel("<b style='color:#ff9d9d'>" + MMt("2 &middot; Selling") + "</b> <span style='color:#9a9a9a'>" + MMt("&ndash; optional; changes what gets proposed") + "</span>");
                 var sellRow = new qx.ui.container.Composite(new qx.ui.layout.Flow(14, 6));
-                var spSell = spinner(sellRow, "Sell up to:", "BaseTools.OptSellN", 0, 0, 6, "CEILING on how many ECONOMY / duplicate buildings (Silo, Refinery, spare Harvester/PowerPlant/Accumulator) the optimizer may demolish to make room - it then builds a new producer of the chosen resource in EACH freed tile, paid for entirely by that building's 90% demolish refund (none of your stored resources are spent). It's a ceiling, not a quota: 'Sell up to 3' will sell 1, 2, or 3 - whatever actually raises the resource - and stops when one more sell wouldn't help. This is SEPARATE from 'Force-sell special buildings' (Defense HQ, Airport, etc.), which you pick by checking them. 0 = don't sell anything.");
-                sellRow.add(new qx.ui.basic.Label("buildings").set({ alignY: "middle", textColor: "#9a9a9a" }));
+                var spSell = spinner(sellRow, MMt("Sell up to:"), "BaseTools.OptSellN", 0, 0, 6, MMt("CEILING on how many ECONOMY / duplicate buildings (Silo, Refinery, spare Harvester/PowerPlant/Accumulator) the optimizer may demolish to make room - it then builds a new producer of the chosen resource in EACH freed tile, paid for entirely by that building's 90% demolish refund (none of your stored resources are spent). It's a ceiling, not a quota: 'Sell up to 3' will sell 1, 2, or 3 - whatever actually raises the resource - and stops when one more sell wouldn't help. This is SEPARATE from 'Force-sell special buildings' (Defense HQ, Airport, etc.), which you pick by checking them. 0 = don't sell anything."));
+                sellRow.add(new qx.ui.basic.Label(MMt("buildings")).set({ alignY: "middle", textColor: "#9a9a9a" }));
                 // "Allow reductions" - widen the search to consider moves that improve the target resource
                 // AT THE COST of other resources. Score = target_gain - 0.5*sum(other losses), so the
                 // optimizer is willing to take a -200 Tib loss for a +101 Crystal gain but NOT a +99 gain.
                 // OFF by default so the optimizer stays strict (only no-loss-in-others moves) unless the
                 // user explicitly opts in. The net-change table in the results shows what's been traded.
-                var cbAllowRed = new qx.ui.form.CheckBox("Allow reductions").set({
+                var cbAllowRed = new qx.ui.form.CheckBox(MMt("Allow reductions")).set({
                     value: !!MM.settings.get("BaseTools.OptAllowReductions", false),
                     alignY: "middle",
-                    toolTipText: "OFF (default): only suggest moves that improve the chosen resource without hurting the others. Strict but limited - a swap that's blocked by, say, a Refinery in the way is never considered.\n\nON: widen the search to ALL resource buildings and let the optimizer trade small losses in other resources for a larger target gain (score = target_gain - 0.5 * sum_of_other_losses). The results panel shows the net change for all 4 resources so you can see exactly what's being traded."
+                    toolTipText: MMt("OFF (default): only suggest moves that improve the chosen resource without hurting the others. Strict but limited - a swap that's blocked by, say, a Refinery in the way is never considered.\n\nON: widen the search to ALL resource buildings and let the optimizer trade small losses in other resources for a larger target gain (score = target_gain - 0.5 * sum_of_other_losses). The results panel shows the net change for all 4 resources so you can see exactly what's being traded.")
                 });
                 cbAllowRed.addListener("changeValue", function (e) { MM.settings.set("BaseTools.OptAllowReductions", !!e.getData()); });
                 sellRow.add(cbAllowRed);
@@ -3671,23 +3674,23 @@
                 // force-demolished and their pooled 90% refund funds new target-resource producers in the freed
                 // tiles (optimizeMultiBuild). NOTE: ordinary self-funded sell->build (e.g. sell a Silo, add an
                 // Accumulator) happens automatically whenever "Sell up to" >= 1 - it does NOT need this box.
-                var cbForceSell = new qx.ui.form.CheckBox("Force-sell special buildings").set({
+                var cbForceSell = new qx.ui.form.CheckBox(MMt("Force-sell special buildings")).set({
                     value: !!MM.settings.get("BaseTools.OptAllowBuild", false),
                     alignY: "middle",
-                    toolTipText: "Reveals a checklist of the 'one-of' special buildings on this base (Defense HQ/Facility, Command Center, Barracks, Factory, Airport, Support). Check any you're willing to sacrifice; the optimizer demolishes them, pools their 90% refund, and fills the freed tiles with the best new producers of the chosen resource (early-game 'strip to the Construction Yard' play).\n\nYou do NOT need this for the normal case: with 'Sell up to' >= 1 and 'Allow reductions' on, the optimizer already auto-considers selling an economy building (e.g. a Silo) and building a producer (e.g. an Accumulator) in its place."
+                    toolTipText: MMt("Reveals a checklist of the 'one-of' special buildings on this base (Defense HQ/Facility, Command Center, Barracks, Factory, Airport, Support). Check any you're willing to sacrifice; the optimizer demolishes them, pools their 90% refund, and fills the freed tiles with the best new producers of the chosen resource (early-game 'strip to the Construction Yard' play).\n\nYou do NOT need this for the normal case: with 'Sell up to' >= 1 and 'Allow reductions' on, the optimizer already auto-considers selling an economy building (e.g. a Silo) and building a producer (e.g. an Accumulator) in its place.")
                 });
                 cbForceSell.addListener("changeValue", function (e) { MM.settings.set("BaseTools.OptAllowBuild", !!e.getData()); rebuildForceSell(); });
                 sellRow.add(cbForceSell);
                 step2.add(sellRow);
-                step2.add(new qx.ui.basic.Label("<i>A ceiling, not a quota &mdash; the optimizer sells only as many as actually help, and builds a producer in each freed tile paid for by that building's 90% demolish refund. Your stored resources are untouched.</i>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#8f8f8f" }));
+                step2.add(new qx.ui.basic.Label(MMt("<i>A ceiling, not a quota &mdash; the optimizer sells only as many as actually help, and builds a producer in each freed tile paid for by that building's 90% demolish refund. Your stored resources are untouched.</i>")).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#8f8f8f" }));
                 page.add(step2);
 
                 // ---- STEP 3: search quality (advanced; collapsed by default - most users never touch these) ----
-                var adv = collapsible("<b style='color:#eaeaea'>Search quality (advanced)</b> <span style='color:#a9a9a9'>&mdash; defaults are fine</span>", false);
+                var adv = collapsible("<b style='color:#eaeaea'>" + MMt("Search quality (advanced)") + "</b> <span style='color:#a9a9a9'>" + MMt("&mdash; defaults are fine") + "</span>", false);
                 var advRow = new qx.ui.container.Composite(new qx.ui.layout.Flow(14, 6)); adv.body.add(advRow);
-                var spRounds = spinner(advRow, "Rounds:", "BaseTools.OptRounds", 30, 5, 200, "Improvement passes per attempt. Higher = more thorough but slower.");
-                var spNeigh = spinner(advRow, "Neighbors:", "BaseTools.OptNeighbors", 16, 4, 72, "How many candidate destination tiles to test per building each pass. Higher = more thorough but slower.");
-                var spKicks = spinner(advRow, "Kicks:", "BaseTools.OptKicks", 3, 0, 20, "Random shake-ups to escape a 'good but not best' layout and explore a different arrangement. More = explores more but slower.");
+                var spRounds = spinner(advRow, MMt("Rounds:"), "BaseTools.OptRounds", 30, 5, 200, MMt("Improvement passes per attempt. Higher = more thorough but slower."));
+                var spNeigh = spinner(advRow, MMt("Neighbors:"), "BaseTools.OptNeighbors", 16, 4, 72, MMt("How many candidate destination tiles to test per building each pass. Higher = more thorough but slower."));
+                var spKicks = spinner(advRow, MMt("Kicks:"), "BaseTools.OptKicks", 3, 0, 20, MMt("Random shake-ups to escape a 'good but not best' layout and explore a different arrangement. More = explores more but slower."));
 
                 // ---- Force-sell picker: the "one-of" special buildings to sacrifice (shown when the box above
                 // is checked). Icon + level + checkbox per type; selection persists (BaseTools.OptForceSell).
@@ -3700,12 +3703,12 @@
                     try { var kids = forceSellBox.removeAll(); for (var i = 0; i < kids.length; i++) { try { kids[i].destroy(); } catch (e) {} } } catch (e) {}
                     if (!cbForceSell.getValue()) { try { forceSellBox.setDecorator(null); forceSellBox.setPadding(0); } catch (e) {} return; }
                     try { if (forceSellDeco) forceSellBox.setDecorator(forceSellDeco); forceSellBox.setPadding(8); } catch (e) {}
-                    forceSellBox.add(new qx.ui.basic.Label("<b style='color:#5fe0f5'>Force-sell</b> &ndash; just <b>check</b> the “one-of” buildings you'll sacrifice (count is automatic &ndash; you do <b>not</b> need “Sell up to”). Their pooled refund funds new producers of the chosen resource. Works regardless of “Allow reductions”. (Economy/duplicate buildings: use “Sell up to” instead.)").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#cfeaf2" }));
+                    forceSellBox.add(new qx.ui.basic.Label(MMt("<b style='color:#5fe0f5'>Force-sell</b> &ndash; just <b>check</b> the “one-of” buildings you'll sacrifice (count is automatic &ndash; you do <b>not</b> need “Sell up to”). Their pooled refund funds new producers of the chosen resource. Works regardless of “Allow reductions”. (Economy/duplicate buildings: use “Sell up to” instead.)")).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#cfeaf2" }));
                     var city = selectedCity();
-                    if (!city) { forceSellBox.add(new qx.ui.basic.Label("(open or select a base)").set({ textColor: "#aaaaaa" })); return; }
+                    if (!city) { forceSellBox.add(new qx.ui.basic.Label(MMt("(open or select a base)")).set({ textColor: "#aaaaaa" })); return; }
                     var cands = [];
                     try { cands = OPT.forceSellCandidates(city) || []; } catch (e) { werr("forceSellCandidates failed:", e); }
-                    if (!cands.length) { forceSellBox.add(new qx.ui.basic.Label("(no force-sellable buildings on this base)").set({ textColor: "#aaaaaa" })); return; }
+                    if (!cands.length) { forceSellBox.add(new qx.ui.basic.Label(MMt("(no force-sellable buildings on this base)")).set({ textColor: "#aaaaaa" })); return; }
                     var sel = MM.settings.get("BaseTools.OptForceSell", []) || [], selMap = {}; for (var s = 0; s < sel.length; s++) selMap[sel[s]] = 1;
                     var flow = new qx.ui.container.Composite(new qx.ui.layout.Flow(14, 5));
                     cands.forEach(function (c) {
@@ -3728,11 +3731,11 @@
 
                 // ---- Apply row: one-click auto-apply of the proposed layout (Phase B) ----
                 var applyRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8));
-                var applyBtn = new qx.ui.form.Button("Apply to base").set({ enabled: false, toolTipText: "Move (and, if proposed, demolish) buildings in-game to match the proposed layout. Shows a confirmation with exactly what will change first." });
+                var applyBtn = new qx.ui.form.Button(MMt("Apply to base")).set({ enabled: false, toolTipText: MMt("Move (and, if proposed, demolish) buildings in-game to match the proposed layout. Shows a confirmation with exactly what will change first.") });
                 try { applyBtn.setTextColor("#7ee07e"); } catch (e) {}
                 applyBtn.addListener("execute", function () { onApply(); });
                 applyRow.add(applyBtn, { flex: 0 });
-                applyRow.add(new qx.ui.basic.Label("Click a resource above (<b>Tiberium / Crystal / Power / Credits</b>) to generate a plan, then <b>Apply to base</b> to make those changes in-game.").set({ rich: true, wrap: true, allowGrowX: true, alignY: "middle", textColor: "#333333" }), { flex: 1 });
+                applyRow.add(new qx.ui.basic.Label(MMt("Click a resource above (<b>Tiberium / Crystal / Power / Credits</b>) to generate a plan, then <b>Apply to base</b> to make those changes in-game.")).set({ rich: true, wrap: true, allowGrowX: true, alignY: "middle", textColor: "#333333" }), { flex: 1 });
                 page.add(applyRow);
                 function setApplyEnabled(on) { try { applyBtn.setEnabled(!!on); } catch (e) {} }
 
@@ -3752,7 +3755,7 @@
                 contentCol.add(topRow);
 
                 var mapBox = new qx.ui.container.Composite(new qx.ui.layout.VBox(4));
-                var mapTitle = new qx.ui.basic.Label("<b>Base layout</b>").set({ rich: true, textColor: "#ffffff" });
+                var mapTitle = new qx.ui.basic.Label("<b>" + MMt("Base layout") + "</b>").set({ rich: true, textColor: "#ffffff" });
                 mapBox.add(mapTitle);
                 var grid = new qx.ui.container.Composite(new qx.ui.layout.Grid(2, 2));
                 mapBox.add(grid);
@@ -3769,7 +3772,7 @@
                 // ---- icon + label helpers ----
                 var ABBR = { Harvester: "H", Silo: "S", PowerPlant: "P", Accumulator: "A", Refinery: "R", Construction_Yard: "CY", Defense_HQ: "DHQ", Defense_Facility: "DEF", Support_Art: "SUP" };
                 function abbrOf(b) { if (b.techName === "Harvester") return b.harvRes === "Cry" ? "Hc" : "Ht"; var a = ABBR[b.techName]; return a == null ? b.techName.slice(0, 3) : a; }
-                function nameOf(b) { return (b.techName === "Harvester" ? (b.harvRes === "Cry" ? "Crystal Harvester" : "Tiberium Harvester") : b.techName.replace(/_/g, " ")); }
+                function nameOf(b) { return (b.techName === "Harvester" ? (b.harvRes === "Cry" ? MMt("Crystal Harvester") : MMt("Tiberium Harvester")) : b.techName.replace(/_/g, " ")); }
                 function typeColor(b) { if (b.techName === "Harvester") return b.harvRes === "Cry" ? "#8fc4ff" : "#8fe08f"; return { Silo: "#dddddd", PowerPlant: "#ece28a", Accumulator: "#d8b0ff", Refinery: "#e6c08f" }[b.techName] || "#bbbbbb"; }
                 function terrBg(t) { return t === "TIBERIUM" ? "#173117" : (t === "CRYSTAL" ? "#152340" : (t === "NONE" ? "#2a2a2a" : "#101010")); }
                 function iconUrlOf(snap, b) { var I = snap.icons || {}; if (b.techName === "Harvester") return b.harvRes === "Cry" ? I.HarvCry : I.HarvTib; return I[b.techName] || null; }
@@ -3834,19 +3837,19 @@
                             cell = makeCell({ iconUrl: iconUrlOf(snap, bd), text: iconUrlOf(snap, bd) ? null : abbrOf(bd), fg: typeColor(bd),
                                 level: nb.level, bg: "#0e3a44", border: "#4dd0e1", borderWidth: 2,
                                 badge: "+", badgeBg: "#0d7a8c", badgeFg: "#d6fbff",
-                                tip: "BUILD NEW " + nameOf(bd) + " -> L" + nb.level + " @ " + rx + ":" + ry });
+                                tip: MMt("BUILD NEW") + " " + nameOf(bd) + " -> L" + nb.level + " @ " + rx + ":" + ry });
                         } else if (b) {
                             var n = moved[b.id];
                             cell = makeCell({ iconUrl: iconUrlOf(snap, bd), text: iconUrlOf(snap, bd) ? null : abbrOf(bd), fg: typeColor(bd),
                                 level: b.level, bg: n ? "#1e6e1e" : terrBg(terr), border: n ? "#7ee07e" : "#000000", borderWidth: n ? 2 : 1,
                                 badge: n || null, badgeBg: "#1e6e1e", badgeFg: "#eaffea",
-                                tip: nameOf(bd) + " L" + b.level + " @ " + rx + ":" + ry + (n ? " (moves here - #" + n + ")" : "") });
+                                tip: nameOf(bd) + " L" + b.level + " @ " + rx + ":" + ry + (n ? " (" + MMt("moves here - #") + n + ")" : "") });
                         } else if (soldAt[key]) {
                             var sb = soldAt[key];
                             cell = makeCell({ iconUrl: iconUrlOf(snap, sb), text: iconUrlOf(snap, sb) ? null : abbrOf(sb), dim: true, bg: "#4a1414", border: "#ff8a8a", borderWidth: 2,
-                                badge: "✕", badgeBg: "#8a1f1f", badgeFg: "#ffd6d6", tip: "SELL " + nameOf(sb) + " L" + sb.level + " @ " + rx + ":" + ry });
+                                badge: "✕", badgeBg: "#8a1f1f", badgeFg: "#ffd6d6", tip: MMt("SELL") + " " + nameOf(sb) + " L" + sb.level + " @ " + rx + ":" + ry });
                         } else if (vacated[key]) {
-                            cell = makeCell({ text: "&rarr;", fg: "#ff8a8a", bg: "#3a1414", border: "#7a2a2a", badge: vacated[key], badgeBg: "#7a2a2a", badgeFg: "#ffd6d6", tip: "tile vacated by move #" + vacated[key] });
+                            cell = makeCell({ text: "&rarr;", fg: "#ff8a8a", bg: "#3a1414", border: "#7a2a2a", badge: vacated[key], badgeBg: "#7a2a2a", badgeFg: "#ffd6d6", tip: MMt("tile vacated by move #") + vacated[key] });
                         } else {
                             cell = makeCell({ text: terr === "TIBERIUM" ? "t" : (terr === "CRYSTAL" ? "c" : ""), fg: "#5a5a5a", bg: terrBg(terr), tip: terr.toLowerCase() + " " + rx + ":" + ry });
                         }
@@ -3863,20 +3866,20 @@
                     var panel = new qx.ui.container.Composite(new qx.ui.layout.VBox(4)).set({ padding: 8 });
                     try { panel.setDecorator(new qx.ui.decoration.Decorator().set({ radius: 5, backgroundColor: "#1b1b1b", width: 1, color: "#3a3a3a", style: "solid" })); }
                     catch (e) { try { panel.setBackgroundColor("#1b1b1b"); } catch (e2) {} }
-                    panel.add(new qx.ui.basic.Label("<b>Legend</b>").set({ rich: true, textColor: "#ffffff" }));
+                    panel.add(new qx.ui.basic.Label("<b>" + MMt("Legend") + "</b>").set({ rich: true, textColor: "#ffffff" }));
                     panel.add(new qx.ui.basic.Label(
-                        "Tiles show each building's icon + its <b>level</b> (corner).<br>" +
-                        "<span style='color:#7ee07e'>&#9632;</span> green tile / #badge = building <b>moves here</b> (matching <span style='color:#ff8a8a'>&rarr;#</span> red tile = where it left).<br>" +
-                        "<span style='color:#ff8a8a'>&#10006;</span> red tile = recommended <b>sell</b> (demolish).<br>" +
-                        "<span style='color:#4dd0e1'>&#43;</span> cyan tile = <b>build new</b> building here (self-funded by a sell's refund).<br>" +
-                        "Field tiles tinted: <span style='color:#7ed07e'>tiberium</span> / <span style='color:#8fc0ff'>crystal</span>.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e6e6e6" }));
+                        MMt("Tiles show each building's icon + its <b>level</b> (corner).") + "<br>" +
+                        "<span style='color:#7ee07e'>&#9632;</span> " + MMt("green tile / #badge = building <b>moves here</b> (matching <span style='color:#ff8a8a'>&rarr;#</span> red tile = where it left).") + "<br>" +
+                        "<span style='color:#ff8a8a'>&#10006;</span> " + MMt("red tile = recommended <b>sell</b> (demolish).") + "<br>" +
+                        "<span style='color:#4dd0e1'>&#43;</span> " + MMt("cyan tile = <b>build new</b> building here (self-funded by a sell's refund).") + "<br>" +
+                        MMt("Field tiles tinted: <span style='color:#7ed07e'>tiberium</span> / <span style='color:#8fc0ff'>crystal</span>.")).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e6e6e6" }));
                     panel.add(new qx.ui.basic.Label(
-                        "<b>Controls</b><br>" +
-                        "<b>Rounds</b> &ndash; improvement passes per attempt (higher = more thorough, slower).<br>" +
-                        "<b>Neighbors</b> &ndash; candidate destination tiles tested per building each pass.<br>" +
-                        "<b>Kicks</b> &ndash; random shake-ups to escape a 'good-but-not-best' layout.<br>" +
-                        "<b>Sell up to N</b> &ndash; the MOST low-impact economy buildings the optimizer may demolish to make room. For each one it sells, it builds a new producer of the chosen resource in the freed tile, paid for by that building's 90% demolish refund (your stored resources are untouched). It's a ceiling, not a quota: it sells only as many as actually help and stops early. Each <span style='color:#ff8a8a'>&times; red sell tile</span> is paired with a <span style='color:#4dd0e1'>&#43; cyan build tile</span> in the results list (\"paid for by selling &hellip;\"). With <b>Allow reductions</b> on it may also trade a little of another resource (e.g. sell an Accumulator for Power) when that yields a bigger gain in the one you picked.<br>" +
-                        "<b>Force-sell special buildings</b> &ndash; reveals a checklist of the base's 'one-of' buildings (Defense HQ/Facility, Command Center, etc.). Sacrifices the checked ones and fills the freed tiles with the best new producers (early-game strip-to-CY). Apply does demolish &rarr; move &rarr; build &rarr; upgrade automatically.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#cfcfcf" }));
+                        "<b>" + MMt("Controls") + "</b><br>" +
+                        MMt("<b>Rounds</b> &ndash; improvement passes per attempt (higher = more thorough, slower).") + "<br>" +
+                        MMt("<b>Neighbors</b> &ndash; candidate destination tiles tested per building each pass.") + "<br>" +
+                        MMt("<b>Kicks</b> &ndash; random shake-ups to escape a 'good-but-not-best' layout.") + "<br>" +
+                        MMt("<b>Sell up to N</b> &ndash; the MOST low-impact economy buildings the optimizer may demolish to make room. For each one it sells, it builds a new producer of the chosen resource in the freed tile, paid for by that building's 90% demolish refund (your stored resources are untouched). It's a ceiling, not a quota: it sells only as many as actually help and stops early. Each <span style='color:#ff8a8a'>&times; red sell tile</span> is paired with a <span style='color:#4dd0e1'>&#43; cyan build tile</span> in the results list (\"paid for by selling &hellip;\"). With <b>Allow reductions</b> on it may also trade a little of another resource (e.g. sell an Accumulator for Power) when that yields a bigger gain in the one you picked.") + "<br>" +
+                        MMt("<b>Force-sell special buildings</b> &ndash; reveals a checklist of the base's 'one-of' buildings (Defense HQ/Facility, Command Center, etc.). Sacrifices the checked ones and fills the freed tiles with the best new producers (early-game strip-to-CY). Apply does demolish &rarr; move &rarr; build &rarr; upgrade automatically.")).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#cfcfcf" }));
                     legendCol.add(panel);
                     legendCol.add(new qx.ui.core.Spacer(null, 6));
                 }
@@ -3893,7 +3896,7 @@
 
                 function renderResultList(res) {
                     var box = ensureResultBox();
-                    if (!res || !res.ok) { box.add(new qx.ui.basic.Label(res && res.reason ? ("Could not optimize: " + res.reason) : "").set({ textColor: "#ff8a8a" })); return; }
+                    if (!res || !res.ok) { box.add(new qx.ui.basic.Label(res && res.reason ? (MMt("Could not optimize:") + " " + res.reason) : "").set({ textColor: "#ff8a8a" })); return; }
 
                     // colored rounded sub-panel for the Sell / Build cards
                     function miniCard(borderColor, bgColor) {
@@ -3906,7 +3909,7 @@
                     var selfFunded = !!(res.builds && res.builds.length && res.builds[0] && res.builds[0].fundedBy);
                     if (selfFunded) {
                         var nb0 = res.builds.length;
-                        box.add(new qx.ui.basic.Label("<b style='color:#ffe14d'>Self-funded plan:</b> demolish <b>" + res.sells.length + "</b> low-impact building" + (res.sells.length === 1 ? "" : "s") + " and spend the 90% demolish refund to build <b>" + nb0 + "</b> new <b>" + OPT.RES_CFG[res.resKey].label + "</b> producer" + (nb0 === 1 ? "" : "s") + " &mdash; <b>none of your stored resources are spent.</b>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e8e8e8" }));
+                        box.add(new qx.ui.basic.Label("<b style='color:#ffe14d'>" + MMt("Self-funded plan:") + "</b> " + MMt("demolish") + " <b>" + res.sells.length + "</b> " + MMt("low-impact building") + (res.sells.length === 1 ? "" : MMt("s")) + " " + MMt("and spend the 90% demolish refund to build") + " <b>" + nb0 + "</b> " + MMt("new") + " <b>" + OPT.RES_CFG[res.resKey].label + "</b> " + MMt("producer") + (nb0 === 1 ? "" : MMt("s")) + " &mdash; <b>" + MMt("none of your stored resources are spent.") + "</b>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e8e8e8" }));
                         box.add(new qx.ui.core.Spacer(null, 6));
                     }
 
@@ -3915,18 +3918,18 @@
                         var cards = new qx.ui.container.Composite(new qx.ui.layout.HBox(8));
                         if (res.sells && res.sells.length) {
                             var sellCard = miniCard("#5a2c2c", "#221314");
-                            sellCard.add(new qx.ui.basic.Label("<b style='color:#ff9d9d'>Sell (" + res.sells.length + ")</b> <span style='color:#b08888'>demolished</span>").set({ rich: true }));
+                            sellCard.add(new qx.ui.basic.Label("<b style='color:#ff9d9d'>" + MMt("Sell") + " (" + res.sells.length + ")</b> <span style='color:#b08888'>" + MMt("demolished") + "</span>").set({ rich: true }));
                             for (var s = 0; s < res.sells.length; s++) { var sl = res.sells[s]; sellCard.add(new qx.ui.basic.Label("&#10006; <b>" + nameOf(sl) + "</b> L" + sl.level + " &middot; " + sl.x + ":" + sl.y).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#ffc9c9" })); }
                             cards.add(sellCard, { flex: 1 });
                         }
                         if (res.builds && res.builds.length) {
                             var buildCard = miniCard("#2c5a5e", "#0f2024");
-                            buildCard.add(new qx.ui.basic.Label("<b style='color:#7fd0ff'>Build (" + res.builds.length + ")</b> <span style='color:#7f9aa0'>new producers</span>").set({ rich: true }));
+                            buildCard.add(new qx.ui.basic.Label("<b style='color:#7fd0ff'>" + MMt("Build") + " (" + res.builds.length + ")</b> <span style='color:#7f9aa0'>" + MMt("new producers") + "</span>").set({ rich: true }));
                             for (var bi2 = 0; bi2 < res.builds.length; bi2++) {
                                 var bl = res.builds[bi2];
                                 buildCard.add(new qx.ui.basic.Label("&#43; <b>" + nameOf(bl) + "</b> &rarr; L" + bl.level + " &middot; " + bl.x + ":" + bl.y).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bfeff7" }));
                                 if (bl.fundedBy) {
-                                    buildCard.add(new qx.ui.basic.Label("<span style='color:#ffb0b0'>&#8592; paid for by selling " + nameOf(bl.fundedBy) + " L" + bl.fundedBy.level + "</span>" + (bl.refund ? " <span style='color:#7f9aa0'>(refund " + MM.num.compact(Math.round(bl.refund.tib), 1) + " Tib + " + MM.num.compact(Math.round(bl.refund.pow), 1) + " Pow)</span>" : "")).set({ rich: true, wrap: true, allowGrowX: true }));
+                                    buildCard.add(new qx.ui.basic.Label("<span style='color:#ffb0b0'>&#8592; " + MMt("paid for by selling") + " " + nameOf(bl.fundedBy) + " L" + bl.fundedBy.level + "</span>" + (bl.refund ? " <span style='color:#7f9aa0'>(" + MMt("refund") + " " + MM.num.compact(Math.round(bl.refund.tib), 1) + " Tib + " + MM.num.compact(Math.round(bl.refund.pow), 1) + " Pow)</span>" : "")).set({ rich: true, wrap: true, allowGrowX: true }));
                                 }
                             }
                             cards.add(buildCard, { flex: 1 });
@@ -3934,16 +3937,16 @@
                         box.add(cards);
                         if ((res.forceSell || res.freeSlot) && res.refundTotal) {
                             var sp = res.spentTotal || { tib: 0, pow: 0 };
-                            var src = res.freeSlot ? "Stored resources" : "Pooled refund";
-                            box.add(new qx.ui.basic.Label(src + ": <b>" + MM.num.compact(Math.round(res.refundTotal.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(res.refundTotal.pow), 1) + "</b> Pow &middot; spent <b>" + MM.num.compact(Math.round(sp.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(sp.pow), 1) + "</b> Pow on builds+upgrades.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#9fd0e0" }));
-                            box.add(new qx.ui.basic.Label("<i>Tip: after applying, run <b>Upgrade Priority</b> (Transfer as needed) to push further using other bases.</i>").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bbbbbb" }));
+                            var src = res.freeSlot ? MMt("Stored resources") : MMt("Pooled refund");
+                            box.add(new qx.ui.basic.Label(src + ": <b>" + MM.num.compact(Math.round(res.refundTotal.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(res.refundTotal.pow), 1) + "</b> Pow &middot; " + MMt("spent") + " <b>" + MM.num.compact(Math.round(sp.tib), 1) + "</b> Tib + <b>" + MM.num.compact(Math.round(sp.pow), 1) + "</b> " + MMt("Pow on builds+upgrades.")).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#9fd0e0" }));
+                            box.add(new qx.ui.basic.Label(MMt("<i>Tip: after applying, run <b>Upgrade Priority</b> (Transfer as needed) to push further using other bases.</i>")).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#bbbbbb" }));
                         }
                         box.add(new qx.ui.core.Spacer(null, 6));
                     }
 
                     // "Sell up to N" stopped before reaching N - tell the user it tried, so 1-of-5 isn't silent.
                     if (res.sellCeiling && res.sellUsed != null && res.sellUsed < res.sellCeiling) {
-                        box.add(new qx.ui.basic.Label("<span style='color:#ffb74d'>Stopped at <b>" + res.sellUsed + "</b> of " + res.sellCeiling + " sell(s)</b></span> &mdash; no further sell raised <b>" + OPT.RES_CFG[res.resKey].label + "</b> enough to be worth demolishing another building (raising “Sell up to” past " + res.sellUsed + " won't change this plan). Enable <i>localStorage.MMBASETOOLS_DEBUG='1'</i> + reload to see the per-round numbers in the console.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e0c890" }));
+                        box.add(new qx.ui.basic.Label("<span style='color:#ffb74d'>" + MMt("Stopped at") + " <b>" + res.sellUsed + "</b> " + MMt("of") + " " + res.sellCeiling + " " + MMt("sell(s)") + "</b></span> &mdash; " + MMt("no further sell raised") + " <b>" + OPT.RES_CFG[res.resKey].label + "</b> " + MMt("enough to be worth demolishing another building (raising “Sell up to” past") + " " + res.sellUsed + " " + MMt("won't change this plan). Enable <i>localStorage.MMBASETOOLS_DEBUG='1'</i> + reload to see the per-round numbers in the console.")).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e0c890" }));
                         box.add(new qx.ui.core.Spacer(null, 6));
                     }
 
@@ -3951,7 +3954,7 @@
                     if (res.startProd && res.bestProd) {
                         var anyChange = false;
                         var rows = [];
-                        var RES_ORDER = [["Tib", "Tiberium"], ["Cry", "Crystal"], ["Pow", "Power"], ["Dol", "Credits"]];
+                        var RES_ORDER = [["Tib", MMt("Tiberium")], ["Cry", MMt("Crystal")], ["Pow", MMt("Power")], ["Dol", MMt("Credits")]];
                         for (var rr = 0; rr < RES_ORDER.length; rr++) {
                             var rk = RES_ORDER[rr][0], lab = RES_ORDER[rr][1];
                             var sBefore = +res.startProd[rk] || 0, sAfter = +res.bestProd[rk] || 0;
@@ -3961,17 +3964,17 @@
                             rows.push({ key: rk, label: lab, before: sBefore, after: sAfter, delta: d, pct: pct, isTarget: rk === res.resKey });
                         }
                         if (anyChange || res.allowReductions) {
-                            box.add(new qx.ui.basic.Label("<b>Net production change (continuous /h)</b>").set({ rich: true, textColor: "#ffffff" }));
+                            box.add(new qx.ui.basic.Label("<b>" + MMt("Net production change (continuous /h)") + "</b>").set({ rich: true, textColor: "#ffffff" }));
                             var tbl = new qx.ui.container.Composite(new qx.ui.layout.Grid(8, 2));
-                            tbl.add(new qx.ui.basic.Label("<b>Resource</b>").set({ rich: true, textColor: "#cfcfcf" }), { row: 0, column: 0 });
-                            tbl.add(new qx.ui.basic.Label("<b>Before</b>").set({ rich: true, textColor: "#cfcfcf", textAlign: "right" }), { row: 0, column: 1 });
-                            tbl.add(new qx.ui.basic.Label("<b>After</b>").set({ rich: true, textColor: "#cfcfcf", textAlign: "right" }), { row: 0, column: 2 });
-                            tbl.add(new qx.ui.basic.Label("<b>Delta</b>").set({ rich: true, textColor: "#cfcfcf", textAlign: "right" }), { row: 0, column: 3 });
+                            tbl.add(new qx.ui.basic.Label("<b>" + MMt("Resource") + "</b>").set({ rich: true, textColor: "#cfcfcf" }), { row: 0, column: 0 });
+                            tbl.add(new qx.ui.basic.Label("<b>" + MMt("Before") + "</b>").set({ rich: true, textColor: "#cfcfcf", textAlign: "right" }), { row: 0, column: 1 });
+                            tbl.add(new qx.ui.basic.Label("<b>" + MMt("After") + "</b>").set({ rich: true, textColor: "#cfcfcf", textAlign: "right" }), { row: 0, column: 2 });
+                            tbl.add(new qx.ui.basic.Label("<b>" + MMt("Delta") + "</b>").set({ rich: true, textColor: "#cfcfcf", textAlign: "right" }), { row: 0, column: 3 });
                             tbl.add(new qx.ui.basic.Label("<b>%</b>").set({ rich: true, textColor: "#cfcfcf", textAlign: "right" }), { row: 0, column: 4 });
                             for (var ri = 0; ri < rows.length; ri++) {
                                 var row = rows[ri];
                                 var clr = row.delta > 0.5 ? "#7ee07e" : (row.delta < -0.5 ? "#ff8a8a" : "#cccccc");
-                                var rowName = row.label + (row.isTarget ? "  <span style='color:#ffe14d'>(target)</span>" : "");
+                                var rowName = row.label + (row.isTarget ? "  <span style='color:#ffe14d'>" + MMt("(target)") + "</span>" : "");
                                 var sign = row.delta > 0 ? "+" : "";
                                 tbl.add(new qx.ui.basic.Label(rowName).set({ rich: true, textColor: row.isTarget ? "#ffe14d" : "#e6e6e6" }), { row: ri + 1, column: 0 });
                                 tbl.add(new qx.ui.basic.Label(MM.num.compact(Math.round(row.before), 1)).set({ textColor: "#e6e6e6", textAlign: "right" }), { row: ri + 1, column: 1 });
@@ -3986,27 +3989,27 @@
 
                     // 4) Moves - collapsed with a count (reference detail; the gain + sell/build above is the headline).
                     if (res.moves.length) {
-                        var mv = collapsible("<b style='color:#ffffff'>Moves (" + res.moves.length + ")</b> <span style='color:#7f7f7f'>&mdash; click to expand</span>", false);
+                        var mv = collapsible("<b style='color:#ffffff'>" + MMt("Moves") + " (" + res.moves.length + ")</b> <span style='color:#7f7f7f'>" + MMt("&mdash; click to expand") + "</span>", false);
                         for (var i = 0; i < res.moves.length; i++) {
                             var m = res.moves[i], dist = Math.max(Math.abs(m.toX - m.fromX), Math.abs(m.toY - m.fromY));
                             var destTerr = res.snapshot && res.snapshot.terrain[m.toY] ? res.snapshot.terrain[m.toY][m.toX] : null;
                             var dm = harvAtTerr(m, destTerr), switched = (dm !== m);   // harvester relocated to the other field type
-                            mv.body.add(new qx.ui.basic.Label("<b>" + (i + 1) + "</b>. " + nameOf(dm) + " L" + m.level + "  <b>" + dirArrow(m.toX - m.fromX, m.toY - m.fromY) + "</b> " + dist + (dist === 1 ? " tile" : " tiles") + (switched ? " <span style='color:#ffb74d'>(now harvests " + (dm.harvRes === "Cry" ? "Crystal" : "Tiberium") + ")</span>" : "")).set({ rich: true, textColor: "#e6e6e6", toolTipText: m.fromX + ":" + m.fromY + " -> " + m.toX + ":" + m.toY }));
+                            mv.body.add(new qx.ui.basic.Label("<b>" + (i + 1) + "</b>. " + nameOf(dm) + " L" + m.level + "  <b>" + dirArrow(m.toX - m.fromX, m.toY - m.fromY) + "</b> " + dist + (dist === 1 ? " " + MMt("tile") : " " + MMt("tiles")) + (switched ? " <span style='color:#ffb74d'>(" + MMt("now harvests") + " " + (dm.harvRes === "Cry" ? MMt("Crystal") : MMt("Tiberium")) + ")</span>" : "")).set({ rich: true, textColor: "#e6e6e6", toolTipText: m.fromX + ":" + m.fromY + " -> " + m.toX + ":" + m.toY }));
                         }
                         box.add(mv.wrap);
                     } else {
-                        box.add(new qx.ui.basic.Label("<b style='color:#ffffff'>Moves (0)</b>").set({ rich: true }));
+                        box.add(new qx.ui.basic.Label("<b style='color:#ffffff'>" + MMt("Moves (0)") + "</b>").set({ rich: true }));
                         var noteMsg = res.allowReductions
-                            ? "No moves improve " + OPT.RES_CFG[res.resKey].label + " on this base, even when trading other resources."
-                            : "No moves improve " + OPT.RES_CFG[res.resKey].label + " on this base. Try <b>Allow reductions</b> to consider moves that trade other resources for a bigger target gain.";
+                            ? MMt("No moves improve") + " " + OPT.RES_CFG[res.resKey].label + " " + MMt("on this base, even when trading other resources.")
+                            : MMt("No moves improve") + " " + OPT.RES_CFG[res.resKey].label + " " + MMt("on this base. Try <b>Allow reductions</b> to consider moves that trade other resources for a bigger target gain.");
                         box.add(new qx.ui.basic.Label(noteMsg).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#7ee07e" }));
                     }
 
                     box.add(new qx.ui.core.Spacer(null, 6));
                     var changed = res.moves.length || (res.sells && res.sells.length) || (res.builds && res.builds.length);
                     box.add(new qx.ui.basic.Label(changed
-                        ? "Numbers match the grid. Click <b>Apply to base</b> above to make these changes in-game (you'll get a confirmation first), or do them by hand in move mode."
-                        : "Numbers match the grid.").set({ rich: true, wrap: true, allowGrowX: true, textColor: "#aaaaaa" }));
+                        ? MMt("Numbers match the grid. Click <b>Apply to base</b> above to make these changes in-game (you'll get a confirmation first), or do them by hand in move mode.")
+                        : MMt("Numbers match the grid.")).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#aaaaaa" }));
                 }
 
                 // ---- Phase B: confirm-with-preview + execute ----------------------------
@@ -4015,11 +4018,11 @@
                     wlog("onApply: entry", { applying: applying, hasRes: !!lastRes, resOk: lastRes && lastRes.ok });
                     if (applying || !lastRes || !lastRes.ok) return;
                     var city = selectedCity();
-                    if (!city) { summary.setValue("<span style='color:#ff8a8a'>Could not find that base. Open it in-game and use 'Current base'.</span>"); return; }
+                    if (!city) { summary.setValue("<span style='color:#ff8a8a'>" + MMt("Could not find that base. Open it in-game and use 'Current base'.") + "</span>"); return; }
                     var plan = OPT.buildApplyPlan(city, lastRes);
                     wlog("onApply: plan", { ok: plan.ok, reason: plan.reason, steps: plan.steps && plan.steps.length });
-                    if (!plan.ok) { summary.setValue("<span style='color:#ff8a8a'>Can't apply: " + (plan.reason || "unknown") + "</span>"); setApplyEnabled(false); return; }
-                    if (!plan.steps.length) { summary.setValue("Nothing to apply - the base already matches the proposal."); setApplyEnabled(false); return; }
+                    if (!plan.ok) { summary.setValue("<span style='color:#ff8a8a'>" + MMt("Can't apply:") + " " + (plan.reason || MMt("unknown")) + "</span>"); setApplyEnabled(false); return; }
+                    if (!plan.steps.length) { summary.setValue(MMt("Nothing to apply - the base already matches the proposal.")); setApplyEnabled(false); return; }
                     showApplyConfirm(city, plan);
                 }
 
@@ -4028,38 +4031,38 @@
                 // package-progress each moved building resets).
                 function showApplyConfirm(city, plan) {
                     wlog("showApplyConfirm: building dialog", { steps: plan.steps.length, moves: plan.nMoves, sells: plan.nSells });
-                    var win = new qx.ui.window.Window("Apply layout changes?").set({
+                    var win = new qx.ui.window.Window(MMt("Apply layout changes?")).set({
                         modal: true, showMinimize: false, showMaximize: false, allowMaximize: false,
                         resizable: false, contentPadding: 12, width: 420 });
                     win.setLayout(new qx.ui.layout.VBox(8));
 
                     var html = "";
-                    html += "<b>" + plan.nMoves + "</b> building" + (plan.nMoves === 1 ? "" : "s") + " will be <b>moved</b>";
-                    if (plan.nStaged) html += " (" + plan.nStaged + " via a temporary staging hop to untangle a swap)";
+                    html += "<b>" + plan.nMoves + "</b> " + MMt("building") + (plan.nMoves === 1 ? "" : MMt("s")) + " " + MMt("will be <b>moved</b>");
+                    if (plan.nStaged) html += " (" + plan.nStaged + " " + MMt("via a temporary staging hop to untangle a swap") + ")";
                     html += ".";
                     win.add(new qx.ui.basic.Label(html).set({ rich: true, wrap: true, allowGrowX: true, textColor: "#e6e6e6" }));
 
                     if (plan.nSells) {
-                        win.add(new qx.ui.basic.Label("<b style='color:#ff8a8a'>&#9888; " + plan.nSells + " building" + (plan.nSells === 1 ? "" : "s") + " will be PERMANENTLY DEMOLISHED:</b>").set({ rich: true, wrap: true, allowGrowX: true }));
+                        win.add(new qx.ui.basic.Label("<b style='color:#ff8a8a'>&#9888; " + plan.nSells + " " + MMt("building") + (plan.nSells === 1 ? "" : MMt("s")) + " " + MMt("will be PERMANENTLY DEMOLISHED:") + "</b>").set({ rich: true, wrap: true, allowGrowX: true }));
                         var sells = plan.steps.filter(function (s) { return s.type === "demolish"; });
-                        for (var s = 0; s < sells.length; s++) { var sl = sells[s]; win.add(new qx.ui.basic.Label("&nbsp;&nbsp;&#10006; " + nameOf(sl) + " L" + sl.level + " (at " + sl.fromX + ":" + sl.fromY + ")").set({ rich: true, textColor: "#ffc9c9" })); }
+                        for (var s = 0; s < sells.length; s++) { var sl = sells[s]; win.add(new qx.ui.basic.Label("&nbsp;&nbsp;&#10006; " + nameOf(sl) + " L" + sl.level + " (" + MMt("at") + " " + sl.fromX + ":" + sl.fromY + ")").set({ rich: true, textColor: "#ffc9c9" })); }
                     }
 
                     if (plan.nBuilds) {
-                        win.add(new qx.ui.basic.Label("<b style='color:#4dd0e1'>&#43; " + plan.nBuilds + " new building" + (plan.nBuilds === 1 ? "" : "s") + " will be BUILT and UPGRADED</b> (paid from the demolition refund):").set({ rich: true, wrap: true, allowGrowX: true }));
+                        win.add(new qx.ui.basic.Label("<b style='color:#4dd0e1'>&#43; " + plan.nBuilds + " " + MMt("new building") + (plan.nBuilds === 1 ? "" : MMt("s")) + " " + MMt("will be BUILT and UPGRADED</b> (paid from the demolition refund):")).set({ rich: true, wrap: true, allowGrowX: true }));
                         var blds = plan.steps.filter(function (s) { return s.type === "build"; });
-                        for (var bb = 0; bb < blds.length; bb++) { var bl = blds[bb]; win.add(new qx.ui.basic.Label("&nbsp;&nbsp;&#43; " + nameOf(bl) + " &rarr; L" + bl.level + " (at " + bl.toX + ":" + bl.toY + ")").set({ rich: true, textColor: "#bfeff7" })); }
-                        win.add(new qx.ui.basic.Label("<span style='color:#ffb74d'>Note: build &amp; upgrade are queued as game commands; the new building appears immediately and upgrades complete over time. Make sure the demolition refund covers the cost.</span>").set({ rich: true, wrap: true, allowGrowX: true }));
+                        for (var bb = 0; bb < blds.length; bb++) { var bl = blds[bb]; win.add(new qx.ui.basic.Label("&nbsp;&nbsp;&#43; " + nameOf(bl) + " &rarr; L" + bl.level + " (" + MMt("at") + " " + bl.toX + ":" + bl.toY + ")").set({ rich: true, textColor: "#bfeff7" })); }
+                        win.add(new qx.ui.basic.Label("<span style='color:#ffb74d'>" + MMt("Note: build &amp; upgrade are queued as game commands; the new building appears immediately and upgrades complete over time. Make sure the demolition refund covers the cost.") + "</span>").set({ rich: true, wrap: true, allowGrowX: true }));
                     }
 
                     if (plan.nPkgReset) {
-                        win.add(new qx.ui.basic.Label("<span style='color:#ffb74d'>&#9888; " + plan.nPkgReset + " harvester" + (plan.nPkgReset === 1 ? "" : "s") + " will switch field type (tiberium &harr; crystal) - this <b>resets that harvester's in-progress package</b>. Continuous production still improves; you just lose the partial package.</span>").set({ rich: true, wrap: true, allowGrowX: true }));
+                        win.add(new qx.ui.basic.Label("<span style='color:#ffb74d'>&#9888; " + plan.nPkgReset + " " + MMt("harvester") + (plan.nPkgReset === 1 ? "" : MMt("s")) + " " + MMt("will switch field type (tiberium &harr; crystal) - this <b>resets that harvester's in-progress package</b>. Continuous production still improves; you just lose the partial package.") + "</span>").set({ rich: true, wrap: true, allowGrowX: true }));
                     }
 
                     win.add(new qx.ui.core.Spacer(null, 4));
                     var btnRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(8, "right"));
-                    var cancel = new qx.ui.form.Button("Cancel");
-                    var go = new qx.ui.form.Button(plan.nBuilds ? ("Demolish + build + apply") : plan.nSells ? ("Demolish " + plan.nSells + " + apply") : ("Apply " + plan.nMoves + " move" + (plan.nMoves === 1 ? "" : "s")));
+                    var cancel = new qx.ui.form.Button(MMt("Cancel"));
+                    var go = new qx.ui.form.Button(plan.nBuilds ? MMt("Demolish + build + apply") : plan.nSells ? (MMt("Demolish") + " " + plan.nSells + " " + MMt("+ apply")) : (MMt("Apply") + " " + plan.nMoves + " " + (plan.nMoves === 1 ? MMt("move") : MMt("moves"))));
                     try { go.setTextColor(plan.nSells ? "#ff8a8a" : "#7ee07e"); } catch (e) {}
                     cancel.addListener("execute", function () { try { win.close(); win.destroy(); } catch (e) {} });
                     go.addListener("execute", function () { try { win.close(); win.destroy(); } catch (e) {} runApply(city, plan); });
@@ -4076,30 +4079,30 @@
                     if (applying) return;
                     applying = true; setApplyEnabled(false); busy = true;
                     var total = plan.steps.length, doneN = 0;
-                    summary.setValue("Applying " + plan.nMoves + " move(s)" + (plan.nSells ? " + " + plan.nSells + " demolition(s)" : "") + "&hellip;");
+                    summary.setValue(MMt("Applying") + " " + plan.nMoves + " " + MMt("move(s)") + (plan.nSells ? " + " + plan.nSells + " " + MMt("demolition(s)") : "") + "&hellip;");
                     OPT.executeApplyPlan(city, plan, {
                         onStep: function (idx, step, ok2) {
                             doneN++;
-                            var verb = step.type === "demolish" ? "Demolished" : step.type === "build" ? "Built" : step.type === "upgrade" ? "Upgraded" : (step.staged ? "Staged" : "Moved");
-                            summary.setValue("Applying&hellip; " + doneN + "/" + total + " - " + (ok2 ? "" : "<span style='color:#ff8a8a'>FAILED </span>") + verb + " " + nameOf(step) + (step.toX != null ? " &rarr; " + step.toX + ":" + step.toY : ""));
+                            var verb = step.type === "demolish" ? MMt("Demolished") : step.type === "build" ? MMt("Built") : step.type === "upgrade" ? MMt("Upgraded") : (step.staged ? MMt("Staged") : MMt("Moved"));
+                            summary.setValue(MMt("Applying&hellip;") + " " + doneN + "/" + total + " - " + (ok2 ? "" : "<span style='color:#ff8a8a'>" + MMt("FAILED") + " </span>") + verb + " " + nameOf(step) + (step.toX != null ? " &rarr; " + step.toX + ":" + step.toY : ""));
                         },
                         onDone: function (sum) {
                             applying = false; busy = false; lastRes = null;
                             var col = sum.failed ? "#ffb74d" : "#7ee07e";
-                            var head = "<b style='color:" + col + "'>Applied " + sum.applied + "/" + total + " change(s)" + (sum.failed ? " - " + sum.failed + " failed" : " - done") + ".</b>";
+                            var head = "<b style='color:" + col + "'>" + MMt("Applied") + " " + sum.applied + "/" + total + " " + MMt("change(s)") + (sum.failed ? " - " + sum.failed + " " + MMt("failed") : " - " + MMt("done")) + ".</b>";
                             var detail = "";
                             if (sum.failed) {
                                 // Show WHY each step failed right in the panel (not just the console), so a partial
                                 // apply is diagnosable at a glance.
                                 for (var f = 0; f < sum.failedSteps.length; f++) {
                                     var fs = sum.failedSteps[f];
-                                    var v = fs.step.type === "demolish" ? "Demolish" : fs.step.type === "build" ? "Build" : fs.step.type === "upgrade" ? "Upgrade" : "Move";
+                                    var v = fs.step.type === "demolish" ? MMt("Demolish") : fs.step.type === "build" ? MMt("Build") : fs.step.type === "upgrade" ? MMt("Upgrade") : MMt("Move");
                                     detail += "<br><span style='color:#ff8a8a'>&#10006; " + v + " " + nameOf(fs.step) + (fs.step.toX != null ? " &rarr; " + fs.step.toX + ":" + fs.step.toY : "") + "</span> &mdash; <span style='color:#ffd0d0'>" + fs.msg + "</span>";
                                     werr("OPT apply step failed:", fs.step.type, nameOf(fs.step), "->", fs.step.toX + ":" + fs.step.toY, "-", fs.msg);
                                 }
                             }
-                            summary.setValue(head + detail + " <span style='color:#aaaaaa'>Re-reading base&hellip;</span>");
-                            window.setTimeout(function () { renderCurrent(); mapTitle.setValue("<b>Current layout</b> (after apply) - " + (city.get_Name ? city.get_Name() : "")); }, 600);
+                            summary.setValue(head + detail + " <span style='color:#aaaaaa'>" + MMt("Re-reading base&hellip;") + "</span>");
+                            window.setTimeout(function () { renderCurrent(); mapTitle.setValue("<b>" + MMt("Current layout") + "</b> " + MMt("(after apply) -") + " " + (city.get_Name ? city.get_Name() : "")); }, 600);
                         }
                     });
                 }
@@ -4110,11 +4113,11 @@
                     try { rebuildForceSell(); } catch (e) {}
                     try {
                         var city = selectedCity();
-                        if (!city) { mapTitle.setValue("<b>Base layout</b>"); return; }
+                        if (!city) { mapTitle.setValue("<b>" + MMt("Base layout") + "</b>"); return; }
                         var snap = OPT.snapshot(city, "Tib");
                         if (!snap || !snap.ok) { return; }
                         var pos = {}; for (var i = 0; i < snap.order.length; i++) { var b = snap.buildings[snap.order[i]]; pos[b.id] = { x: b.x, y: b.y }; }
-                        mapTitle.setValue("<b>Current layout</b> - " + (city.get_Name ? city.get_Name() : ""));
+                        mapTitle.setValue("<b>" + MMt("Current layout") + "</b> - " + (city.get_Name ? city.get_Name() : ""));
                         renderLayout(snap, pos, [], []);
                     } catch (e) { werr("OPT renderCurrent failed:", e); }
                 }
@@ -4123,15 +4126,15 @@
                 function runOptimize(resKey) {
                     if (busy) return;
                     var city = selectedCity();
-                    if (!city) { summary.setValue("<span style='color:#ff8a8a'>Could not find that base. Open it in-game and use 'Current base'.</span>"); return; }
+                    if (!city) { summary.setValue("<span style='color:#ff8a8a'>" + MMt("Could not find that base. Open it in-game and use 'Current base'.") + "</span>"); return; }
                     busy = true;
                     var sellN = spSell.getValue();
                     var allowReductions = !!cbAllowRed.getValue();
                     var forceSellOn = !!cbForceSell.getValue();
                     var forceSell = forceSellOn ? (MM.settings.get("BaseTools.OptForceSell", []) || []) : [];
-                    summary.setValue("Optimizing " + OPT.RES_CFG[resKey].label
-                        + (forceSell.length ? " (force-selling " + forceSell.length + " + building)" : (sellN ? " (up to " + sellN + " sell" + (sellN > 1 ? "s" : "") + ", auto-build)" : ""))
-                        + (allowReductions && !forceSell.length ? " (allowing reductions)" : "")
+                    summary.setValue(MMt("Optimizing") + " " + OPT.RES_CFG[resKey].label
+                        + (forceSell.length ? " (" + MMt("force-selling") + " " + forceSell.length + " " + MMt("+ building") + ")" : (sellN ? " (" + MMt("up to") + " " + sellN + " " + (sellN > 1 ? MMt("sells") : MMt("sell")) + ", " + MMt("auto-build") + ")" : ""))
+                        + (allowReductions && !forceSell.length ? " (" + MMt("allowing reductions") + ")" : "")
                         + "...");
                     MM.settings.set("BaseTools.OptResource", resKey);
                     window.setTimeout(async function () {
@@ -4159,20 +4162,20 @@
                                 res = (moved && moved.ok && moved.projected >= ((built && built.ok) ? built.projected * 0.995 : 0)) ? moved : built;
                             }
                         }
-                        catch (e) { werr("OPT optimize threw:", e); res = { ok: false, reason: "internal error (see console)" }; }
+                        catch (e) { werr("OPT optimize threw:", e); res = { ok: false, reason: MMt("internal error (see console)") }; }
                         try {
                             if (res && res.ok) {
                                 var cn = MM.num.compact(Math.round(res.current), 1), pn = MM.num.compact(Math.round(res.projected), 1);
                                 var sign = res.gainPct >= 0 ? "+" : "";
                                 var changed = res.moves.length || (res.sells && res.sells.length) || (res.builds && res.builds.length);
                                 var col = changed ? "#ffe14d" : "#7ee07e";
-                                var modeNote = res.allowReductions ? " <span style='color:#ffb74d'>[allow reductions: ON]</span>" : "";
-                                summary.setValue("<b style='color:" + col + "'>" + OPT.RES_CFG[resKey].label + "</b> (continuous /h): <b>" + cn + "</b> &rarr; <b>" + pn + "</b> (<b>" + sign + res.gainPct.toFixed(1) + "%</b>) via <b>" + res.moves.length + "</b> move(s)" + (res.sells && res.sells.length ? " + <b>" + res.sells.length + "</b> sell(s)" : "") + (res.builds && res.builds.length ? " + <b>" + res.builds.length + "</b> build(s)" : "") + ". Figures are continuous production (packages aren't layout-dependent)." + modeNote + (res.snapshot && res.snapshot.calibWarn ? " <span style='color:#ffb74d'>(" + res.snapshot.calibWarn + " link(s) uncalibrated)</span>" : ""));
-                                mapTitle.setValue("<b>Proposed layout</b>");
+                                var modeNote = res.allowReductions ? " <span style='color:#ffb74d'>" + MMt("[allow reductions: ON]") + "</span>" : "";
+                                summary.setValue("<b style='color:" + col + "'>" + OPT.RES_CFG[resKey].label + "</b> " + MMt("(continuous /h):") + " <b>" + cn + "</b> &rarr; <b>" + pn + "</b> (<b>" + sign + res.gainPct.toFixed(1) + "%</b>) " + MMt("via") + " <b>" + res.moves.length + "</b> " + MMt("move(s)") + (res.sells && res.sells.length ? " + <b>" + res.sells.length + "</b> " + MMt("sell(s)") : "") + (res.builds && res.builds.length ? " + <b>" + res.builds.length + "</b> " + MMt("build(s)") : "") + ". " + MMt("Figures are continuous production (packages aren't layout-dependent).") + modeNote + (res.snapshot && res.snapshot.calibWarn ? " <span style='color:#ffb74d'>(" + res.snapshot.calibWarn + " " + MMt("link(s) uncalibrated") + ")</span>" : ""));
+                                mapTitle.setValue("<b>" + MMt("Proposed layout") + "</b>");
                                 renderLayout(res.snapshot, res.bestPos, res.moves, res.sells, res.builds);
                                 lastRes = res; setApplyEnabled(!!changed);   // enable Apply only when there's something to apply
                             } else {
-                                summary.setValue("<span style='color:#ff8a8a'>Could not optimize: " + ((res && res.reason) || "unknown") + "</span>");
+                                summary.setValue("<span style='color:#ff8a8a'>" + MMt("Could not optimize:") + " " + ((res && res.reason) || MMt("unknown")) + "</span>");
                                 lastRes = null; setApplyEnabled(false);
                             }
                             renderResultList(res);
@@ -4222,8 +4225,8 @@
             // Main toggle: always present, opens/closes the window.
             MM.buttons.register({
                 id: "base-tools",
-                label: "Base Tools",
-                tooltip: "Toggle the Base Tools window",
+                label: MMt("Base Tools"),
+                tooltip: MMt("Toggle the Base Tools window"),
                 onExecute: function () { if (win.isVisible()) { win.close(); } else { win.open(); refresh(); } }
             });
 
@@ -4257,17 +4260,17 @@
             }
             var btnCollect = makeNotificationBtn(
                 gameIconPath("icon_collect_packages.png"),
-                "Collect packages on bases that have them ready",
+                MMt("Collect packages on bases that have them ready"),
                 function () { collectAll(); window.setTimeout(refresh, 500); }
             );
             var btnRepBld = makeNotificationBtn(
                 gameIconPath("icn_build_slots.png"),
-                "Repair buildings on bases where repair is available",
+                MMt("Repair buildings on bases where repair is available"),
                 function () { repairAll(ClientLib.Vis.Mode.City); window.setTimeout(refresh, 500); }
             );
             var btnRepUnits = makeNotificationBtn(
                 gameIconPath("icon_army_points.png"),
-                "Repair units on bases where repair is available",
+                MMt("Repair units on bases where repair is available"),
                 function () { repairAll(ClientLib.Vis.Mode.ArmySetup); window.setTimeout(refresh, 500); }
             );
             // Fixed slots in the bottom-right corner so the user's eye learns where each button lives.
@@ -4290,9 +4293,9 @@
             function refresh() {
                 try {
                     var c = counts();
-                    var msg = "Bases with collectable packages: <b>" + c.collect + "</b>" +
-                              "  &middot;  buildings to repair: <b>" + c.repBld + "</b>" +
-                              "  &middot;  units to repair: <b>" + c.repUnits + "</b>";
+                    var msg = MMt("Bases with collectable packages:") + " <b>" + c.collect + "</b>" +
+                              "  &middot;  " + MMt("buildings to repair:") + " <b>" + c.repBld + "</b>" +
+                              "  &middot;  " + MMt("units to repair:") + " <b>" + c.repUnits + "</b>";
                     statusLbl.setValue(msg);
                     btnCollectInWin.setEnabled(c.collect > 0);
                     btnRepBldInWin.setEnabled(c.repBld > 0);

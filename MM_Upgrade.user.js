@@ -5,7 +5,7 @@
 // @contributor     NetquiK (https://github.com/netquik)
 // @translator      ES: Nefrontheone
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.5
+// @version         1.1.6
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
@@ -53,6 +53,9 @@
 (function () {
     var Upgrade_main = function () {
         // --- [MM Upgrade] debug framework (pack-wide convention; wlog gated, wwarn/werr always on) ---
+        // i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+        // loads after this script (extension injection order isn't guaranteed). Identity in English.
+        function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
         var LOG = (window.MMCommon && window.MMCommon.makeLogger)
             ? window.MMCommon.makeLogger("Upgrade")
             : { log: function () {}, warn: function () { try { console.warn.apply(console, arguments); } catch (e) {} }, err: function () { try { console.error.apply(console, arguments); } catch (e) {} } };
@@ -130,7 +133,7 @@
             var out = { plan: [], totalCost: 0, moved: 0, need: Math.max(0, Math.ceil(amount || 0)), full: false, reason: "" };
             try {
                 var ETradeNone = ClientLib.Data.ETradeError.None;
-                if (targetCity.CanTrade && targetCity.CanTrade() !== ETradeNone) { out.reason = "target base cannot trade right now"; return out; }
+                if (targetCity.CanTrade && targetCity.CanTrade() !== ETradeNone) { out.reason = MMt("target base cannot trade right now"); return out; }
                 if (out.need <= 0) { out.full = true; return out; }
                 var tx = targetCity.get_PosX(), ty = targetCity.get_PosY();
                 var sources = [];
@@ -176,7 +179,7 @@
                 }
                 out.full = (remaining <= 0);
                 return out;
-            } catch (e) { werr("planBestEffortTransfer:", e); out.reason = "error - see console"; return out; }
+            } catch (e) { werr("planBestEffortTransfer:", e); out.reason = MMt("error - see console"); return out; }
         }
 
         // Execute one resource's transfer plan (sequential SelfTrade commands), then poll the target's
@@ -244,8 +247,8 @@
                 // fees never exceed what we can pay. (In practice only one of Tib/Cry is short per
                 // mode: army/defense = Crystal, buildings = Tiberium.)
                 var specs = [];
-                if (short.tib > 0) specs.push({ ert: ERT.Tiberium, need: short.tib, label: "Tiberium" });
-                if (short.cry > 0) specs.push({ ert: ERT.Crystal,  need: short.cry, label: "Crystal" });
+                if (short.tib > 0) specs.push({ ert: ERT.Tiberium, need: short.tib, label: MMt("Tiberium") });
+                if (short.cry > 0) specs.push({ ert: ERT.Crystal,  need: short.cry, label: MMt("Crystal") });
                 var budget = credits, plans = [], anyPartial = false, hardReason = "";
                 for (var s = 0; s < specs.length; s++) {
                     var sp = specs[s];
@@ -262,13 +265,13 @@
                     // Nothing could be transferred (no spare resources across bases, can't trade, or no
                     // credits for the fee). Fire anyway so the game upgrades whatever local resources
                     // already cover - honest about why nothing moved.
-                    setStatus("<span style='color:#ff9d3c;font-weight:bold'>" + (hardReason || "No transferable resources within your credit budget") + " - upgrading what fits.</span>");
+                    setStatus("<span style='color:#ff9d3c;font-weight:bold'>" + (hardReason || MMt("No transferable resources within your credit budget")) + MMt(" - upgrading what fits.") + "</span>");
                     fireUpgrade();
                     return;
                 }
 
                 var totalFee = credits - budget;
-                setStatus("Transferring max available (" + plans.length + " resource type" + (plans.length > 1 ? "s" : "") + ", fee ~" + Math.round(totalFee) + " credits)..." + note);
+                setStatus(MMt("Transferring max available (") + plans.length + MMt(" resource type") + (plans.length > 1 ? "s" : "") + MMt(", fee ~") + Math.round(totalFee) + MMt(" credits)...") + note);
                 var pi = 0;
                 function nextPlan() {
                     if (pi >= plans.length) {
@@ -276,15 +279,15 @@
                         // UpgradeAll*ToLevel pass spends the topped-up pool greedily (we already pulled
                         // ALL available resources, so a second pass couldn't add anything).
                         setStatus(anyPartial
-                            ? "<span style='color:#6ee07a;font-weight:bold'>Transferred all available - upgrading as many as fit.</span>" + note
-                            : "<span style='color:#6ee07a;font-weight:bold'>Transfers complete - upgrading.</span>" + note);
+                            ? "<span style='color:#6ee07a;font-weight:bold'>" + MMt("Transferred all available - upgrading as many as fit.") + "</span>" + note
+                            : "<span style='color:#6ee07a;font-weight:bold'>" + MMt("Transfers complete - upgrading.") + "</span>" + note);
                         window.setTimeout(function () { fireUpgrade(); window.setTimeout(function () { setStatus(""); }, 3000); }, 400);
                         return;
                     }
                     var pp = plans[pi++];
                     runTransferPlan(city, pp.ert, pp.plan, function (ok) {
                         // Even if a plan doesn't fully land in time, keep going and upgrade what arrived.
-                        if (!ok) setStatus("<span style='color:#ff9d3c;font-weight:bold'>" + pp.label + " didn't fully arrive - upgrading what fits.</span>");
+                        if (!ok) setStatus("<span style='color:#ff9d3c;font-weight:bold'>" + pp.label + MMt(" didn't fully arrive - upgrading what fits.") + "</span>");
                         nextPlan();
                     });
                 }
@@ -369,9 +372,9 @@
                         onViewModeChanged: function (oldViewMode, newViewMode) {
                             if (oldViewMode === newViewMode) return;
                             switch (newViewMode) {
-                                case ClientLib.Vis.Mode.City:         this.title.setValue(this.tr("All buildings"));     this.reset(); break;
-                                case ClientLib.Vis.Mode.DefenseSetup: this.title.setValue(this.tr("All defense units")); this.reset(); break;
-                                case ClientLib.Vis.Mode.ArmySetup:    this.title.setValue(this.tr("All army units"));    this.reset(); break;
+                                case ClientLib.Vis.Mode.City:         this.title.setValue(MMt(this.tr("All buildings")));     this.reset(); break;
+                                case ClientLib.Vis.Mode.DefenseSetup: this.title.setValue(MMt(this.tr("All defense units"))); this.reset(); break;
+                                case ClientLib.Vis.Mode.ArmySetup:    this.title.setValue(MMt(this.tr("All army units")));    this.reset(); break;
                             }
                         },
                         onCurrentCityChange: function (oldCurrentCity, newCurrentCity) {
@@ -494,7 +497,7 @@
                                             cry: Math.floor((totalCosts.cry || 0) * f),
                                             pow: totalCosts.pow
                                         };
-                                        note = " (stored power covers ~" + Math.round(f * 100) + "% of the batch - bringing only that much; run again as power regrows)";
+                                        note = MMt(" (stored power covers ~") + Math.round(f * 100) + MMt("% of the batch - bringing only that much; run again as power regrows)");
                                     }
                                 }
                                 function fire() {
@@ -585,9 +588,9 @@
                         onViewModeChanged: function (oldViewMode, newViewMode) {
                             if (oldViewMode === newViewMode) return;
                             switch (newViewMode) {
-                                case ClientLib.Vis.Mode.City:         this.title.setValue(this.tr("Selected building"));     this.reset(); break;
-                                case ClientLib.Vis.Mode.DefenseSetup: this.title.setValue(this.tr("Selected defense unit")); this.reset(); break;
-                                case ClientLib.Vis.Mode.ArmySetup:    this.title.setValue(this.tr("Selected army unit"));    this.reset(); break;
+                                case ClientLib.Vis.Mode.City:         this.title.setValue(MMt(this.tr("Selected building")));     this.reset(); break;
+                                case ClientLib.Vis.Mode.DefenseSetup: this.title.setValue(MMt(this.tr("Selected defense unit"))); this.reset(); break;
+                                case ClientLib.Vis.Mode.ArmySetup:    this.title.setValue(MMt(this.tr("Selected army unit")));    this.reset(); break;
                             }
                         },
                         onSelectionChange: function (oldSelection, newSelection) {
@@ -853,8 +856,8 @@
         // non-finite grow times so the user can tell apart "have it already" vs "can't grow this".
         function paintRes(atom, amount, time) {
             try {
-                var tail = (isFinite(time) && time > 0) ? " @ " + phe.cnc.Util.getTimespanString(time)
-                          : (isFinite(time) ? "" : " NO GROW!");
+                var tail = (isFinite(time) && time > 0) ? MMt(" @ ") + phe.cnc.Util.getTimespanString(time)
+                          : (isFinite(time) ? "" : MMt(" NO GROW!"));
                 atom.setLabel(phe.cnc.gui.util.Numbers.formatNumbersCompact(amount) + tail);
                 atom.setToolTipText(phe.cnc.gui.util.Numbers.formatNumbers(amount));
                 if (amount === 0) atom.exclude(); else atom.show();
@@ -922,7 +925,7 @@
             pinBtn.set({
                 decorator: "button-forum-light", icon: pinIcon(menuOn()), show: "icon", iconPosition: "top",
                 cursor: "pointer", width: 22, height: 19, maxWidth: 22, maxHeight: 19, padding: 0, alignY: "middle",
-                toolTipText: "Pin into the game menu / unpin to a movable panel"
+                toolTipText: MMt("Pin into the game menu / unpin to a movable panel")
             });
             try { var _pic = pinBtn.getChildControl("icon"); _pic.setWidth(15); _pic.setHeight(15); _pic.setScale(true); } catch (e) {}
             pinBtn.addListener("execute", function () { try { setMenuMode(!menuOn()); } catch (e) { werr("pin execute:", e); } });
@@ -931,7 +934,7 @@
             function updatePin() { try { pinBtn.setIcon(pinIcon(menuOn())); } catch (e) {} }
 
             // ---- header (title + pin) - lives WITH the content so it shows in float + dock states ----
-            var titleLbl = new qx.ui.basic.Label("Upgrade").set({ font: "bold", rich: true, alignY: "middle", textAlign: "center", allowGrowX: true });
+            var titleLbl = new qx.ui.basic.Label(MMt("Upgrade")).set({ font: "bold", rich: true, alignY: "middle", textAlign: "center", allowGrowX: true });
             var headerRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(0).set({ alignY: "middle" }));
             headerRow.add(new qx.ui.core.Spacer(22, 1));   // balances the pin width so title stays centred
             headerRow.add(titleLbl, { flex: 1 });
@@ -953,10 +956,10 @@
             // surface "transferring...", "transfers complete", "can't afford fee" etc).
             var transferRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(6).set({ alignY: "middle" }));
             transferRow.set({ padding: [2, 4, 0, 4] });
-            var cbTransferUpgrade = new qx.ui.form.CheckBox("Transfer as needed").set({
+            var cbTransferUpgrade = new qx.ui.form.CheckBox(MMt("Transfer as needed")).set({
                 value: transferOn(),
                 alignY: "middle",
-                toolTipText: "When the current base lacks Tiberium or Crystal for an upgrade, transfer the shortfall in from your other bases (cheapest first) before firing the upgrade. Power isn't transferable - those shortages still fall through. Off by default (transfers cost credits)."
+                toolTipText: MMt("When the current base lacks Tiberium or Crystal for an upgrade, transfer the shortfall in from your other bases (cheapest first) before firing the upgrade. Power isn't transferable - those shortages still fall through. Off by default (transfers cost credits).")
             });
             cbTransferUpgrade.addListener("changeValue", function (e) {
                 try {
@@ -978,7 +981,7 @@
 
             // ---- floating panel (frameless, drag-by-body, position persists across reloads) ----
             var win = MMC.ui.Window({
-                caption: "Upgrade",
+                caption: MMt("Upgrade"),
                 key: "Upgrade.Window",
                 pos: [120, 120],
                 restoreOpen: false,           // entry point is the in-game Upgrade button, not auto-open
@@ -1162,9 +1165,9 @@
                 try {
                     var label;
                     switch (newMode) {
-                        case ClientLib.Vis.Mode.City:         label = "Upgrade: Base"; break;
-                        case ClientLib.Vis.Mode.DefenseSetup: label = "Upgrade: Defense"; break;
-                        case ClientLib.Vis.Mode.ArmySetup:    label = "Upgrade: Offense"; break;
+                        case ClientLib.Vis.Mode.City:         label = MMt("Upgrade: Base"); break;
+                        case ClientLib.Vis.Mode.DefenseSetup: label = MMt("Upgrade: Defense"); break;
+                        case ClientLib.Vis.Mode.ArmySetup:    label = MMt("Upgrade: Offense"); break;
                         default:
                             // Left a base view (back to region etc.). Hide whichever container is up,
                             // and skip the section onAppear churn until we're back in a base.

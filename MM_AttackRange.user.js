@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  While you are using the game's "move base" tool, highlights every base that would fall within your attack/tunnel influence range of the spot under the cursor - other players' bases in orange, Forgotten (NPC) bases in green. Markers follow the map as you pan and zoom and clear when you finish moving. A HUD options panel toggles each layer and lets you override the range.
-// @version      1.0.2
+// @version      1.0.3
 // @author       Napali, XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -58,6 +58,9 @@
 (function () {
 	var AR_main = function () {
 		// ---- logger ----------------------------------------------------------------
+		// i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+		// loads after this script (extension injection order isn't guaranteed). Identity in English.
+		function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
 		var LOG = (window.MMCommon && window.MMCommon.makeLogger)
 			? window.MMCommon.makeLogger("Attack Range")
 			: {
@@ -285,11 +288,11 @@
 		// ---- options panel ---------------------------------------------------------
 		function buildOptions() {
 			var body = new qx.ui.container.Composite(new qx.ui.layout.VBox(6)).set({ padding: 10, backgroundColor: "#23282b" });
-			body.add(new qx.ui.basic.Label("Highlight in move-base view:").set({
+			body.add(new qx.ui.basic.Label(MMt("Highlight in move-base view:")).set({
 				rich: true, textColor: "#9fb4c0", font: new qx.bom.Font(12, ["sans-serif"]).set({ bold: true })
 			}));
 			function cb(label, key, def) {
-				var c = new qx.ui.form.CheckBox(label).set({ value: getS(key, def) === true, textColor: "#e8e8e8" });
+				var c = new qx.ui.form.CheckBox(MMt(label)).set({ value: getS(key, def) === true, textColor: "#e8e8e8" });
 				c.addListener("changeValue", function (e) { setS(key, e.getData() === true); redrawLast(); });
 				return c;
 			}
@@ -299,15 +302,15 @@
 
 			// range override row
 			var rangeRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(6)).set({ marginTop: 4 });
-			rangeRow.add(new qx.ui.basic.Label("Range override:").set({ textColor: "#e8e8e8", alignY: "middle" }));
+			rangeRow.add(new qx.ui.basic.Label(MMt("Range override:")).set({ textColor: "#e8e8e8", alignY: "middle" }));
 			var spin = new qx.ui.form.Spinner(0, getS("AttackRange.rangeOverride", 0), 50).set({ width: 60 });
 			spin.addListener("changeValue", function (e) { setS("AttackRange.rangeOverride", e.getData() | 0); redrawLast(); });
 			rangeRow.add(spin);
-			rangeRow.add(new qx.ui.basic.Label("(0 = auto from alliance [tir], else 10)").set({ textColor: "#9fb4c0", alignY: "middle", rich: true }));
+			rangeRow.add(new qx.ui.basic.Label(MMt("(0 = auto from alliance [tir], else 10)")).set({ textColor: "#9fb4c0", alignY: "middle", rich: true }));
 			body.add(rangeRow);
 
 			body.add(new qx.ui.core.Widget().set({ height: 1, backgroundColor: "#3a4248", marginTop: 4, marginBottom: 2, allowGrowX: true }));
-			var master = new qx.ui.form.CheckBox("Master: enable the range overlay").set({ value: masterOn(), textColor: "#e8e8e8" });
+			var master = new qx.ui.form.CheckBox(MMt("Master: enable the range overlay")).set({ value: masterOn(), textColor: "#e8e8e8" });
 			master.addListener("changeValue", function (e) {
 				setS("AttackRange.enabled", e.getData() === true);
 				if (e.getData() === true) redrawLast(); else clearMarkers();
@@ -315,14 +318,14 @@
 			body.add(master);
 
 			var win = MM.ui.Window({
-				caption: "Attack Range", key: "AttackRange.Window",
+				caption: MMt("Attack Range"), key: "AttackRange.Window",
 				layout: new qx.ui.layout.VBox(), pos: [280, 150], resizable: false, restoreOpen: true, dock: true
 			});
 			if (!win) { werr("options window creation failed"); return; }
 			win.add(body);
 			MM.buttons.register({
-				id: "mm-attack-range", label: "Attack Range",
-				tooltip: "Highlight bases in range while moving a base",
+				id: "mm-attack-range", label: MMt("Attack Range"),
+				tooltip: MMt("Highlight bases in range while moving a base"),
 				onExecute: function () { try { if (win.isVisible()) win.close(); else win.open(); } catch (e) { werr("toggle failed:", e); } }
 			});
 			wlog("options panel ready.");

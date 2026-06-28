@@ -3,7 +3,7 @@
 // @namespace      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include        https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description    Client-side "what-if" territory planner: right-click any base/NPC on the region map to simulate moving it, ruining it (for any alliance), levelling it up, or removing it - the territory-control colouring updates live, with full Undo / Reset plans. Everything is a LOCAL visualisation; nothing is ever sent to the server.
-// @version        1.0.0
+// @version        1.0.1
 // @license        GPL version 3 or any later version; http://www.gnu.org/copyleft/gpl.html
 // @author         MikeyMike (rework of petui's "The Movement")
 // @contributor    petui
@@ -64,6 +64,9 @@
         var OPTIONS_ID = 10209; // MM - The Movement (CnC Pack registry id)
 
         // ---- logger ----------------------------------------------------------------
+        // i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+        // loads after this script (extension injection order isn't guaranteed). Identity in English.
+        function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
         var LOG = (window.MMCommon && window.MMCommon.makeLogger)
             ? window.MMCommon.makeLogger("The Movement")
             : {
@@ -1180,7 +1183,7 @@
                      * @returns {String}
                      */
                     getName: function () {
-                        return 'Plan move base';
+                        return MMt('Plan move base');
                     },
                     /**
                      * @param {ClientLib.Vis.Region.RegionObject} regionObject
@@ -1325,7 +1328,7 @@
                      * @returns {String}
                      */
                     getName: function () {
-                        return 'Plan ruin';
+                        return MMt('Plan ruin');
                     },
                     /**
                      * @param {ClientLib.Vis.Region.RegionObject} regionObject
@@ -1421,7 +1424,7 @@
                     statics.RelationshipColors[ClientLib.Data.EAllianceDiplomacyStatus.NAP] = '#31eddd';
                     statics.RelationshipColors[ClientLib.Data.EAllianceDiplomacyStatus.Foe] = '#fb607a';
                     statics.RelationshipColors[ClientLib.Data.EAllianceDiplomacyStatus.Neutral] = '#fb7a4b';
-                    statics.Relationships = ['None', 'Friend', 'NAP', 'Foe', 'Neutral'];
+                    statics.Relationships = [MMt('None'), MMt('Friend'), MMt('NAP'), MMt('Foe'), MMt('Neutral')];
                 },
                 members: {
                     relationshipColors: null,
@@ -1431,7 +1434,7 @@
                      * @returns {String}
                      */
                     getName: function () {
-                        return 'Plan ruin for';
+                        return MMt('Plan ruin for');
                     },
                     /**
                      * @param {ClientLib.Vis.Region.RegionObject} regionObject
@@ -1447,7 +1450,7 @@
                     getTwoStepOptions: function () {
                         var ownAlliance = ClientLib.Data.MainData.GetInstance().get_Alliance();
                         var alliances = [{
-                            label: 'No alliance',
+                            label: MMt('No alliance'),
                             color: this.constructor.RelationshipColors[ClientLib.Data.EAllianceDiplomacyStatus.None],
                             data: 0,
                             tag: ''
@@ -1463,7 +1466,7 @@
                                         label: relationship.OtherAllianceName,
                                         color: relationship.IsConfirmed ? this.constructor.RelationshipColors[relationship.Relationship] : '#f5f5dc',
                                         data: relationship.OtherAllianceId,
-                                        tag: relationship.IsConfirmed ? '' : ' (Pending ' + this.constructor.Relationships[relationship.Relationship] + ')'
+                                        tag: relationship.IsConfirmed ? '' : MMt(' (Pending ') + this.constructor.Relationships[relationship.Relationship] + ')'
                                     };
                                 }, this).sort(function (a, b) {
                                     return a.label.localeCompare(b.label);
@@ -1529,7 +1532,7 @@
                      * @returns {String}
                      */
                     getName: function () {
-                        return 'Plan level up';
+                        return MMt('Plan level up');
                     },
                     /**
                      * @param {ClientLib.Vis.Region.RegionObject} regionObject
@@ -1589,7 +1592,7 @@
                      * @returns {String}
                      */
                     getName: function () {
-                        return 'Plan remove';
+                        return MMt('Plan remove');
                     },
                     /**
                      * @param {ClientLib.Vis.Region.RegionObject} regionObject
@@ -1644,7 +1647,7 @@
                      * @returns {String}
                      */
                     getName: function () {
-                        var name = 'Undo';
+                        var name = MMt('Undo');
                         if (!this.history.isEmpty()) {
                             var actionName = this.history.getLastActionName();
                             name += ' ' + actionName.substr(0, 1).toLowerCase() + actionName.substr(1);
@@ -1693,7 +1696,7 @@
                      * @returns {String}
                      */
                     getName: function () {
-                        return 'Reset plans';
+                        return MMt('Reset plans');
                     },
                     /**
                      * @param {ClientLib.Vis.Region.RegionObject} regionObject

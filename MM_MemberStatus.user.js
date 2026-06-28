@@ -3,7 +3,7 @@
 // @description     Dockable, color-coded "Member Status" overview of online/away alliance members (with highest offense/defense levels when your access exposes them). MikeyMike rework of InFlames2k's "AllianceMemberOnline", rebuilt on the MM - Common Library.
 // @author          InFlames2k (Patrick Schubert)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.7
+// @version         1.2.8
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_MemberStatus.user.js
@@ -59,6 +59,9 @@
 
 (function () {
     var AllianceOverview_main = function () {
+        // i18n fallback: hoisted so MMt() is always defined even if the Common Library's global
+        // loads after this script (extension injection order isn't guaranteed). Identity in English.
+        function MMt(s){try{return (window.MMCommon&&window.MMCommon.i18n)?window.MMCommon.i18n.t(s):s;}catch(e){return s;}}
         var LOG = (window.MMCommon && window.MMCommon.makeLogger) ? window.MMCommon.makeLogger("Member Status") : {
             log: function () {}, warn: function () { try { console.warn.apply(console, arguments); } catch (e) {} }, err: function () { try { console.error.apply(console, arguments); } catch (e) {} }
         };
@@ -95,7 +98,7 @@
             pinBtn.set({
                 decorator: "button-forum-light", icon: pinIcon(menuOn()), show: "icon", iconPosition: "top",
                 cursor: "pointer", width: 22, height: 19, maxWidth: 22, maxHeight: 19, padding: 0, alignY: "middle",
-                toolTipText: "Pin into the game menu / unpin to a movable panel"
+                toolTipText: MMt("Pin into the game menu / unpin to a movable panel")
             });
             try { var _pic = pinBtn.getChildControl("icon"); _pic.setWidth(15); _pic.setHeight(15); _pic.setScale(true); } catch (e) {}
             pinBtn.addListener("execute", function () { try { setMenuMode(!menuOn()); } catch (e) {} });
@@ -105,7 +108,7 @@
             function updatePin() { try { pinBtn.setIcon(pinIcon(menuOn())); } catch (e) {} }
 
             // header (title + pin) - kept WITH the content so it shows in both the floating and docked states
-            var titleLbl = new qx.ui.basic.Label("Members").set({ font: "bold", rich: true, alignY: "middle", textAlign: "center", allowGrowX: true });
+            var titleLbl = new qx.ui.basic.Label(MMt("Members")).set({ font: "bold", rich: true, alignY: "middle", textAlign: "center", allowGrowX: true });
             var headerRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(0).set({ alignY: "middle" }));
             headerRow.add(new qx.ui.core.Spacer(22, 1)); // balances the pin width so the title sits centered
             headerRow.add(titleLbl, { flex: 1 });
@@ -126,7 +129,7 @@
 
             // --- the floating ("unpinned") panel: frameless + movable + on-screen clamp, like MM - Next MCV ---
             var win = MM.ui.Window({
-                caption: "Member Status",
+                caption: MMt("Member Status"),
                 key: "AllianceOverview.Window",
                 pos: [240, 120],
                 restoreOpen: true,
@@ -253,7 +256,7 @@
                 try { titleLbl.setTextColor(C.title); } catch (e) {}
                 clearList();
                 if (!rows.length) {
-                    listBox.add(new qx.ui.basic.Label("(no members online)").set({ textColor: C.none }), { row: 0, column: 0 });
+                    listBox.add(new qx.ui.basic.Label(MMt("(no members online)")).set({ textColor: C.none }), { row: 0, column: 0 });
                     return;
                 }
                 // Show the Off/Def level columns only if enabled AND the data is populated (i.e. your
@@ -266,9 +269,9 @@
                 }
                 var r = 0;
                 if (hasLevels) {
-                    listBox.add(header("Member"), { row: 0, column: 0 });
-                    listBox.add(header("Off", "Best (highest) offense/army unit level"), { row: 0, column: 1 });
-                    listBox.add(header("Def", "Best (highest) defense level"), { row: 0, column: 2 });
+                    listBox.add(header(MMt("Member")), { row: 0, column: 0 });
+                    listBox.add(header(MMt("Off"), MMt("Best (highest) offense/army unit level")), { row: 0, column: 1 });
+                    listBox.add(header(MMt("Def"), MMt("Best (highest) defense level")), { row: 0, column: 2 });
                     r = 1;
                 }
                 for (i = 0; i < rows.length; i++) {
@@ -325,8 +328,8 @@
             // --- the toggle button (CommonButtonHandler) ---
             MM.buttons.register({
                 id: "member-status",
-                label: "Member Status",
-                tooltip: "Toggle the Member Status display",
+                label: MMt("Member Status"),
+                tooltip: MMt("Toggle the Member Status display"),
                 onExecute: function () {
                     try {
                         if (menuOn()) {
