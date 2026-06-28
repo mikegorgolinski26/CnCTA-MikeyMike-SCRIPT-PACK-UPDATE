@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.25
+// @version         1.0.26
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.25"
+            version: "1.0.26"
         };
 
         // -------------------------------------------------------------------
@@ -667,22 +667,25 @@
                     var minLevel = opts.minLevel || 0;
                     var playerCP = (opts.playerCP !== false);
                     // attackableOnly (default true): use the game's own CheckAttackBase to drop targets
-                    // that can't actually be attacked from this origin - out of range (FailDistance) or
-                    // costing more command points than the base can field (FailInsufficientCommandPoints).
-                    // Other failure reasons (no army staged, ally, ghost, protection) are deliberately
-                    // IGNORED here, so a scan works without a loaded army and leaves ally/ghost handling
-                    // to the caller's detail phase. This is the real "you can only attack so far / so
-                    // expensively" guardrail - the geometric maxDistance below is a fast pre-filter; this
-                    // is the authoritative one.
+                    // that are out of real attack range (FailDistance). We gate ONLY on FailDistance.
+                    //
+                    // We deliberately do NOT gate on FailInsufficientCommandPoints: that bit reflects the
+                    // command points you have AVAILABLE RIGHT NOW, which deplete as you play, so including
+                    // it made the scanner show ~0 targets whenever your CP pool was spent (confirmed live:
+                    // bit 16 was set on 120/125 in-range targets when CP was low, and the count fluctuated
+                    // run-to-run as CP regenerated/drained). The scanner is a planning tool - it must list
+                    // every worthwhile target in range regardless of your current CP. CP filtering is the
+                    // user's job via cpLimit, which filters the actual per-target cost computed below from
+                    // CalculateAttackCommandPointCostToCoord. Other failure reasons (no army staged, ally,
+                    // ghost, protection) are likewise IGNORED here, so a scan works without a loaded army
+                    // and leaves ally/ghost handling to the caller's detail phase.
                     var attackableOnly = (opts.attackableOnly !== false);
                     var FAIL_MASK = 0;
                     if (attackableOnly) {
                         try {
                             var EA = ClientLib.Data.EAttackBaseResult;
-                            var fDist = (EA && EA.FailDistance != null) ? EA.FailDistance : 1;
-                            var fCp = (EA && EA.FailInsufficientCommandPoints != null) ? EA.FailInsufficientCommandPoints : 16;
-                            FAIL_MASK = fDist | fCp;
-                        } catch (e) { FAIL_MASK = 1 | 16; }
+                            FAIL_MASK = (EA && EA.FailDistance != null) ? EA.FailDistance : 1;
+                        } catch (e) { FAIL_MASK = 1; }
                         if (typeof world.CheckAttackBase !== "function") attackableOnly = false; // not available -> skip the gate
                     }
                     var ownIds = {};
