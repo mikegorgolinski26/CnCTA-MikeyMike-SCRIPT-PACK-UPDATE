@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.7
+// @version         1.1.8
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -1451,9 +1451,9 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         }
                         //SETTINGS
                         var settingsMenu = new qx.ui.menu.Menu(),
-                            settingsLoad = new qx.ui.menu.Button(this.tr("load"), null, null),
-                            settingsSave = new qx.ui.menu.Button(this.tr("save"), null, null),
-                            settingsReset = new qx.ui.menu.Button(this.tr("reset"), null, null);
+                            settingsLoad = new qx.ui.menu.Button(MMt(this.tr("load")), null, null),
+                            settingsSave = new qx.ui.menu.Button(MMt(this.tr("save")), null, null),
+                            settingsReset = new qx.ui.menu.Button(MMt(this.tr("reset")), null, null);
                         settingsLoad.addListener("execute", function () {
                             TABS.SETTINGS.load();
                         }, this);
@@ -1462,7 +1462,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         }, this);
                         settingsReset.addListener("execute", function () {
                             TABS.SETTINGS.reset();
-                            alert(this.tr("Game will reload now."));
+                            alert(MMt(this.tr("Game will reload now.")));
                             window.location.reload();
                         }, this);
                         settingsMenu.add(settingsLoad);
@@ -1472,8 +1472,8 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         //Info
                         this.Menu.add(new qx.ui.menu.Separator());
                         var infoMenu = new qx.ui.menu.Menu(),
-                            infoHomepage = new qx.ui.menu.Button(this.tr("Homepage"), "", null),
-                            infoFacebook = new qx.ui.menu.Button(this.tr("Facebook"), "", null);
+                            infoHomepage = new qx.ui.menu.Button(MMt(this.tr("Homepage")), "", null),
+                            infoFacebook = new qx.ui.menu.Button(MMt(this.tr("Facebook")), "", null);
                         infoHomepage.addListener("execute", function () {
                             qx.core.Init.getApplication().showExternal("http://eistee82.github.io/ta_simv2");
                         }, this);
@@ -3524,12 +3524,12 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 cntWave = this.ArmySetupAttackBar.getMainContainer().getChildren()[i + this.cntWaveI];
                                 cntWave._removeAll();
                                 cntWave._setLayout(new qx.ui.layout.HBox());
-                                cntWave._add(this.newSideButton(TABS.RES.IMG.Flip.H, this.tr("Mirrors units horizontally."), this.onClick_btnMirror, "h", i));
+                                cntWave._add(this.newSideButton(TABS.RES.IMG.Flip.H, MMt(this.tr("Mirrors units horizontally.")), this.onClick_btnMirror, "h", i));
                                 cntWave._add(new qx.ui.core.Spacer(), {
                                     flex: 1
                                 });
-                                cntWave._add(this.newSideButton(TABS.RES.IMG.Arrows.Left, this.tr("Shifts units one space left."), this.onClick_btnShift, "l", i));
-                                cntWave._add(this.newSideButton(TABS.RES.IMG.Arrows.Right, this.tr("Shifts units one space right."), this.onClick_btnShift, "r", i));
+                                cntWave._add(this.newSideButton(TABS.RES.IMG.Arrows.Left, MMt(this.tr("Shifts units one space left.")), this.onClick_btnShift, "l", i));
+                                cntWave._add(this.newSideButton(TABS.RES.IMG.Arrows.Right, MMt(this.tr("Shifts units one space right.")), this.onClick_btnShift, "r", i));
                             }
 
                             // Mirror and Shift Buttons top
@@ -3559,10 +3559,10 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 shiftbox_inside._removeAll();
                                 shiftbox_inside.add(new qx.ui.core.Spacer());
                                 //3 buttons (1 long + 2 updown)
-                                shiftbox_inside.add(this.newTopButton(TABS.RES.IMG.Flip2.V, this.tr("Mirrors units vertically."), this.onClick_btnMirror, "v", i, 35, null));
+                                shiftbox_inside.add(this.newTopButton(TABS.RES.IMG.Flip2.V, MMt(this.tr("Mirrors units vertically.")), this.onClick_btnMirror, "v", i, 35, null));
                                 shiftbox_inside.add(new qx.ui.core.Spacer());
-                                shiftbox_inside.add(this.newTopButton(TABS.RES.IMG.Arrows2.Up, this.tr("Shifts units one space up."), this.onClick_btnShift, "u", i, 20, 20));
-                                shiftbox_inside.add(this.newTopButton(TABS.RES.IMG.Arrows2.Down, this.tr("Shifts units one space down."), this.onClick_btnShift, "d", i, 20, 20));
+                                shiftbox_inside.add(this.newTopButton(TABS.RES.IMG.Arrows2.Up, MMt(this.tr("Shifts units one space up.")), this.onClick_btnShift, "u", i, 20, 20));
+                                shiftbox_inside.add(this.newTopButton(TABS.RES.IMG.Arrows2.Down, MMt(this.tr("Shifts units one space down.")), this.onClick_btnShift, "d", i, 20, 20));
                                 shiftbox_inside.add(new qx.ui.core.Spacer());
 
 
@@ -3676,7 +3676,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             var WDG_COMBATSWAPVIEW = this.HUD.getUIItem(ClientLib.Data.Missions.PATH.WDG_COMBATSWAPVIEW);
                             //View Simulation
                             this.btnSimulation = new webfrontend.ui.SoundButton(null, TABS.RES.IMG.Simulate).set({
-                                toolTipText: this.tr("View Simulation") + " [NUM 0]",
+                                toolTipText: MMt(this.tr("View Simulation")) + " [NUM 0]",
                                 width: 44,
                                 height: 44,
                                 allowGrowX: false,
@@ -3715,82 +3715,82 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 allowGrowX: false,
                                 allowGrowY: false,
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Stats, this.tr("Statistic") + " [NUM 7]", this.onClick_btnStats, null, null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Stats, MMt(this.tr("Statistic")) + " [NUM 7]", this.onClick_btnStats, null, null), {
                                 row: 0,
                                 column: 0
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Arrows.Up, this.tr("Shifts units one space up.") + " [NUM 8]", this.onClick_btnShift, "u", null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Arrows.Up, MMt(this.tr("Shifts units one space up.")) + " [NUM 8]", this.onClick_btnShift, "u", null), {
                                 row: 0,
                                 column: 1
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.CNCTAOpt, this.tr("Show current formation with CNCTAOpt") + " [NUM 9]<br>" + this.tr("Right click: Set formation from CNCTAOpt Long Link") + "<br>" + this.tr("Remember transported units are not supported."), this.onClick_CNCTAOpt, null, null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.CNCTAOpt, MMt(this.tr("Show current formation with CNCTAOpt")) + " [NUM 9]<br>" + MMt(this.tr("Right click: Set formation from CNCTAOpt Long Link")) + "<br>" + MMt(this.tr("Remember transported units are not supported.")), this.onClick_CNCTAOpt, null, null), {
                                 row: 0,
                                 column: 2
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Arrows.Left, this.tr("Shifts units one space left.") + " [NUM 4]", this.onClick_btnShift, "l", null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Arrows.Left, MMt(this.tr("Shifts units one space left.")) + " [NUM 4]", this.onClick_btnShift, "l", null), {
                                 row: 1,
                                 column: 0
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.DisableUnit, this.tr("Enables/Disables all units.") + " [NUM 5]", this.onClick_btnDisable, null, null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.DisableUnit, MMt(this.tr("Enables/Disables all units.")) + " [NUM 5]", this.onClick_btnDisable, null, null), {
                                 row: 1,
                                 column: 1
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Arrows.Right, this.tr("Shifts units one space right.") + " [NUM 6]", this.onClick_btnShift, "r", null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Arrows.Right, MMt(this.tr("Shifts units one space right.")) + " [NUM 6]", this.onClick_btnShift, "r", null), {
                                 row: 1,
                                 column: 2
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Flip.H, this.tr("Mirrors units horizontally.") + " [NUM 1]", this.onClick_btnMirror, "h", null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Flip.H, MMt(this.tr("Mirrors units horizontally.")) + " [NUM 1]", this.onClick_btnMirror, "h", null), {
                                 row: 2,
                                 column: 0
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Arrows.Down, this.tr("Shifts units one space down.") + " [NUM 2]", this.onClick_btnShift, "d", null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Arrows.Down, MMt(this.tr("Shifts units one space down.")) + " [NUM 2]", this.onClick_btnShift, "d", null), {
                                 row: 2,
                                 column: 1
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Flip.V, this.tr("Mirrors units vertically.") + " [NUM 3]", this.onClick_btnMirror, "v", null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Flip.V, MMt(this.tr("Mirrors units vertically.")) + " [NUM 3]", this.onClick_btnMirror, "v", null), {
                                 row: 2,
                                 column: 2
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Offense.Infantry, this.tr("Enables/Disables all infantry units.") + " [NUM *]", this.onClick_btnDisable, ClientLib.Data.EUnitGroup.Infantry, null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Offense.Infantry, MMt(this.tr("Enables/Disables all infantry units.")) + " [NUM *]", this.onClick_btnDisable, ClientLib.Data.EUnitGroup.Infantry, null), {
                                 row: 3,
                                 column: 0
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Offense.Vehicle, this.tr("Enables/Disables all vehicles.") + " [NUM -]", this.onClick_btnDisable, ClientLib.Data.EUnitGroup.Vehicle, null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Offense.Vehicle, MMt(this.tr("Enables/Disables all vehicles.")) + " [NUM -]", this.onClick_btnDisable, ClientLib.Data.EUnitGroup.Vehicle, null), {
                                 row: 3,
                                 column: 1
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Offense.Aircraft, this.tr("Enables/Disables all aircrafts.") + " [NUM +]", this.onClick_btnDisable, ClientLib.Data.EUnitGroup.Aircraft, null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Offense.Aircraft, MMt(this.tr("Enables/Disables all aircrafts.")) + " [NUM +]", this.onClick_btnDisable, ClientLib.Data.EUnitGroup.Aircraft, null), {
                                 row: 3,
                                 column: 2
                             });
                             //DS-MOd
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.VictoryPop, this.tr("Skip Victory-Popup After Battle"), this.onClick_btnVictory, null, null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.VictoryPop, MMt(this.tr("Skip Victory-Popup After Battle")), this.onClick_btnVictory, null, null), {
                                 row: 4,
                                 column: 0
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Offense.ResetFormation, this.tr("Reset Formation"), this.onClick_btnReset, null, null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Offense.ResetFormation, MMt(this.tr("Reset Formation")), this.onClick_btnReset, null, null), {
                                 row: 4,
                                 column: 1
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.Offense.SaveLoad, this.tr("Save/Load Formation [NUM ,]"), this.onClick_SaveLoad, null, null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.Offense.SaveLoad, MMt(this.tr("Save/Load Formation [NUM ,]")), this.onClick_SaveLoad, null, null), {
                                 row: 4,
                                 column: 2
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.one, this.tr("Swaps lines 1 & 2."), this.onClick_btnSwap_1_2, "k", null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.one, MMt(this.tr("Swaps lines 1 & 2.")), this.onClick_btnSwap_1_2, "k", null), {
                                 row: 5,
                                 column: 0
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.two, this.tr("Swaps lines 2 & 3."), this.onClick_btnSwap_2_3, "z", null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.two, MMt(this.tr("Swaps lines 2 & 3.")), this.onClick_btnSwap_2_3, "z", null), {
                                 row: 5,
                                 column: 1
                             });
-                            this.boxMove.add(this.newButton(TABS.RES.IMG.three, this.tr("Swaps lines 3 & 4."), this.onClick_btnSwap_3_4, "c", null), {
+                            this.boxMove.add(this.newButton(TABS.RES.IMG.three, MMt(this.tr("Swaps lines 3 & 4.")), this.onClick_btnSwap_3_4, "c", null), {
                                 row: 5,
                                 column: 2
                             });
                             // MikeyMike: auto layout optimizer buttons (full-width, labeled)
-                            var btnOptWin = new qx.ui.form.Button(this.tr("Best Win")).set({
-                                toolTipText: this.tr("Auto-try several army layouts and apply the WINNING layout (enemy destroyed) with the lowest repair time."),
+                            var btnOptWin = new qx.ui.form.Button(MMt(this.tr("Best Win"))).set({
+                                toolTipText: MMt(this.tr("Auto-try several army layouts and apply the WINNING layout (enemy destroyed) with the lowest repair time.")),
                                 height: 20,
                                 show: "label",
                                 center: true,
@@ -3803,8 +3803,8 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 column: 0,
                                 colSpan: 3
                             });
-                            var btnOptDF0 = new qx.ui.form.Button(this.tr("Best DF 0")).set({
-                                toolTipText: this.tr("Auto-try several army layouts to DESTROY the enemy Defense Facility (DF): applies the layout that gets DF health as close to 0 as possible, then the lowest max repair time."),
+                            var btnOptDF0 = new qx.ui.form.Button(MMt(this.tr("Best DF 0"))).set({
+                                toolTipText: MMt(this.tr("Auto-try several army layouts to DESTROY the enemy Defense Facility (DF): applies the layout that gets DF health as close to 0 as possible, then the lowest max repair time.")),
                                 height: 20,
                                 show: "label",
                                 center: true,
@@ -3827,8 +3827,8 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             } catch (e) {}
                             // MikeyMike: open the optimizer options panel (added last so it doesn't shift
                             // the getChildren()[12] skip-victory index used below).
-                            var btnOptions = new qx.ui.form.Button(this.tr("Optimizer Options")).set({
-                                toolTipText: this.tr("Tune how the auto-optimizer searches layouts: step size, left/right vs up/down weighting, row drift and search budgets."),
+                            var btnOptions = new qx.ui.form.Button(MMt(this.tr("Optimizer Options"))).set({
+                                toolTipText: MMt(this.tr("Tune how the auto-optimizer searches layouts: step size, left/right vs up/down weighting, row drift and search budgets.")),
                                 height: 20,
                                 show: "label",
                                 center: true,
@@ -4074,18 +4074,18 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             try {
                                 var p = e.getData();
                                 if (p === 7) {
-                                    if (this.__btnOptDF0) this.__btnOptDF0.setLabel("■ " + this.tr("Stop"));
+                                    if (this.__btnOptDF0) this.__btnOptDF0.setLabel("■ " + MMt(this.tr("Stop")));
                                     if (this.__btnOptWin) this.__btnOptWin.setEnabled(false);
                                 } else {
-                                    if (this.__btnOptWin) this.__btnOptWin.setLabel("■ " + this.tr("Stop"));
+                                    if (this.__btnOptWin) this.__btnOptWin.setLabel("■ " + MMt(this.tr("Stop")));
                                     if (this.__btnOptDF0) this.__btnOptDF0.setEnabled(false);
                                 }
                             } catch (err) {}
                         },
                         __onOptimizeEnd: function (e) {
                             try {
-                                if (this.__btnOptWin) { this.__btnOptWin.setLabel(this.tr("Best Win")); this.__btnOptWin.setEnabled(true); }
-                                if (this.__btnOptDF0) { this.__btnOptDF0.setLabel(this.tr("Best DF 0")); this.__btnOptDF0.setEnabled(true); }
+                                if (this.__btnOptWin) { this.__btnOptWin.setLabel(MMt(this.tr("Best Win"))); this.__btnOptWin.setEnabled(true); }
+                                if (this.__btnOptDF0) { this.__btnOptDF0.setLabel(MMt(this.tr("Best DF 0"))); this.__btnOptDF0.setEnabled(true); }
                             } catch (err) {}
                         },
                         onClick_btnOptions: function (e) { // MikeyMike: open the optimizer options panel
@@ -4201,7 +4201,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 
                         //DS-MOD-END
                         onClick_CNCTAOpt: function (e) {
-                            if (e.isRightPressed()) TABS.UTIL.Formation.Set(TABS.UTIL.CNCTAOpt.parseLink(prompt(this.tr("Enter CNCTAOpt Long Link:"))));
+                            if (e.isRightPressed()) TABS.UTIL.Formation.Set(TABS.UTIL.CNCTAOpt.parseLink(prompt(MMt(this.tr("Enter CNCTAOpt Long Link:")))));
                             else qx.core.Init.getApplication().showExternal(TABS.UTIL.CNCTAOpt.createLink());
                         }
                     },
@@ -4396,7 +4396,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.base(arguments);
                             this.set({
                                 layout: new qx.ui.layout.VBox(),
-                                caption: "TABS: " + this.tr("Statistic"),
+                                caption: "TABS: " + MMt(this.tr("Statistic")),
                                 icon: TABS.RES.IMG.Stats,
                                 minWidth: 175,
                                 contentPadding: 4,
@@ -4435,7 +4435,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 scale: true,
                                 alignY: "middle"
                             });
-                            this.setStatus("0 " + this.tr("simulations in cache"));
+                            this.setStatus("0 " + MMt(this.tr("simulations in cache")));
                             //Enemy Health Section//
                             this.EnemyHeader = this.makeHeader(this.tr("tnf:combat target"));
                             this.EnemyHeader.addListener("click", function () {
@@ -4546,11 +4546,11 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             };
                             this.Label = {
                                 Battle: {
-                                    Preset: new TABS.GUI.Window.Stats.Atom("P", null, this.tr("Preset")),
+                                    Preset: new TABS.GUI.Window.Stats.Atom("P", null, MMt(this.tr("Preset"))),
                                     Outcome: new TABS.GUI.Window.Stats.Atom("O", null, this.tr("tnf:combat report")),
                                     Duration: new TABS.GUI.Window.Stats.Atom("D", null, this.tr("tnf:combat timer npc: %1", "")),
                                     OwnCity: new TABS.GUI.Window.Stats.Atom("B", null, this.tr("tnf:base")),
-                                    Morale: new TABS.GUI.Window.Stats.Atom("M", null, this.tr("Morale"))
+                                    Morale: new TABS.GUI.Window.Stats.Atom("M", null, MMt(this.tr("Morale")))
                                 },
                                 Enemy: {
                                     Overall: new TABS.GUI.Window.Stats.Atom(this.tr("tnf:total"), TABS.RES.IMG.Enemy.All),
@@ -4580,7 +4580,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     Overall: new TABS.GUI.Window.Stats.Atom(this.tr("tnf:total") + " " + this.tr("tnf:loot"), TABS.RES.IMG.Resource.Transfer)
                                 },
                                 Buttons: {
-                                    View: new TABS.GUI.Window.Stats.Atom(this.tr("View Simulation"), TABS.RES.IMG.Simulate).set({
+                                    View: new TABS.GUI.Window.Stats.Atom(MMt(this.tr("View Simulation")), TABS.RES.IMG.Simulate).set({
                                         marginTop: 1,
                                         marginBottom: 5
                                     })
@@ -4645,7 +4645,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 flex: 1
                             });
                             var fontsize = qx.theme.manager.Font.getInstance().resolve(this.getChildControl("statusbar-text").getFont()).getSize(),
-                                lblReset = new qx.ui.basic.Label(this.tr("Reset")).set({
+                                lblReset = new qx.ui.basic.Label(MMt(this.tr("Reset"))).set({
                                     textColor: "#115274",
                                     font: new qx.bom.Font("statusbar-text").set({
                                         size: fontsize,
@@ -4711,7 +4711,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     this.simViews[i].__onTick();
                                 }
                             }
-                            this.setStatus(TABS.CACHE.getInstance().getCitySimAmount().toString() + " " + this.tr("simulations in cache"));
+                            this.setStatus(TABS.CACHE.getInstance().getCitySimAmount().toString() + " " + MMt(this.tr("simulations in cache")));
                         },
                         __updateStats: function () {
                             this.StatsChanged = true;
@@ -5185,7 +5185,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             var ButtonPlay = new qx.ui.form.ModelButton(null, TABS.RES.IMG.Arrows.Right).set({
                                 maxHeight: 22,
                                 minWidth: 22,
-                                toolTipText: this.tr("View Simulation"),
+                                toolTipText: MMt(this.tr("View Simulation")),
                                 show: "icon",
                                 iconPosition: "top",
                                 appearance: "button-addpoints"
@@ -5202,8 +5202,8 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             if (this.Num === 6 || this.Num === 7) {
                                 var optMode = this.Num,
                                     optTip = (optMode === 7) ?
-                                    this.tr("Auto-try several layouts to destroy the Defense Facility: applies the layout with DF closest to 0, then lowest max repair time. (or call window.MikeyMike_OptimizeDF0())") :
-                                    this.tr("Auto-try several layouts and apply the winning layout with the lowest repair time. (or call window.MikeyMike_OptimizeRepair())");
+                                    MMt(this.tr("Auto-try several layouts to destroy the Defense Facility: applies the layout with DF closest to 0, then lowest max repair time. (or call window.MikeyMike_OptimizeDF0())")) :
+                                    MMt(this.tr("Auto-try several layouts and apply the winning layout with the lowest repair time. (or call window.MikeyMike_OptimizeRepair())"));
                                 var ButtonOptimize = new qx.ui.form.Button("✨").set({
                                     maxHeight: 22,
                                     minWidth: 22,
@@ -5588,7 +5588,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.base(arguments);
                             this.set({
                                 layout: new qx.ui.layout.Grid(),
-                                caption: this.tr("Priority Setup"),
+                                caption: MMt(this.tr("Priority Setup")),
                                 allowMaximize: false,
                                 showMaximize: false,
                                 allowMinimize: false,
@@ -5619,7 +5619,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.base(arguments);
                             this.set({
                                 layout: new qx.ui.layout.VBox(8),
-                                caption: "TABS: " + this.tr("Optimizer Options"),
+                                caption: "TABS: " + MMt(this.tr("Optimizer Options")),
                                 icon: TABS.RES.IMG.Stats,
                                 allowMaximize: false,
                                 showMaximize: false,
@@ -5740,30 +5740,30 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 minHeight: 180
                             });
                             // --- Movement page (how a unit is allowed to move) ---
-                            var pMove = new qx.ui.tabview.Page(this.tr("Movement"));
+                            var pMove = new qx.ui.tabview.Page(MMt(this.tr("Movement")));
                             var aMove = pageAdder(pMove);
-                            aMove.spinner(this.tr("Max step (cells per move)"), "Optimizer.MaxStep", 1, 1, 8,
-                                this.tr("1 = a unit may only move ONE cell up/down/left/right per try. After an improvement the search re-bases on the new position and steps again, so larger overall moves still build up across rounds."));
-                            aMove.number(this.tr("Weight: left/right moves"), "Optimizer.Weight.Horizontal", 1,
-                                this.tr("Relative chance of trying a horizontal (left/right) move. Higher = more likely to be picked."));
-                            aMove.number(this.tr("Weight: up/down moves"), "Optimizer.Weight.Vertical", 0.75,
-                                this.tr("Relative chance of trying a vertical (up/down) move. Keep below the left/right weight to favour horizontal changes (e.g. 0.75)."));
-                            aMove.check(this.tr("Don't move a unit back to the cell it just left"), "Optimizer.TabuLastCell", true,
-                                this.tr("Prevents a unit bouncing back and forth between the same two cells."));
-                            aMove.spinner(this.tr("Max row drift from start"), "Optimizer.MaxRowDelta", 1, 0, 3,
-                                this.tr("How many rows a unit may drift away from its starting row while climbing (kicks may go further if it helps)."));
+                            aMove.spinner(MMt(this.tr("Max step (cells per move)")), "Optimizer.MaxStep", 1, 1, 8,
+                                MMt(this.tr("1 = a unit may only move ONE cell up/down/left/right per try. After an improvement the search re-bases on the new position and steps again, so larger overall moves still build up across rounds.")));
+                            aMove.number(MMt(this.tr("Weight: left/right moves")), "Optimizer.Weight.Horizontal", 1,
+                                MMt(this.tr("Relative chance of trying a horizontal (left/right) move. Higher = more likely to be picked.")));
+                            aMove.number(MMt(this.tr("Weight: up/down moves")), "Optimizer.Weight.Vertical", 0.75,
+                                MMt(this.tr("Relative chance of trying a vertical (up/down) move. Keep below the left/right weight to favour horizontal changes (e.g. 0.75).")));
+                            aMove.check(MMt(this.tr("Don't move a unit back to the cell it just left")), "Optimizer.TabuLastCell", true,
+                                MMt(this.tr("Prevents a unit bouncing back and forth between the same two cells.")));
+                            aMove.spinner(MMt(this.tr("Max row drift from start")), "Optimizer.MaxRowDelta", 1, 0, 3,
+                                MMt(this.tr("How many rows a unit may drift away from its starting row while climbing (kicks may go further if it helps).")));
                             tabs.add(pMove);
                             // --- Search budget page (how hard it searches) ---
-                            var pBud = new qx.ui.tabview.Page(this.tr("Search Budget"));
+                            var pBud = new qx.ui.tabview.Page(MMt(this.tr("Search Budget")));
                             var aBud = pageAdder(pBud);
-                            aBud.spinner(this.tr("Tweaks tried per round"), "Optimizer.MaxNeighbors", 16, 1, 64,
-                                this.tr("How many candidate layouts to evaluate each round. Higher = more thorough but more simulations."));
-                            aBud.spinner(this.tr("Max rounds per click"), "Optimizer.MaxRounds", 30, 1, 200,
-                                this.tr("Hard cap on climb+kick rounds for a single optimize click."));
-                            aBud.spinner(this.tr("Max simulations per click"), "Optimizer.SimBudget", 150, 1, 1000,
-                                this.tr("Hard cap on battle simulations per click (the main safety net)."));
-                            aBud.spinner(this.tr("Max fruitless kicks"), "Optimizer.MaxKicks", 3, 0, 20,
-                                this.tr("Stop after this many random jumps in a row that find no improvement."));
+                            aBud.spinner(MMt(this.tr("Tweaks tried per round")), "Optimizer.MaxNeighbors", 16, 1, 64,
+                                MMt(this.tr("How many candidate layouts to evaluate each round. Higher = more thorough but more simulations.")));
+                            aBud.spinner(MMt(this.tr("Max rounds per click")), "Optimizer.MaxRounds", 30, 1, 200,
+                                MMt(this.tr("Hard cap on climb+kick rounds for a single optimize click.")));
+                            aBud.spinner(MMt(this.tr("Max simulations per click")), "Optimizer.SimBudget", 150, 1, 1000,
+                                MMt(this.tr("Hard cap on battle simulations per click (the main safety net).")));
+                            aBud.spinner(MMt(this.tr("Max fruitless kicks")), "Optimizer.MaxKicks", 3, 0, 20,
+                                MMt(this.tr("Stop after this many random jumps in a row that find no improvement.")));
                             tabs.add(pBud);
                             this.add(tabs, {
                                 flex: 1
@@ -5776,11 +5776,11 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             var bar = new qx.ui.container.Composite(new qx.ui.layout.HBox(6)).set({
                                 paddingTop: 4
                             });
-                            var btnDefaults = new qx.ui.form.Button(this.tr("Reset Defaults"));
+                            var btnDefaults = new qx.ui.form.Button(MMt(this.tr("Reset Defaults")));
                             btnDefaults.addListener("execute", this._onResetDefaults, this);
-                            var btnSave = new qx.ui.form.Button(this.tr("Save"));
+                            var btnSave = new qx.ui.form.Button(MMt(this.tr("Save")));
                             btnSave.addListener("execute", this._onSave, this);
-                            var btnClose = new qx.ui.form.Button(this.tr("Close"));
+                            var btnClose = new qx.ui.form.Button(MMt(this.tr("Close")));
                             btnClose.addListener("execute", function () {
                                 this.close();
                             }, this);
@@ -5819,7 +5819,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     }
                                     TABS.SETTINGS.set(key, v);
                                 }
-                                if (this._status) this._status.setValue(this.tr("Saved - applies on the next optimize click."));
+                                if (this._status) this._status.setValue(MMt(this.tr("Saved - applies on the next optimize click.")));
                             } catch (e) {
                                 if (this._status) this._status.setValue(MMt("Error saving: ") + e);
                             }
@@ -5834,7 +5834,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     else if (fld.type === "float") fld.w.setValue(String(fld.def));
                                     else fld.w.setValue(fld.def);
                                 }
-                                if (this._status) this._status.setValue(this.tr("Defaults restored - press Save to apply."));
+                                if (this._status) this._status.setValue(MMt(this.tr("Defaults restored - press Save to apply.")));
                             } catch (e) {}
                         }
                     }
