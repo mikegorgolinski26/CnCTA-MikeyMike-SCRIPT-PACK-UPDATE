@@ -3,7 +3,7 @@
 // @description     A full replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Alliance / Global / Whisper / ...) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Locks docked lower-left like the native chat, or unlock to move + resize. Hides the native chat (toggle to bring it back).
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.0
+// @version         1.1.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -138,40 +138,39 @@
         })();
 
         // ----------------------------------------------------------------------
-        // Native chat access helpers
+        // Channel model. Classification of INCOMING messages is by data-chat-messagetype
+        // (live-sniffed: 6=Global, 8=Alliance, 7=Whisper - language-independent, unlike the
+        // [label] bracket which Global omits entirely). The native page index used for
+        // SENDING/switching is resolved at runtime by matching the page icon (robust to
+        // ordering changes). Colours are the game's own per-channel colours.
         // ----------------------------------------------------------------------
+        var MTYPE_CHAN = { "6": "global", "8": "alliance", "7": "whisper" };
+        var CHAN = {
+            all:      { label: MMt("All"),      color: "#cfe6ff", icons: ["all"] },
+            global:   { label: MMt("Global"),   color: "#FFAA00", icons: ["world", "global"] },
+            alliance: { label: MMt("Alliance"), color: "#ABFF5C", icons: ["alliance"] },
+            whisper:  { label: MMt("Whisper"),  color: "#ff95b3", icons: ["whisper", "private"] }
+        };
+        var TAB_ORDER = ["all", "global", "alliance", "whisper"];
+
         function getChat() { try { return qx.core.Init.getApplication().getChat(); } catch (e) { return null; } }
         function getWidget() { try { var c = getChat(); return c && c.getChatWidget ? c.getChatWidget() : null; } catch (e) { return null; } }
         function getTabView() { try { var w = getWidget(); var ch = w && w.getChildren && w.getChildren(); return (ch && ch[0]) || null; } catch (e) { return null; } }
         function pagesOf(tv) { try { return (tv.getSelectables ? tv.getSelectables() : tv.getChildren()) || []; } catch (e) { return []; } }
-        function labelFromIcon(icon) {
-            var m = String(icon || "").match(/icon_chat_channel_([a-z0-9]+)/i);
-            var key = m ? m[1].toLowerCase() : "";
-            var map = { world: "Global", global: "Global", alliance: "Alliance", officer: "Officer", "private": "Whisper", whisper: "Whisper", trade: "Trade", help: "Help" };
-            return MMt(map[key] || (key ? (key.charAt(0).toUpperCase() + key.slice(1)) : "Chat"));
-        }
-        function enumChannels() {
-            var out = [];
+        // native page index for a channel key, by icon keyword (null if not present)
+        function nativeIdxFor(key) {
             try {
-                var tv = getTabView(); if (!tv) return out;
-                var pages = pagesOf(tv);
+                var keys = (CHAN[key] && CHAN[key].icons) || [];
+                var pages = pagesOf(getTabView());
                 for (var i = 0; i < pages.length; i++) {
-                    var icon = ""; try { icon = pages[i].getIcon() || ""; } catch (e) {}
-                    out.push({ idx: i, page: pages[i], icon: icon, label: labelFromIcon(icon) });
+                    var icon = ""; try { icon = String(pages[i].getIcon() || "").toLowerCase(); } catch (e) {}
+                    for (var k = 0; k < keys.length; k++) if (icon.indexOf("channel_" + keys[k]) !== -1) return i;
                 }
-            } catch (e) { wwarn("enumChannels:", e); }
-            return out;
-        }
-        function currentNativeIdx() {
-            try {
-                var tv = getTabView(); var sel = tv && tv.getSelection ? tv.getSelection()[0] : null;
-                var pages = pagesOf(tv);
-                for (var i = 0; i < pages.length; i++) if (pages[i] === sel) return i;
-            } catch (e) {}
-            return 0;
+            } catch (e) { wwarn("nativeIdxFor:", e); }
+            return -1;
         }
         function selectChannelIdx(idx) {
-            try { var tv = getTabView(); var pages = pagesOf(tv); if (pages[idx] && tv.setSelection) { tv.setSelection([pages[idx]]); return true; } }
+            try { if (idx < 0) return false; var tv = getTabView(); var pages = pagesOf(tv); if (pages[idx] && tv.setSelection) { tv.setSelection([pages[idx]]); return true; } }
             catch (e) { wwarn("selectChannelIdx:", e); }
             return false;
         }
@@ -194,16 +193,23 @@
                 var sender = span ? (span.textContent || "") : "";
                 var tm = String(html).match(/(\d{1,2}:\d{2}:\d{2})/);
                 var time = tm ? tm[1] : "";
-                var chan = "", chanColor = null;
+                // first non-white font colour = the game's channel colour (Global has no [label]
+                // bracket, so we classify by message-type, not by parsing the text)
+                var chanColor = null;
                 var fonts = d.querySelectorAll("font");
                 for (var i = 0; i < fonts.length; i++) {
                     var col = fonts[i].getAttribute("color");
-                    if (col && col.toLowerCase() !== "white") {
-                        var m = (fonts[i].textContent || "").match(/^\s*\[([^\]]+)\]/);
-                        if (m) { chan = m[1]; chanColor = col; break; }
-                    }
+                    if (col && col.toLowerCase() !== "white") { chanColor = col; break; }
                 }
-                return { time: time, chan: chan, chanColor: chanColor, sender: sender, senderId: senderId, mtype: mtype, raw: raw, plain: (d.textContent || "").trim() };
+                var chanKey = MTYPE_CHAN[String(mtype)] || "other";
+                var def = CHAN[chanKey];
+                return {
+                    time: time, chanKey: chanKey,
+                    chan: def ? def.label : "",
+                    chanColor: chanColor || (def ? def.color : null),
+                    sender: sender, senderId: senderId, mtype: mtype, raw: raw,
+                    plain: (d.textContent || "").trim()
+                };
             } catch (e) { wwarn("parse failed:", e); return null; }
         }
 
@@ -227,8 +233,9 @@
             wlog("building UI");
             try { Tr.warm(); } catch (e) {}
 
-            var rows = [];          // { lbl, p, tr, chanIdx }
-            var activeFilter = -1;  // -1 = All, else channel index
+            var rows = [];              // { lbl, p, tr, chanKey }
+            var activeFilter = "all";  // "all" or a channel key
+            var lastChanKey = "alliance";   // last real channel chosen (send target when viewing All)
             var TXT = "#e8e8e8";
 
             var list = new qx.ui.container.Composite(new qx.ui.layout.VBox(2)).set({ padding: 6, backgroundColor: "#0c1a28" });
@@ -238,14 +245,14 @@
             function atBottom() { try { return (scroll.getScrollY() >= scroll.getScrollMaxY() - 24); } catch (e) { return true; } }
             function scrollBottomSoon(force) { var stick = force || atBottom(); if (!stick) return; window.setTimeout(function () { try { scroll.scrollToY(scroll.getScrollMaxY()); } catch (e) {} }, 0); }
 
-            function rowVisible(r) { return (activeFilter < 0) || (r.chanIdx === activeFilter); }
+            function rowVisible(r) { return (activeFilter === "all") || (r.chanKey === activeFilter); }
             function applyFilter() {
                 for (var i = 0; i < rows.length; i++) { try { rows[i].lbl.setVisibility(rowVisible(rows[i]) ? "visible" : "excluded"); } catch (e) {} }
                 scrollBottomSoon(true);
             }
 
-            function addRow(p, chanIdx) {
-                var r = { lbl: null, p: p, tr: null, chanIdx: (typeof chanIdx === "number" ? chanIdx : null) };
+            function addRow(p) {
+                var r = { lbl: null, p: p, tr: null, chanKey: p.chanKey };
                 var lbl = new qx.ui.basic.Label(lineHtml(p, null)).set({ rich: true, selectable: true, allowGrowX: true, font: new qx.bom.Font(12, ["sans-serif"]) });
                 r.lbl = lbl;
                 var wasBottom = atBottom();
@@ -257,12 +264,12 @@
                 return r;
             }
 
-            function onMessage(html, chanIdx) {
+            function onMessage(html) {
                 if (!enabled()) return;
                 var p = parseMessage(html);
                 if (!p) return;
-                ensureTabFor(chanIdx, p);   // a new (e.g. whisper) channel may need a tab
-                var row = addRow(p, chanIdx);
+                if (!p.raw || String(p.mtype) === "0") return;   // skip system / command-error / no-text rows
+                var row = addRow(p);
                 if (p.raw && Tr.supported) {
                     var tgt = targetLang(), done = false;
                     var hintTimer = window.setTimeout(function () { if (!done) { try { row.lbl.setValue(lineHtml(p, null, true)); } catch (e) {} } }, 400);
@@ -283,7 +290,7 @@
                     if (typeof orig !== "function") { werr("showMessage not found"); return false; }
                     cw.showMessage = function () {
                         var r = orig.apply(this, arguments);
-                        try { onMessage(arguments[0], arguments[2]); } catch (e) { wwarn("onMessage:", e); }
+                        try { onMessage(arguments[0]); } catch (e) { wwarn("onMessage:", e); }
                         return r;
                     };
                     cw.__mmTransHooked = true;
@@ -293,33 +300,27 @@
             }
             if (!hookChat()) window.setTimeout(hookChat, 1500);
 
-            // ---- channel tabs (built live from the native channels) ----
+            // ---- channel tabs: fixed All / Global / Alliance / Whisper ----
             var tabsBar = new qx.ui.container.Composite(new qx.ui.layout.Flow(3, 3)).set({ padding: 4, backgroundColor: "#0a1521" });
             var tabGroup = new qx.ui.form.RadioGroup().set({ allowEmptySelection: false });
-            var knownTabs = {};   // idx -> button ("all" -> button)
-            function makeTab(key, label) {
-                var b = new qx.ui.form.ToggleButton(label).set({ focusable: false, padding: [2, 8] });
-                b.setUserData("chanKey", key);
+            var tabBtns = {};
+            function makeTab(key) {
+                var def = CHAN[key];
+                var b = new qx.ui.form.ToggleButton(def.label).set({ focusable: false, padding: [2, 8] });
+                if (key !== "all") { try { b.setTextColor(def.color); } catch (e) {} }
                 tabGroup.add(b);
                 tabsBar.add(b);
                 b.addListener("changeValue", function (e) {
                     if (!e.getData()) return;
-                    activeFilter = (key === "all") ? -1 : key;
-                    if (key !== "all") selectChannelIdx(key);   // align native send-target with the viewed channel
+                    activeFilter = key;
+                    if (key !== "all") { lastChanKey = key; selectChannelIdx(nativeIdxFor(key)); }   // align native send-target with the viewed channel
                     applyFilter();
                 });
                 return b;
             }
-            function ensureTabFor(chanIdx, p) {
-                if (typeof chanIdx !== "number" || knownTabs[chanIdx]) return;
-                var label = p && p.chan ? p.chan : (labelFromIcon((enumChannels()[chanIdx] || {}).icon) || (MMt("Channel") + " " + chanIdx));
-                knownTabs[chanIdx] = makeTab(chanIdx, label);
-            }
             function buildTabs() {
-                if (!knownTabs.all) knownTabs.all = makeTab("all", MMt("All"));
-                var chans = enumChannels();
-                for (var i = 0; i < chans.length; i++) if (!knownTabs[chans[i].idx]) knownTabs[chans[i].idx] = makeTab(chans[i].idx, chans[i].label);
-                try { knownTabs.all.setValue(true); } catch (e) {}
+                for (var i = 0; i < TAB_ORDER.length; i++) { var k = TAB_ORDER[i]; if (!tabBtns[k]) tabBtns[k] = makeTab(k); }
+                try { tabBtns.all.setValue(true); } catch (e) {}
             }
 
             // ---- header ----
@@ -361,10 +362,10 @@
                 var text = (input.getValue() || "").trim();
                 if (!text) return;
                 try {
-                    var idx = (activeFilter >= 0) ? activeFilter : currentNativeIdx();
-                    selectChannelIdx(idx);
+                    var key = (activeFilter === "all") ? lastChanKey : activeFilter;   // "All" view sends to the last channel used (default Alliance)
+                    selectChannelIdx(nativeIdxFor(key));
                     var cw = getWidget();
-                    if (cw && typeof cw.send === "function") cw.send(text);   // game echoes it back through showMessage -> appears in feed
+                    if (cw && typeof cw.send === "function") cw.send(text);   // game echoes it back via showMessage -> appears in feed
                     input.setValue("");
                 } catch (e) { werr("send failed:", e); }
             }
