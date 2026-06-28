@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.30
+// @version         1.0.31
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.30"
+            version: "1.0.31"
         };
 
         // -------------------------------------------------------------------
@@ -205,6 +205,10 @@
             // ENGLISH SOURCE string -> translation. English needs no catalog (t() returns the source
             // unchanged); a missing key also falls back to English, so partial catalogs are safe.
             // fr/de/ru/es are broad; others seeded from the old BaseInfo + script translation tables.
+            // Inline translation catalogs (auto-assembled). Keyed by language code, then by the
+            // ENGLISH SOURCE string -> translation. English needs no catalog (t() returns the source
+            // unchanged); a missing key also falls back to English, so partial catalogs are safe.
+            // fr/de/ru/es are broad; others seeded from the old BaseInfo + script translation tables.
             var CATALOGS = {
               "fr": {
                 " (Pending ": " (En attente ",
@@ -280,6 +284,8 @@
                 "All defense units": "Toutes les unites de defense",
                 "Alliance Bonus": "Bonus d'alliance",
                 "Alliance Role": "rôle de l'Alliance",
+                "Alliance bases": "Bases de l'alliance",
+                "Alliance bases (blue)": "Bases de l'alliance (bleu)",
                 "Allow reductions": "Autoriser les réductions",
                 "Applied": "Appliqué",
                 "Applied cheapest winning layout (lowest max repair time).": "Agencement gagnant le moins cher appliqué (temps de réparation max le plus bas).",
@@ -379,6 +385,7 @@
                 "Enables/Disables all infantry units.": "Active/Desactive toutes les unites d'infanterie.",
                 "Enables/Disables all units.": "Active/Desactive toutes les unites.",
                 "Enables/Disables all vehicles.": "Active/Desactive tous les vehicules.",
+                "Enemy bases": "Bases ennemies",
                 "Enter CNCTAOpt Long Link:": "Entrez le lien long CNCTAOpt :",
                 "Enumerating…": "Énumération…",
                 "Error saving: ": "Erreur d'enregistrement : ",
@@ -392,6 +399,7 @@
                 "Flash the browser-tab title": "Faire clignoter le titre de l'onglet du navigateur",
                 "Foe": "Ennemi",
                 "Force-sell special buildings": "Vente forcée des bâtiments spéciaux",
+                "Forgotten / NPC bases (green)": "Bases Oubliés / PNJ (vert)",
                 "Found": "Trouvé",
                 "Friend": "Ami",
                 "From:": "De :",
@@ -430,10 +438,12 @@
                 "Lootable resources": "Ressources pillables",
                 "Lvl": "Niv",
                 "Lvl≥": "Niv≥",
+                "MM - Base Scanner": "MM - Scanner de base",
                 "Master: enable Attack Alert": "Principal : activer l'alerte d'attaque",
                 "Master: enable the move-panel readout": "Principal : activer l'affichage du panneau de déplacement",
                 "Master: enable the range overlay": "Principal : activer la superposition de portée",
                 "Master: enable the tunnel overlay": "Principal : activer la superposition de tunnels",
+                "Master: show the overlay at all": "Principal : afficher la superposition",
                 "Max bases": "Bases max",
                 "Max bases founded": "Bases max fondées",
                 "Max fruitless kicks": "Ejections infructueuses max",
@@ -463,6 +473,7 @@
                 "Neighbors:": "Voisins :",
                 "Net production change (continuous /h)": "Variation nette de production (continu /h)",
                 "Neutral": "Neutre",
+                "Neutral bases (peace/NAP)": "Bases neutres (paix/PNA)",
                 "Next MCV": "Prochain MCV",
                 "No alliance": "Aucune alliance",
                 "No army units found to optimize.": "Aucune unité d'armée trouvée à optimiser.",
@@ -499,8 +510,10 @@
                 "Optimizing": "Optimisation",
                 "Optimizing (": "Optimisation (",
                 "Origin base not loaded": "Base d'origine non chargée",
+                "Other players' bases (orange)": "Bases des autres joueurs (orange)",
                 "Outpost": "Avant-poste",
                 "Outposts": "Avant-postes",
+                "Own bases": "Vos bases",
                 "Package Production": "Production de colis",
                 "Pick an origin base": "Choisissez une base d'origine",
                 "Pin into the game menu / unpin to a movable panel": "Épingler dans le menu du jeu / désépingler vers un panneau déplaçable",
@@ -874,6 +887,8 @@
                 "All defense units": "Alle Abwehrstellungen",
                 "Alliance Bonus": "Allianz-Bonus",
                 "Alliance Role": "Allianz Rolle",
+                "Alliance bases": "Allianz-Basen",
+                "Alliance bases (blue)": "Allianz-Basen (blau)",
                 "Allow reductions": "Reduzierungen erlauben",
                 "Applied": "Angewendet",
                 "Applied cheapest winning layout (lowest max repair time).": "Günstigstes Sieger-Layout angewendet (niedrigste maximale Reparaturzeit).",
@@ -975,6 +990,7 @@
                 "Enables/Disables all infantry units.": "Aktiviert/Deaktiviert alle Infanterie-Einheiten.",
                 "Enables/Disables all units.": "Aktiviert/Deaktiviert alle Einheiten.",
                 "Enables/Disables all vehicles.": "Aktiviert/Deaktiviert alle Fahrzeuge.",
+                "Enemy bases": "Feindliche Basen",
                 "Enter CNCTAOpt Long Link:": "CNCTAOpt Long Link eingeben:",
                 "Enumerating…": "Wird aufgelistet…",
                 "Error saving: ": "Fehler beim Speichern: ",
@@ -988,6 +1004,7 @@
                 "Flash the browser-tab title": "Den Browser-Tab-Titel aufblinken lassen",
                 "Foe": "Feind",
                 "Force-sell special buildings": "Spezialgebäude zwangsverkaufen",
+                "Forgotten / NPC bases (green)": "Vergessene / NPC-Basen (grün)",
                 "Found": "Gefunden",
                 "Friend": "Freund",
                 "From:": "Von:",
@@ -1024,10 +1041,12 @@
                 "Loot Info": "Beute-Info",
                 "Loot Summary": "Beute-Übersicht",
                 "Lootable resources": "Erbeutbare Ressourcen",
+                "MM - Base Scanner": "MM - Basis-Scanner",
                 "Master: enable Attack Alert": "Hauptschalter: Angriffsalarm aktivieren",
                 "Master: enable the move-panel readout": "Hauptschalter: die Verschiebe-Panel-Anzeige aktivieren",
                 "Master: enable the range overlay": "Hauptschalter: das Reichweiten-Overlay aktivieren",
                 "Master: enable the tunnel overlay": "Hauptschalter: das Tunnel-Overlay aktivieren",
+                "Master: show the overlay at all": "Hauptschalter: Overlay überhaupt anzeigen",
                 "Max bases": "Max. Basen",
                 "Max bases founded": "Max. gegründete Basen",
                 "Max fruitless kicks": "Max. erfolglose Kicks",
@@ -1056,6 +1075,7 @@
                 "Needs a Tiberium transfer": "Benötigt einen Tiberium-Transfer",
                 "Neighbors:": "Nachbarn:",
                 "Net production change (continuous /h)": "Netto-Produktionsänderung (kontinuierlich /h)",
+                "Neutral bases (peace/NAP)": "Neutrale Basen (Frieden/NAP)",
                 "Next MCV": "Nächste MCV",
                 "No alliance": "Keine Allianz",
                 "No army units found to optimize.": "Keine Armeeeinheiten zum Optimieren gefunden.",
@@ -1092,8 +1112,10 @@
                 "Optimizing": "Wird optimiert",
                 "Optimizing (": "Wird optimiert (",
                 "Origin base not loaded": "Ursprungsbasis nicht geladen",
+                "Other players' bases (orange)": "Basen anderer Spieler (orange)",
                 "Outpost": "Außenposten",
                 "Outposts": "Außenposten",
+                "Own bases": "Eigene Basen",
                 "Package Production": "Paket-Produktion",
                 "Pick an origin base": "Wähle eine Ursprungsbasis",
                 "Pin into the game menu / unpin to a movable panel": "Im Spielmenü anheften / zu einem beweglichen Panel lösen",
@@ -1467,6 +1489,8 @@
                 "All defense units": "Все оборонительные юниты",
                 "Alliance Bonus": "Бонус альянса",
                 "Alliance Role": "Роль в альянсе",
+                "Alliance bases": "Базы альянса",
+                "Alliance bases (blue)": "Базы альянса (синие)",
                 "Allow reductions": "Разрешить ухудшения",
                 "Applied": "Применено",
                 "Applied cheapest winning layout (lowest max repair time).": "Применена самая дешёвая выигрышная планировка (наименьшее макс. время ремонта).",
@@ -1572,6 +1596,7 @@
                 "Enables/Disables all infantry units.": "Включает/отключает всю пехоту.",
                 "Enables/Disables all units.": "Включает/отключает все юниты.",
                 "Enables/Disables all vehicles.": "Включает/отключает всю технику.",
+                "Enemy bases": "Вражеские базы",
                 "Enter CNCTAOpt Long Link:": "Введите длинную ссылку CNCTAOpt:",
                 "Enumerating…": "Перечисление…",
                 "Error saving: ": "Ошибка сохранения: ",
@@ -1585,6 +1610,7 @@
                 "Flash the browser-tab title": "Мигать заголовком вкладки браузера",
                 "Foe": "Враг",
                 "Force-sell special buildings": "Принудительно продать особые здания",
+                "Forgotten / NPC bases (green)": "Базы Забытых / NPC (зелёные)",
                 "Found": "Найдено",
                 "Friend": "Друг",
                 "From:": "От:",
@@ -1625,10 +1651,12 @@
                 "Lootable resources": "Захватываемые ресурсы",
                 "Lvl": "Ур",
                 "Lvl≥": "Ур≥",
+                "MM - Base Scanner": "MM - Сканер баз",
                 "Master: enable Attack Alert": "Главное: включить оповещение об атаке",
                 "Master: enable the move-panel readout": "Главное: включить показания панели перемещения",
                 "Master: enable the range overlay": "Главное: включить наложение радиуса",
                 "Master: enable the tunnel overlay": "Главное: включить наложение туннелей",
+                "Master: show the overlay at all": "Главный: показывать наложение целиком",
                 "Max bases": "Макс. баз",
                 "Max bases founded": "Макс. основано баз",
                 "Max fruitless kicks": "Макс. безрезультатных толчков",
@@ -1658,6 +1686,7 @@
                 "Neighbors:": "Соседи:",
                 "Net production change (continuous /h)": "Чистое изменение производства (непрерывно /ч)",
                 "Neutral": "Нейтральный",
+                "Neutral bases (peace/NAP)": "Нейтральные базы (мир/ПНА)",
                 "Next MCV": "Следующий MCV",
                 "No alliance": "Нет альянса",
                 "No army units found to optimize.": "Не найдено армейских юнитов для оптимизации.",
@@ -1693,8 +1722,10 @@
                 "Optimizing": "Оптимизация",
                 "Optimizing (": "Оптимизация (",
                 "Origin base not loaded": "База-источник не загружена",
+                "Other players' bases (orange)": "Базы других игроков (оранжевые)",
                 "Outpost": "Аванпост",
                 "Outposts": "Аванпосты",
+                "Own bases": "Свои базы",
                 "Package Production": "Производство посылок",
                 "Pick an origin base": "Выберите базу-источник",
                 "Pin into the game menu / unpin to a movable panel": "Закрепить в игровом меню / открепить в перемещаемую панель",
@@ -2072,6 +2103,8 @@
                 "All defense units": "Todas las unidades defensivas",
                 "Alliance Bonus": "Bonificación de alianza",
                 "Alliance Role": "papel Alianza",
+                "Alliance bases": "Bases de la alianza",
+                "Alliance bases (blue)": "Bases de la alianza (azul)",
                 "Allow reductions": "Permitir reducciones",
                 "Applied": "Aplicado",
                 "Applied cheapest winning layout (lowest max repair time).": "Aplicada la distribución ganadora más barata (menor tiempo máximo de reparación).",
@@ -2172,6 +2205,7 @@
                 "Enables/Disables all infantry units.": "Activa/Desactiva todas las unidades de infanteria.",
                 "Enables/Disables all units.": "Activa/Desactiva todas las unidades.",
                 "Enables/Disables all vehicles.": "Activa/Desactiva todos los vehiculos.",
+                "Enemy bases": "Bases enemigas",
                 "Enter CNCTAOpt Long Link:": "Introduce el enlace largo de CNCTAOpt:",
                 "Enumerating…": "Enumerando…",
                 "Error saving: ": "Error al guardar: ",
@@ -2185,6 +2219,7 @@
                 "Flash the browser-tab title": "Parpadear el título de la pestaña del navegador",
                 "Foe": "Enemigo",
                 "Force-sell special buildings": "Venta forzada de edificios especiales",
+                "Forgotten / NPC bases (green)": "Bases Olvidados / PNJ (verde)",
                 "Found": "Encontrado",
                 "Friend": "Amigo",
                 "From:": "De:",
@@ -2224,10 +2259,12 @@
                 "Lootable resources": "Recursos saqueables",
                 "Lvl": "Nvl",
                 "Lvl≥": "Nvl≥",
+                "MM - Base Scanner": "MM - Escáner de base",
                 "Master: enable Attack Alert": "Principal: activar Alerta de ataque",
                 "Master: enable the move-panel readout": "Principal: activar la lectura del panel de movimiento",
                 "Master: enable the range overlay": "Principal: activar la superposición de alcance",
                 "Master: enable the tunnel overlay": "Principal: activar la superposición de túneles",
+                "Master: show the overlay at all": "Principal: mostrar la superposición",
                 "Max bases": "Máx. bases",
                 "Max bases founded": "Máx. bases fundadas",
                 "Max fruitless kicks": "Maximo de patadas infructuosas",
@@ -2256,6 +2293,7 @@
                 "Needs a Tiberium transfer": "Necesita una transferencia de Tiberio",
                 "Neighbors:": "Vecinos:",
                 "Net production change (continuous /h)": "Cambio neto de producción (continua /h)",
+                "Neutral bases (peace/NAP)": "Bases neutrales (paz/PNA)",
                 "Next MCV": "Próximo MCV",
                 "No alliance": "Sin alianza",
                 "No army units found to optimize.": "No se encontraron unidades de ejército para optimizar.",
@@ -2292,8 +2330,10 @@
                 "Optimizing": "Optimizando",
                 "Optimizing (": "Optimizando (",
                 "Origin base not loaded": "Base de origen no cargada",
+                "Other players' bases (orange)": "Bases de otros jugadores (naranja)",
                 "Outpost": "Puesto avanzado",
                 "Outposts": "Puestos avanzados",
+                "Own bases": "Bases propias",
                 "Package Production": "Producción de paquetes",
                 "Pick an origin base": "Elige una base de origen",
                 "Pin into the game menu / unpin to a movable panel": "Fijar en el menú del juego / desfijar a un panel movible",
