@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.0
+// @version         1.2.1
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -371,13 +371,16 @@
                 key: "TranslatedChat.Window",
                 layout: new qx.ui.layout.VBox(0),
                 width: 460, height: 320,
-                persistSize: true, restoreOpen: true, resizable: true,
+                persistSize: false, restoreOpen: true, resizable: true,
                 dock: false, contentPadding: 0
             });
             if (!win) { werr("window creation failed"); return; }
             // frameless-ish: drop the qx caption bar so our blue title strip is the only chrome
             // (keep the window decorator so the resize handles still work when unlocked)
             try { var cb = win.getChildControl("captionbar"); if (cb) cb.exclude(); } catch (e) {}
+            // paint a clean outline on all four sides (frameless look, but bordered like the native chat)
+            function styleFrame() { try { var de = win.getContentElement().getDomElement(); if (de) { de.style.border = "1px solid #3a6e9c"; de.style.borderRadius = "4px"; de.style.boxSizing = "border-box"; } } catch (e) {} }
+            win.addListener("appear", styleFrame);
             win.add(titleStrip);
             win.add(controls);
             win.add(tabsBar);
@@ -394,29 +397,35 @@
                     try { var b = win.getBounds(); if (!b || b.left == null) return; ox = e.getDocumentLeft() - b.left; oy = e.getDocumentTop() - b.top; drag = true; win.capture(true); e.stop(); } catch (er) {}
                 });
                 win.addListener("mousemove", function (e) { if (!drag) return; try { win.moveTo(Math.max(0, e.getDocumentLeft() - ox), Math.max(0, e.getDocumentTop() - oy)); } catch (er) {} });
-                function end() { if (!drag) return; drag = false; try { win.releaseCapture(); } catch (er) {} }
+                function end() { if (!drag) return; drag = false; try { win.releaseCapture(); } catch (er) {} saveUG(); }
                 win.addListener("mouseup", end);
                 win.addListener("losecapture", end);
             })();
 
-            // ---- lock / dock ----
-            function dockLowerLeft() {
-                try {
-                    var root = qx.core.Init.getApplication().getRoot().getBounds() || {};
-                    var b = win.getBounds() || {};
-                    var vh = root.height || window.innerHeight || 720;
-                    win.moveTo(6, Math.max(0, vh - (b.height || 320) - 4));
-                } catch (e) {}
-            }
-            function applyLock(locked) {
+            // ---- lock / dock + geometry memory ----
+            // Locked = a fixed compact size docked lower-left (like the native chat). Unlocked = the last
+            // size/position you left it at (remembered separately, so locking doesn't clobber it).
+            var DOCK = { w: 430, h: 250 };
+            var DEF_UG = { left: 220, top: 120, width: 460, height: 320 };
+            function getUG() { try { var g = MM.settings.get(SET + "ug", null); return (g && g.width) ? g : DEF_UG; } catch (e) { return DEF_UG; } }
+            function saveUG() { try { if (isLocked()) return; var b = win.getBounds(); if (b && b.left != null && b.width) MM.settings.set(SET + "ug", { left: b.left, top: b.top, width: b.width, height: b.height }); } catch (e) {} }
+            function viewH() { try { var r = qx.core.Init.getApplication().getRoot().getBounds() || {}; return r.height || window.innerHeight || 720; } catch (e) { return 720; } }
+            function applyDocked() { try { win.setWidth(DOCK.w); win.setHeight(DOCK.h); win.moveTo(6, Math.max(0, viewH() - DOCK.h - 4)); } catch (e) {} }
+            function applyUnlockedGeom() { try { var g = getUG(); win.setWidth(g.width); win.setHeight(g.height); win.moveTo(g.left, g.top); } catch (e) {} }
+            function applyLock(locked, captureFirst) {
                 try {
                     lockLbl.setValue(locked ? "🔒" : "🔓");
                     lockLbl.setToolTipText(locked ? MMt("Unlock") : MMt("Lock"));
                     win.setResizable(!locked);
-                    if (locked) dockLowerLeft();
+                    if (locked) { if (captureFirst) saveUG(); applyDocked(); }
+                    else { applyUnlockedGeom(); }
                 } catch (e) { wwarn("applyLock:", e); }
             }
-            lockLbl.addListener("tap", function () { var n = !isLocked(); try { MM.settings.set(SET + "locked", n); } catch (e) {} applyLock(n); });
+            lockLbl.addListener("tap", function () { var n = !isLocked(); try { MM.settings.set(SET + "locked", n); } catch (e) {} applyLock(n, true); });
+            // keep the unlocked geometry fresh as the user moves/resizes (resize event is unreliable across
+            // qooxdoo builds, so also poll lightly while unlocked)
+            try { win.addListener("resize", saveUG); } catch (e) {}
+            window.setInterval(function () { try { if (win.isVisible() && !isLocked()) saveUG(); } catch (e) {} }, 1500);
 
             // ---- minimize (native stays hidden; restore via the MM Tools button) ----
             minBtn.addListener("tap", function () { try { win.close(); } catch (e) {} });
@@ -426,7 +435,7 @@
             nativeChk.addListener("changeValue", function () { try { MM.settings.set(SET + "hideNative", nativeChk.getValue()); setNativeHidden(nativeChk.getValue()); } catch (e) {} });
             setNativeHidden(hideNative());
 
-            win.addListener("appear", function () { buildTabs(); updateTitle(); applyLock(isLocked()); setNativeHidden(hideNative()); });
+            win.addListener("appear", function () { buildTabs(); updateTitle(); applyLock(isLocked(), false); setNativeHidden(hideNative()); });
 
             MM.buttons.register({
                 id: "mm-translated-chat",
