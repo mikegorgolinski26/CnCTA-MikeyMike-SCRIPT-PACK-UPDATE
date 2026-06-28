@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.24
+// @version         1.0.25
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.24"
+            version: "1.0.25"
         };
 
         // -------------------------------------------------------------------
@@ -1800,9 +1800,12 @@
                 if (!pendingMenu.length) return;
                 var mp = ensureMenuPanel();
                 if (mp) {
-                    pendingMenu.sort(byLabelAsc); // docked buttons alphabetical (ascending)
-                    for (var i = 0; i < pendingMenu.length; i++) { try { mp.add(pendingMenu[i]); } catch (e) {} }
+                    // Re-sort the ENTIRE docked set, not just this batch. register() runs once per script
+                    // across several ticks, so a heavy/slow script (e.g. Base Tools) flushes in a LATER batch;
+                    // a per-batch sort+append stranded it at the bottom instead of its global alphabetical slot.
+                    // moveButtonsTo(mp) re-orders every registered button (the "MM Tools" label is left alone).
                     pendingMenu = [];
+                    moveButtonsTo(mp);
                     return;
                 }
                 if (++placeTries <= 30) { placeTimer = window.setTimeout(flushMenuButtons, 1000); return; }

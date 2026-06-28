@@ -5,7 +5,7 @@
 // @contributor     NetquiK (https://github.com/netquik)
 // @translator      ES: Nefrontheone
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.1.3
+// @version         1.1.5
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_Upgrade.user.js
@@ -227,8 +227,9 @@
         // request: clicking "All army units" with crystal short should still upgrade every unit it
         // can, not nothing). Power isn't transferable, so a power shortage just falls through.
         // `setStatus(html)` surfaces progress to the panel-footer label; pass a no-op if you don't care.
-        function upgradeWithMaybeTransfer(totalCosts, setStatus, fireUpgrade) {
+        function upgradeWithMaybeTransfer(totalCosts, setStatus, fireUpgrade, note) {
             try {
+                note = note || "";
                 if (!transferOn()) { fireUpgrade(); return; }
                 var city;
                 try { city = ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity(); } catch (e) {}
@@ -267,7 +268,7 @@
                 }
 
                 var totalFee = credits - budget;
-                setStatus("Transferring max available (" + plans.length + " resource type" + (plans.length > 1 ? "s" : "") + ", fee ~" + Math.round(totalFee) + " credits)...");
+                setStatus("Transferring max available (" + plans.length + " resource type" + (plans.length > 1 ? "s" : "") + ", fee ~" + Math.round(totalFee) + " credits)..." + note);
                 var pi = 0;
                 function nextPlan() {
                     if (pi >= plans.length) {
@@ -275,8 +276,8 @@
                         // UpgradeAll*ToLevel pass spends the topped-up pool greedily (we already pulled
                         // ALL available resources, so a second pass couldn't add anything).
                         setStatus(anyPartial
-                            ? "<span style='color:#6ee07a;font-weight:bold'>Transferred all available - upgrading as many as fit.</span>"
-                            : "<span style='color:#6ee07a;font-weight:bold'>Transfers complete - upgrading.</span>");
+                            ? "<span style='color:#6ee07a;font-weight:bold'>Transferred all available - upgrading as many as fit.</span>" + note
+                            : "<span style='color:#6ee07a;font-weight:bold'>Transfers complete - upgrading.</span>" + note);
                         window.setTimeout(function () { fireUpgrade(); window.setTimeout(function () { setStatus(""); }, 3000); }, 400);
                         return;
                     }
@@ -468,10 +469,37 @@
                                 var newLevel = parseInt(this.txtLevel.getValue(), 10);
                                 if (newLevel <= 0) return;
                                 var self = this;
+                                var mode = ClientLib.Vis.VisMain.GetInstance().get_Mode();
                                 var totalCosts = sumCostsByResource(this.getUpgradeCostsToLevel(newLevel));
+                                var note = "";
+                                // "Transfer as needed" POWER CAP (Mike): power can't be transferred between
+                                // bases, so stored power is the hard ceiling on how many of these units/buildings
+                                // actually upgrade. The game upgrades a SUBSET when power runs short, but its API
+                                // exposes no way to drive individual units (only "upgrade ALL to level N"), so we
+                                // can't pick which - we just avoid hauling resources the base can't spend. If
+                                // stored power covers only a fraction f of the batch's TOTAL power cost, bring
+                                // only that fraction of the tiberium/crystal (floored, so we never over-transfer)
+                                // and let the game upgrade as many as fit. This scales WHATEVER the batch needs,
+                                // so it works for army (crystal), defense (tiberium and/or crystal) and buildings
+                                // (tiberium) alike. NOTE: this is proportional, not a per-unit simulation - the
+                                // exact crystal the game spends depends on which units it upgrades, but bringing
+                                // the power-fraction is close and never the old "haul it all then send it back".
+                                if (transferOn() && totalCosts && (totalCosts.pow || 0) > 0) {
+                                    var city = ClientLib.Data.MainData.GetInstance().get_Cities().get_CurrentOwnCity();
+                                    var powAvail = city ? Math.floor(city.GetResourceCount(ClientLib.Base.EResourceType.Power)) : 0;
+                                    if (powAvail < (totalCosts.pow || 0)) {
+                                        var f = Math.max(0, powAvail / totalCosts.pow);
+                                        totalCosts = {
+                                            tib: Math.floor((totalCosts.tib || 0) * f),
+                                            cry: Math.floor((totalCosts.cry || 0) * f),
+                                            pow: totalCosts.pow
+                                        };
+                                        note = " (stored power covers ~" + Math.round(f * 100) + "% of the batch - bringing only that much; run again as power regrows)";
+                                    }
+                                }
                                 function fire() {
                                     try {
-                                        switch (ClientLib.Vis.VisMain.GetInstance().get_Mode()) {
+                                        switch (mode) {
                                             case ClientLib.Vis.Mode.City:         ClientLib.API.City.GetInstance().UpgradeAllBuildingsToLevel(newLevel); break;
                                             case ClientLib.Vis.Mode.DefenseSetup: ClientLib.API.Defense.GetInstance().UpgradeAllUnitsToLevel(newLevel); break;
                                             case ClientLib.Vis.Mode.ArmySetup:    ClientLib.API.Army.GetInstance().UpgradeAllUnitsToLevel(newLevel); break;
@@ -479,7 +507,7 @@
                                         self.reset();
                                     } catch (e) { werr("All.onUpgrade fire:", e); }
                                 }
-                                upgradeWithMaybeTransfer(totalCosts, setUpgradeStatus, fire);
+                                upgradeWithMaybeTransfer(totalCosts, setUpgradeStatus, fire, note);
                             } catch (e) { werr("All.onUpgrade:", e); }
                         }
                     }
