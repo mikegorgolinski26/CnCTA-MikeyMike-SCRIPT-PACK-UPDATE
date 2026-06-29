@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.2
+// @version         1.2.3
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -307,7 +307,15 @@
             // clicks on the buttons must not start a drag
             minBtn.addListener("mousedown", function (e) { e.stopPropagation(); });
             lockLbl.addListener("mousedown", function (e) { e.stopPropagation(); });
-            function updateTitle() { try { var def = CHAN[activeFilter] || CHAN.all; titleLbl.setValue(MMt("Translated Chat") + " (" + (def ? def.label : MMt("All")) + ")"); } catch (e) {} }
+            function sendKeyNow() { return (activeFilter === "all") ? lastChanKey : activeFilter; }
+            function updateTitle() {
+                try {
+                    var label;
+                    if (activeFilter === "all") { var sk = CHAN[sendKeyNow()]; label = MMt("All") + " → " + (sk ? sk.label : ""); }
+                    else { var d = CHAN[activeFilter]; label = d ? d.label : MMt("All"); }
+                    titleLbl.setValue(MMt("Translated Chat") + " (" + label + ")");
+                } catch (e) {}
+            }
 
             // ---- channel tabs ----
             var tabsBar = new qx.ui.container.Composite(new qx.ui.layout.Flow(3, 3)).set({ padding: 4, backgroundColor: "#0a1521" });
@@ -324,6 +332,7 @@
                     activeFilter = key;
                     if (key !== "all") { lastChanKey = key; selectChannelIdx(nativeIdxFor(key)); }
                     updateTitle();
+                    updateSendTarget();
                     applyFilter();
                 });
                 return b;
@@ -372,6 +381,12 @@
             var inputRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(6)).set({ padding: 5, backgroundColor: "#10243a" });
             var input = new qx.ui.form.TextField().set({ placeholder: MMt("Type a message"), maxLength: 256 });
             var sendBtn = new qx.ui.form.Button(MMt("Send")).set({ focusable: false });
+            // prominent "where your message goes" chip (matters most on the All tab, where you view all but
+            // send to one channel) - coloured by that channel
+            var sendChip = new qx.ui.basic.Label("").set({ rich: true, alignY: "middle", font: new qx.bom.Font(12, ["sans-serif"]) });
+            function updateSendTarget() {
+                try { var d = CHAN[sendKeyNow()] || CHAN.global; sendChip.setValue('<span style="background:' + d.color + ';color:#10243a;padding:2px 9px;border-radius:4px;font-weight:bold;">➤ ' + esc(d.label) + '</span>'); } catch (e) {}
+            }
             function doSend() {
                 var text = (input.getValue() || "").trim();
                 if (!text) return;
@@ -390,6 +405,7 @@
             }
             sendBtn.addListener("execute", doSend);
             input.addListener("keypress", function (e) { if (e.getKeyIdentifier() === "Enter") doSend(); });
+            inputRow.add(sendChip);
             inputRow.add(input, { flex: 1 });
             inputRow.add(sendBtn);
 
@@ -420,6 +436,7 @@
             buildTabs();
             updateTabAvailability();
             updateTitle();
+            updateSendTarget();
 
             // ---- drag by the title strip (only when unlocked); win captures so moves track ----
             (function () {
@@ -466,8 +483,13 @@
             nativeChk.setValue(hideNative());
             nativeChk.addListener("changeValue", function () { try { MM.settings.set(SET + "hideNative", nativeChk.getValue()); setNativeHidden(nativeChk.getValue()); } catch (e) {} });
             setNativeHidden(hideNative());
+            // keep native hidden across reloads: the game can (re)show its chat AFTER our build runs, so
+            // re-assert on a few delays and whenever the native window's visibility changes
+            function enforceNativeHidden() { try { if (!hideNative()) return; var c = getChat(); if (c && c.getVisibility && c.getVisibility() !== "excluded") setNativeHidden(true); } catch (e) {} }
+            try { var nchat = getChat(); if (nchat && nchat.addListener) nchat.addListener("changeVisibility", enforceNativeHidden); } catch (e) {}
+            [300, 1000, 2500, 5000].forEach(function (d) { window.setTimeout(enforceNativeHidden, d); });
 
-            win.addListener("appear", function () { buildTabs(); updateTabAvailability(); updateTitle(); applyLock(isLocked(), false); setNativeHidden(hideNative()); });
+            win.addListener("appear", function () { buildTabs(); updateTabAvailability(); updateTitle(); updateSendTarget(); applyLock(isLocked(), false); setNativeHidden(hideNative()); });
 
             MM.buttons.register({
                 id: "mm-translated-chat",
