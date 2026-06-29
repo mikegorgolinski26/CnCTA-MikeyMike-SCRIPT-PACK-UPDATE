@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.5
+// @version         1.2.6
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -243,8 +243,10 @@
             try { Tr.warm(); } catch (e) {}
 
             var rows = [];
-            var activeFilter = "all";
-            var lastChanKey = "global";   // All-tab send target until a channel tab is picked (global is always available)
+            // Restore the channel tab + last send-channel the user left on (persisted per player+world);
+            // re-read on appear too, in case build() ran before the settings store keyed to the player.
+            var activeFilter = MM.settings.get(SET + "filter", "all") || "all";
+            var lastChanKey = MM.settings.get(SET + "lastChan", "global") || "global";   // All-tab send target until a channel tab is picked (global is always available)
             var TXT = "#e8e8e8";
 
             // ---- feed ----
@@ -333,7 +335,8 @@
             }
             function selectTab(key) {
                 activeFilter = key;
-                if (key !== "all") { lastChanKey = key; selectChannelIdx(nativeIdxFor(key)); }
+                try { MM.settings.set(SET + "filter", key); } catch (e) {}
+                if (key !== "all") { lastChanKey = key; try { MM.settings.set(SET + "lastChan", key); } catch (e) {} selectChannelIdx(nativeIdxFor(key)); }
                 for (var i = 0; i < TAB_ORDER.length; i++) { var k = TAB_ORDER[i]; var bb = tabBtns[k]; if (bb) try { bb.setValue(k === key); } catch (e) {} }
                 updateTitle(); updateSendTarget(); applyFilter();
             }
@@ -459,11 +462,33 @@
             // size/position you left it at (remembered separately, so locking doesn't clobber it).
             var DOCK = { w: 430, h: 250 };
             var DEF_UG = { left: 220, top: 120, width: 460, height: 320 };
+            var applyingGeom = false;   // suppress saveUG while we're (re)applying a restored size on appear
             function getUG() { try { var g = MM.settings.get(SET + "ug", null); return (g && g.width) ? g : DEF_UG; } catch (e) { return DEF_UG; } }
-            function saveUG() { try { if (isLocked()) return; var b = win.getBounds(); if (b && b.left != null && b.width) MM.settings.set(SET + "ug", { left: b.left, top: b.top, width: b.width, height: b.height }); } catch (e) {} }
+            // Save only a real, settled, on-screen size - never while we're mid-restore (the window briefly
+            // collapses to its content height before our re-apply lands, and persisting THAT was what reset
+            // the size on reload), and never an obviously-collapsed box.
+            function saveUG() {
+                try {
+                    if (isLocked() || applyingGeom || !win.isVisible()) return;
+                    var b = win.getBounds();
+                    if (b && b.left != null && b.width >= 200 && b.height >= 140) {
+                        MM.settings.set(SET + "ug", { left: b.left, top: b.top, width: b.width, height: b.height });
+                    }
+                } catch (e) {}
+            }
             function viewH() { try { var r = qx.core.Init.getApplication().getRoot().getBounds() || {}; return r.height || window.innerHeight || 720; } catch (e) { return 720; } }
             function applyDocked() { try { win.setWidth(DOCK.w); win.setHeight(DOCK.h); win.moveTo(6, Math.max(0, viewH() - DOCK.h - 4)); } catch (e) {} }
-            function applyUnlockedGeom() { try { var g = getUG(); win.setWidth(g.width); win.setHeight(g.height); win.moveTo(g.left, g.top); } catch (e) {} }
+            // Apply the saved unlocked size/pos, then RE-APPLY after layout settles: a single early setHeight
+            // gets overridden by the content size hint before the window is fully realized (same trap the
+            // MM.ui.Window geometry restore guards against), which collapsed the height on reload.
+            function applyUnlockedGeom() {
+                var g = getUG();
+                applyingGeom = true;
+                function put() { try { win.setWidth(g.width); win.setHeight(g.height); win.moveTo(g.left, g.top); } catch (e) {} }
+                put();
+                window.setTimeout(function () { if (!isLocked()) put(); }, 60);
+                window.setTimeout(function () { if (!isLocked()) put(); applyingGeom = false; }, 360);
+            }
             function applyLock(locked, captureFirst) {
                 try {
                     lockLbl.setValue(locked ? "🔒" : "🔓");
@@ -499,7 +524,12 @@
             win.addListener("disappear", function () { try { setNativeHidden(false); } catch (e) {} });
             applyNativeVisibility();
 
-            win.addListener("appear", function () { buildTabs(); updateTabAvailability(); updateTitle(); updateSendTarget(); applyLock(isLocked(), false); applyNativeVisibility(); });
+            win.addListener("appear", function () {
+                // re-read the remembered channel filter (build() may have read settings before the player
+                // was loaded), reflect it on the tabs + feed, then restore geometry + native state
+                try { activeFilter = MM.settings.get(SET + "filter", activeFilter) || activeFilter; lastChanKey = MM.settings.get(SET + "lastChan", lastChanKey) || lastChanKey; } catch (e) {}
+                buildTabs(); updateTabAvailability(); applyFilter(); updateTitle(); updateSendTarget(); applyLock(isLocked(), false); applyNativeVisibility();
+            });
 
             MM.buttons.register({
                 id: "mm-translated-chat",
