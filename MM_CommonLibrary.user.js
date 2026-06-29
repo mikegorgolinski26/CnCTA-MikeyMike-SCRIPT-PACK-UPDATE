@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.34
+// @version         1.0.35
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.34"
+            version: "1.0.35"
         };
 
         // -------------------------------------------------------------------
@@ -3439,8 +3439,21 @@
                 return null;
             },
             format: function (x, y) { return "[coords]" + x + ":" + y + "[/coords]"; },
-            // Insert text at the cursor of the game chat input. Returns true on success.
+            // A replacement chat UI (e.g. MM - Translated Chat) registers its input here so that anything
+            // aimed at the chat (Paste Coords, etc.) lands in whichever chat is actually ACTIVE. provider =
+            // { isActive(): bool, insert(text): bool }. While isActive() is true, insertIntoChat routes text
+            // to provider.insert instead of the native chat input (which may be hidden). Pass null to clear.
+            _chatInput: null,
+            setChatInputProvider: function (p) { this._chatInput = p || null; },
+            // Insert text into the ACTIVE chat input (registered provider if open, else the native input).
+            // Returns true on success.
             insertIntoChat: function (text) {
+                try {
+                    var p = this._chatInput;
+                    if (p && p.isActive && p.isActive()) {
+                        try { if (p.insert(text) !== false) return true; } catch (e) { NS.log.err("chatInput provider:", e); }
+                    }
+                } catch (e) {}
                 try {
                     var dom = qx.core.Init.getApplication().getChat().getChatWidget().getEditable()
                         .getContentElement().getDomElement();

@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.8
+// @version         1.2.9
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -629,6 +629,25 @@
                 tooltip: MMt("Auto-translating chat window (replaces the game chat)"),
                 onExecute: function () { try { if (win.isVisible()) win.close(); else win.open(); } catch (e) { werr("toggle failed:", e); } }
             });
+
+            // Route chat-input inserts (e.g. "Paste Coords") to THIS window's input WHILE IT'S OPEN, so they
+            // don't disappear into the hidden native chat. When our window is closed, isActive() is false and
+            // MMCommon.coords.insertIntoChat falls back to the native input - so the right chat always gets it.
+            try {
+                if (MM.coords && MM.coords.setChatInputProvider) {
+                    MM.coords.setChatInputProvider({
+                        isActive: function () { try { return !!(win && win.isVisible()); } catch (e) { return false; } },
+                        insert: function (text) {
+                            try {
+                                if (text == null) return false;
+                                input.setValue((input.getValue() || "") + String(text));
+                                try { input.focus(); } catch (e) {}
+                                return true;
+                            } catch (e) { return false; }
+                        }
+                    });
+                }
+            } catch (e) { werr("chat input provider register failed:", e); }
 
             wlog("ready");
         }
