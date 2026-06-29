@@ -3,7 +3,7 @@
 // @description     Scan every attackable base/camp/outpost within range of one of your bases and rank them for farming and capture: loot (Tib/Cry/Credits/Research), command-point cost, loot-per-CP efficiency, resource-field counts, perfect-layout flags, Construction-Yard / Defense-Facility row, and building/defense condition. Rebuilt on the MM - Common Library (no MaelstromTools dependency).
 // @author          BlinDManX, chertosha, Netquik, kad (original Maelstrom ADDON Basescanner AIO)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.4
+// @version         1.0.5
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
@@ -559,18 +559,26 @@
                 return { tier: 0, color: null };
             }
             function spotSeg(label, t) {
-                var bg = t.color || "rgba(255,255,255,0.10)";
-                var fg = t.color ? "#111" : "#cdd8df";
-                var txt = label + (t.tier ? t.tier : "–");
-                return "<span style='display:inline-block;padding:0 5px;margin:0 1px;border-radius:5px;background:" + bg + ";color:" + fg + "'>" + txt + "</span>";
+                // only ever called for a HIGHLIGHTED tier (4-7), so it always has a shading colour
+                return "<span style='display:inline-block;padding:0 5px;margin:0 1px;border-radius:5px;background:"
+                    + t.color + ";color:#111'>" + label + t.tier + "</span>";
             }
-            // Two-part Tib + Cry tag, each segment shaded by its own best tier; bubble border = the better tier.
+            // Tib / Cry tag, but ONLY segments that have a highlighted perfect-spot tier (4-7) are shown -
+            // a base with no good Tib spot shows just "C6", no Cry spot shows just "T4", both shows "C6 T4"
+            // (highest tier first). A base with NEITHER highlighted gets no bubble at all (returns null).
+            // The bubble border uses the colour of the highest highlight.
             function bubbleContent(row) {
                 var tb = bestTier(row[C.TIBL]), cb = bestTier(row[C.CRYL]);
-                var acc = (tb.tier >= cb.tier ? tb.color : cb.color) || "#8fa0ab";
+                var segs = [];
+                if (tb.tier > 0) segs.push({ label: MMt("T"), t: tb });
+                if (cb.tier > 0) segs.push({ label: MMt("C"), t: cb });
+                if (!segs.length) return null;                              // nothing highlighted -> no bubble
+                segs.sort(function (a, b) { return b.t.tier - a.t.tier; }); // highest tier first
+                var html = "";
+                for (var i = 0; i < segs.length; i++) html += spotSeg(segs[i].label, segs[i].t);
                 return {
-                    html: spotSeg(MMt("T"), tb) + spotSeg(MMt("C"), cb),
-                    accent: acc,
+                    html: html,
+                    accent: segs[0].t.color,                                // colour of the highest highlight
                     title: (row[C.CITY] || "") + " " + (row[C.LOC] || "")
                 };
             }
@@ -584,9 +592,11 @@
                     if (!cand) continue;
                     if (row[C.RULE] === true) continue;                          // ruled out -> no bubble
                     if (row[C.TIBL] === "" && row[C.CRYL] === "") continue;       // not analysed yet
+                    var content = bubbleContent(row);
+                    if (!content) continue;                                       // no highlighted spot -> no bubble
                     var key = "b" + row[C.ID];
                     live[key] = true;
-                    layer.set(key, { x: cand.x, y: cand.y }, bubbleContent(row));
+                    layer.set(key, { x: cand.x, y: cand.y }, content);
                 }
                 var keys = layer.keys();
                 for (var k = 0; k < keys.length; k++) { if (!live[keys[k]]) layer.remove(keys[k]); }
