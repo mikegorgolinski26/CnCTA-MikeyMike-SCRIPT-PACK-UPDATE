@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.35
+// @version         1.0.36
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.35"
+            version: "1.0.36"
         };
 
         // -------------------------------------------------------------------
@@ -4449,8 +4449,12 @@
                 //            (projected, so zoom-correct). worldToScreen(base) is the base's top-centre, so
                 //            tip {x:0,y:1.0} drops the leader onto the base body. Default {0,0}.
                 //   arrow  : true to draw an arrowhead at the leader's tip end, pointing into the base.
-                //   anchor : "left" (default - bubble extends to the right of the anchor; the leader meets
-                //            its left-middle) or "center" (bubble centred above the anchor, PBI-style).
+                //   anchor : "left" (default - bubble extends right of the anchor; leader meets its left-middle),
+                //            "center" (bubble sits ABOVE the anchor), or "middle" (bubble centred ON the anchor;
+                //            the leader then meets its bottom-middle).
+                //   anchorGrid : { x, y } GRID-cell fraction shift of the BUBBLE anchor (projected, zoom-correct).
+                //            worldToScreen(gx,gy) is the tile's top-LEFT corner, so {x:0.5,y:-0.5} centres the
+                //            bubble in the tile directly ABOVE the base. Default {0,0}.
                 //   id     : DOM id for the layer (default "mm_bubble_layer"); use a unique id per consumer.
                 bubbleLayer: function (opts) {
                     opts = opts || {};
@@ -4464,7 +4468,11 @@
                     var tipX = (opts.tip && opts.tip.x) || 0;
                     var tipY = (opts.tip && opts.tip.y) || 0;
                     var useArrow = (opts.arrow === true);   // draw an arrowhead at the leader's base (tip) end
-                    var anchorLeft = (opts.anchor !== "center");
+                    var anchorMode = opts.anchor || "left";   // "left" | "center" (sits above) | "middle" (centred ON the point)
+                    // anchorGrid shifts the BUBBLE anchor by a grid-cell fraction (projected, zoom-correct).
+                    // worldToScreen(gx,gy) is the tile's top-LEFT corner, so {x:0.5} centres on the tile.
+                    var aGX = (opts.anchorGrid && opts.anchorGrid.x) || 0;
+                    var aGY = (opts.anchorGrid && opts.anchorGrid.y) || 0;
                     var layerId = opts.id || "mm_bubble_layer";
                     var SVGNS = "http://www.w3.org/2000/svg";
                     var NEUTRAL = "#8fa0ab";
@@ -4509,7 +4517,7 @@
                         var el = document.createElement("div");
                         el.style.cssText = [
                             "position:absolute", "white-space:nowrap",
-                            anchorLeft ? "transform:translate(0,-50%)" : "transform:translate(-50%,-100%)",
+                            "transform:" + (anchorMode === "center" ? "translate(-50%,-100%)" : anchorMode === "middle" ? "translate(-50%,-50%)" : "translate(0,-50%)"),
                             "padding:2px 7px 3px", "border:2px solid " + NEUTRAL, "border-radius:8px",
                             "background:rgba(15,20,25,0.92)", "box-shadow:0 2px 7px rgba(0,0,0,0.5)",
                             "font:bold 12px sans-serif", "color:#fff", "pointer-events:none"
@@ -4554,28 +4562,30 @@
                     }
                     function position(key) {
                         var it = items[key]; if (!it) return;
-                        var p;
-                        try { p = api.worldToScreen(it.base.x, it.base.y); } catch (e) { return; }
-                        var ax = p.x + offX, ay = p.y + offY;
+                        var bp;   // bubble anchor point, shifted by the grid-fraction anchorGrid (e.g. tile centre)
+                        try { bp = api.worldToScreen(it.base.x + aGX, it.base.y + aGY); } catch (e) { return; }
+                        var ax = bp.x + offX, ay = bp.y + offY;
                         it.el.style.left = Math.round(ax) + "px";
                         it.el.style.top = Math.round(ay) + "px";
                         if (it.line) {
-                            // leader runs from the base (its tip point) to the bubble's anchor edge (left-middle)
-                            var tp = p;
-                            if (tipX || tipY) { try { tp = api.worldToScreen(it.base.x + tipX, it.base.y + tipY); } catch (e) { tp = p; } }
+                            // leader: from the base TIP point up to the bubble - its bottom-centre when the
+                            // bubble is centred on its anchor (middle), else its anchor edge.
+                            var tp;
+                            try { tp = api.worldToScreen(it.base.x + tipX, it.base.y + tipY); } catch (e) { tp = bp; }
+                            var bx = ax, by = (anchorMode === "middle") ? (ay + ((it.el.offsetHeight || 24) / 2)) : ay;
                             it.line.setAttribute("x1", Math.round(tp.x));
                             it.line.setAttribute("y1", Math.round(tp.y));
-                            it.line.setAttribute("x2", Math.round(ax));
-                            it.line.setAttribute("y2", Math.round(ay));
+                            it.line.setAttribute("x2", Math.round(bx));
+                            it.line.setAttribute("y2", Math.round(by));
                             // arrowhead at the tip, oriented along the leader (points INTO the base)
                             if (it.arrow) {
-                                var dx = tp.x - ax, dy = tp.y - ay, len = Math.sqrt(dx * dx + dy * dy) || 1;
+                                var dx = tp.x - bx, dy = tp.y - by, len = Math.sqrt(dx * dx + dy * dy) || 1;
                                 var ux = dx / len, uy = dy / len, AL = 10, AW = 5;
-                                var bx = tp.x - ux * AL, by = tp.y - uy * AL, px = -uy, py = ux;
+                                var hx = tp.x - ux * AL, hy = tp.y - uy * AL, px = -uy, py = ux;
                                 it.arrow.setAttribute("points",
                                     Math.round(tp.x) + "," + Math.round(tp.y) + " " +
-                                    Math.round(bx + px * AW) + "," + Math.round(by + py * AW) + " " +
-                                    Math.round(bx - px * AW) + "," + Math.round(by - py * AW));
+                                    Math.round(hx + px * AW) + "," + Math.round(hy + py * AW) + " " +
+                                    Math.round(hx - px * AW) + "," + Math.round(hy - py * AW));
                             }
                         }
                     }

@@ -3,7 +3,7 @@
 // @description     Scan every attackable base/camp/outpost within range of one of your bases and rank them for farming and capture: loot (Tib/Cry/Credits/Research), command-point cost, loot-per-CP efficiency, resource-field counts, perfect-layout flags, Construction-Yard / Defense-Facility row, and building/defense condition. Rebuilt on the MM - Common Library (no MaelstromTools dependency).
 // @author          BlinDManX, chertosha, Netquik, kad (original Maelstrom ADDON Basescanner AIO)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.10
+// @version         1.0.11
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
@@ -565,12 +565,16 @@
                 if (bubbleLayer) return bubbleLayer;
                 try {
                     if (!MM.map || typeof MM.map.bubbleLayer !== "function") { wwarn("map.bubbleLayer unavailable"); return null; }
-                    // Bubble sits centred ABOVE the base with a straight-DOWN leader + ARROWHEAD landing on it
-                    // (a map-pin look) - clearer than a diagonal that's hard to trace. offset {x:0,y:-46} floats
-                    // it above; the leader drops to tip {x:0,y:1.0} (~one grid cell below the base's projected
-                    // top-centre = onto the base body) and the arrowhead points right at it. tip is a grid
-                    // fraction so it's zoom-correct.
-                    bubbleLayer = MM.map.bubbleLayer({ id: "mm_bscan_bubbles", offset: { x: 0, y: -46 }, leader: true, arrow: true, anchor: "center", tip: { x: 0, y: 1.0 } });
+                    // Bubble CENTRED in the tile directly above the base, with a vertical leader + arrowhead
+                    // pointing straight DOWN at the base's tile centre. The key fix: worldToScreen(gx,gy) is the
+                    // tile's top-LEFT corner, so we anchor on the tile CENTRE via grid fractions (+0.5 x) - else
+                    // the whole tag hangs off to the left and points at empty ground.
+                    //   anchorGrid {x:0.5,y:-0.5} = centre of the tile ABOVE the base; anchor "middle" centres
+                    //   the bubble on it; tip {x:0.5,y:0.45} = the base's tile centre (slightly high = on the body).
+                    bubbleLayer = MM.map.bubbleLayer({
+                        id: "mm_bscan_bubbles", leader: true, arrow: true,
+                        anchor: "middle", anchorGrid: { x: 0.5, y: -0.5 }, tip: { x: 0.5, y: 0.45 }
+                    });
                 } catch (e) { werr("bubbleLayer create failed:", e); bubbleLayer = null; }
                 return bubbleLayer;
             }
