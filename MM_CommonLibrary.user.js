@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.31
+// @version         1.0.32
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.31"
+            version: "1.0.32"
         };
 
         // -------------------------------------------------------------------
@@ -4411,6 +4411,242 @@
                         for (var i = 0; i < bound.length; i++) { try { NS.net.detach(v, bound[i][0], bound[i][1], ctx, fire); } catch (e) {} }
                         bound = [];
                     };
+                },
+
+                // ---- reusable on-map bubble overlay ----------------------------------------
+                // Generalises the MM - Player Base Info off/def overlay into a shared layer ANY script can
+                // drive. It owns a DOM layer pinned right after the map canvas (z-index:10,
+                // pointer-events:none - paints over the terrain but under every HUD panel and never blocks
+                // map interaction), holding one "bubble" per key, each anchored to a base's grid tile and
+                // optionally joined to it by a thin SVG leader line ("thought bubble"). The layer owns its
+                // OWN pan/zoom tracking (via map.watch) and hides bubbles that fall under an open region
+                // panel, so a consumer only ever calls set()/remove()/clear(). Returns a handle:
+                //   set(key, base, content) : create-or-update. base={x,y} GRID coords; content =
+                //                             { html, accent (border + leader colour), title }.
+                //   remove(key) / clear() / has(key) / keys() / count()
+                //   visible(bool)  : master show/hide (kept across reprojects)
+                //   reposition()   : force a reproject (normally automatic)
+                //   destroy()      : remove the layer + stop all watchers
+                // opts:
+                //   offset : { x, y } screen-px offset of the bubble's anchor from the base tile (default
+                //            {0,0}). Base Scanner uses +x so its bubbles sit to the RIGHT, leaving the
+                //            left/top free for Player Base Info's off/def bubbles.
+                //   leader : true to draw a leader line from the base tile to the bubble's anchor edge.
+                //   anchor : "left" (default - bubble extends to the right of the anchor; the leader meets
+                //            its left-middle) or "center" (bubble centred above the anchor, PBI-style).
+                //   id     : DOM id for the layer (default "mm_bubble_layer"); use a unique id per consumer.
+                bubbleLayer: function (opts) {
+                    opts = opts || {};
+                    var offX = (opts.offset && opts.offset.x) || 0;
+                    var offY = (opts.offset && opts.offset.y) || 0;
+                    var useLeader = (opts.leader === true);
+                    var anchorLeft = (opts.anchor !== "center");
+                    var layerId = opts.id || "mm_bubble_layer";
+                    var SVGNS = "http://www.w3.org/2000/svg";
+                    var NEUTRAL = "#8fa0ab";
+
+                    var layer = null, svg = null;
+                    var items = {};   // key -> { base:{x,y}, content, el, line }
+                    var master = true;
+                    var watchStop = null, popupTimer = null;
+
+                    function ensureLayer() {
+                        var old = document.getElementById(layerId);
+                        if (old && old !== layer) { try { old.remove(); } catch (e) {} }
+                        layer = document.createElement("div");
+                        layer.id = layerId;
+                        // Slot the overlay just above the map but UNDER all the game's UI chrome. The map
+                        // canvas container is the FIRST child of the game root and every HUD/menu panel is a
+                        // LATER sibling at z-index:10 (stacked purely by DOM order). Inserting right after the
+                        // canvas WITH z-index:10 paints us over the map yet below every panel. Falls back to a
+                        // top-level fixed layer if the game root isn't reachable.
+                        var placed = false;
+                        try {
+                            var app = qx.core.Init.getApplication();
+                            var ba = app && app.getBackgroundArea && app.getBackgroundArea();
+                            var baEl = ba && ba.getContentElement && ba.getContentElement().getDomElement();
+                            if (baEl && baEl.parentNode) {
+                                layer.style.cssText = "position:absolute;left:0;top:0;right:0;bottom:0;z-index:10;pointer-events:none;overflow:hidden";
+                                baEl.parentNode.insertBefore(layer, baEl.nextSibling);
+                                placed = true;
+                            }
+                        } catch (e) {}
+                        if (!placed) {
+                            layer.style.cssText = "position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483000;pointer-events:none;overflow:hidden";
+                            (document.body || document.documentElement).appendChild(layer);
+                        }
+                        if (useLeader) {
+                            svg = document.createElementNS(SVGNS, "svg");
+                            svg.setAttribute("style", "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:visible");
+                            layer.appendChild(svg);
+                        }
+                    }
+                    function makeEl() {
+                        var el = document.createElement("div");
+                        el.style.cssText = [
+                            "position:absolute", "white-space:nowrap",
+                            anchorLeft ? "transform:translate(0,-50%)" : "transform:translate(-50%,-100%)",
+                            "padding:2px 7px 3px", "border:2px solid " + NEUTRAL, "border-radius:8px",
+                            "background:rgba(15,20,25,0.92)", "box-shadow:0 2px 7px rgba(0,0,0,0.5)",
+                            "font:bold 12px sans-serif", "color:#fff", "pointer-events:none"
+                        ].join(";");
+                        layer.appendChild(el);
+                        return el;
+                    }
+                    function makeLine() {
+                        var ln = document.createElementNS(SVGNS, "line");
+                        ln.setAttribute("stroke", NEUTRAL);
+                        ln.setAttribute("stroke-width", "1.5");
+                        ln.setAttribute("stroke-dasharray", "3,3");
+                        if (svg) svg.appendChild(ln);
+                        return ln;
+                    }
+                    // If qx ever rebuilt the map container and dropped our layer, re-create it and re-attach
+                    // every bubble from its stored base+content (the detached DOM nodes are gone).
+                    function healLayer() {
+                        if (layer && layer.isConnected) return;
+                        var saved = items; items = {};
+                        ensureLayer();
+                        for (var k in saved) {
+                            var o = saved[k];
+                            var it = items[k] = { base: o.base, content: o.content, el: makeEl(), line: useLeader ? makeLine() : null };
+                            paint(k, it);
+                        }
+                    }
+                    function paint(key, it) {
+                        var c = it.content || {};
+                        var acc = c.accent || NEUTRAL;
+                        it.el.style.borderColor = acc;
+                        it.el.innerHTML = c.html || "";
+                        if (c.title != null) it.el.title = c.title;
+                        if (it.line) it.line.setAttribute("stroke", acc);
+                    }
+                    function position(key) {
+                        var it = items[key]; if (!it) return;
+                        var p;
+                        try { p = api.worldToScreen(it.base.x, it.base.y); } catch (e) { return; }
+                        var ax = p.x + offX, ay = p.y + offY;
+                        it.el.style.left = Math.round(ax) + "px";
+                        it.el.style.top = Math.round(ay) + "px";
+                        if (it.line) {
+                            // leader runs from the base tile to the bubble's anchor edge (its left-middle)
+                            it.line.setAttribute("x1", Math.round(p.x));
+                            it.line.setAttribute("y1", Math.round(p.y));
+                            it.line.setAttribute("x2", Math.round(ax));
+                            it.line.setAttribute("y2", Math.round(ay));
+                        }
+                    }
+                    // ---- region popup overlap hiding (a bubble shares the panels' z-index, so one sitting
+                    // over an open base-info panel would paint on top of it; hide just those). Discover the
+                    // panel singletons by name pattern - their class names vary by relationship + game
+                    // version - and confirm each with a real DOM rect.
+                    var _infoNames = null;
+                    function infoPanelNames() {
+                        if (_infoNames) return _infoNames;
+                        var out = [];
+                        try {
+                            var R = webfrontend.gui.region, keys = Object.keys(R);
+                            for (var i = 0; i < keys.length; i++) {
+                                var k = keys[i];
+                                if (!/StatusInfo/.test(k) && k !== "RegionCityInfo" && k !== "RegionCityMoveInfo"
+                                    && k !== "RegionCityFoundInfo" && k !== "RegionCitySupportInfo") continue;
+                                try { if (R[k] && typeof R[k].getInstance === "function") out.push(k); } catch (e) {}
+                            }
+                        } catch (e) {}
+                        _infoNames = out;
+                        return out;
+                    }
+                    function infoRect(name) {
+                        try {
+                            var W = webfrontend.gui.region[name];
+                            if (!W || typeof W.getInstance !== "function") return null;
+                            var inst = W.getInstance();
+                            if (!inst || typeof inst.isVisible !== "function" || !inst.isVisible()) return null;
+                            var el = inst.getContentElement && inst.getContentElement().getDomElement();
+                            if (!el) return null;
+                            var r = el.getBoundingClientRect();
+                            return (r.width > 0 && r.height > 0) ? r : null;
+                        } catch (e) { return null; }
+                    }
+                    function popupRects() {
+                        var rects = [], names = infoPanelNames();
+                        for (var i = 0; i < names.length; i++) { var r = infoRect(names[i]); if (r) rects.push(r); }
+                        var menu = infoRect("RegionCityMenu"); if (menu) rects.push(menu);
+                        return rects;
+                    }
+                    function rectsIntersect(a, b) { return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom); }
+                    function updatePopupVisibility() {
+                        if (!layer || layer.style.display === "none") return;
+                        var rects = popupRects();
+                        for (var k in items) {
+                            var it = items[k]; if (!it || !it.el) continue;
+                            var hide = false;
+                            if (rects.length) {
+                                var br = it.el.getBoundingClientRect();
+                                for (var i = 0; i < rects.length; i++) { if (rectsIntersect(br, rects[i])) { hide = true; break; } }
+                            }
+                            it.el.style.visibility = hide ? "hidden" : "visible";
+                            if (it.line) it.line.style.visibility = hide ? "hidden" : "visible";
+                        }
+                    }
+                    function hideLayer() {
+                        if (layer) layer.style.display = "none";
+                        if (svg) svg.style.display = "none";
+                    }
+                    function reprojectAll() {
+                        if (!master || !api.inRegionView()) { hideLayer(); return; }
+                        healLayer();
+                        if (layer) layer.style.display = "block";
+                        if (svg) svg.style.display = "block";
+                        for (var k in items) position(k);
+                        updatePopupVisibility();
+                    }
+
+                    // bring-up: layer + SAFE camera watcher (poll, never hook render-path events) + popup poll
+                    ensureLayer();
+                    try {
+                        watchStop = api.watch({ onChange: function (st) {
+                            try { if (st.region) reprojectAll(); else hideLayer(); } catch (e) { NS.log.err("bubbleLayer watch:", e); }
+                        } });
+                    } catch (e) { NS.log.err("bubbleLayer watch attach:", e); }
+                    popupTimer = window.setInterval(function () {
+                        try { if (master && api.inRegionView()) updatePopupVisibility(); } catch (e) {}
+                    }, 200);
+
+                    var handle = {
+                        set: function (key, base, content) {
+                            try {
+                                healLayer();
+                                var it = items[key];
+                                if (!it) it = items[key] = { base: base, content: content, el: makeEl(), line: useLeader ? makeLine() : null };
+                                it.base = base; it.content = content || {};
+                                paint(key, it);
+                                position(key);
+                                if (!master || !api.inRegionView()) hideLayer();
+                                return it;
+                            } catch (e) { NS.log.err("bubbleLayer.set:", e); return null; }
+                        },
+                        remove: function (key) {
+                            var it = items[key]; if (!it) return;
+                            try { if (it.el && it.el.parentNode) it.el.parentNode.removeChild(it.el); } catch (e) {}
+                            try { if (it.line && it.line.parentNode) it.line.parentNode.removeChild(it.line); } catch (e) {}
+                            delete items[key];
+                        },
+                        clear: function () { for (var k in items) handle.remove(k); },
+                        has: function (key) { return !!items[key]; },
+                        keys: function () { var o = []; for (var k in items) o.push(k); return o; },
+                        count: function () { var n = 0; for (var k in items) n++; return n; },
+                        visible: function (b) { master = (b !== false); reprojectAll(); },
+                        reposition: function () { reprojectAll(); },
+                        destroy: function () {
+                            try { if (watchStop) watchStop(); } catch (e) {} watchStop = null;
+                            try { if (popupTimer) window.clearInterval(popupTimer); } catch (e) {} popupTimer = null;
+                            for (var k in items) handle.remove(k);
+                            try { if (layer && layer.parentNode) layer.parentNode.removeChild(layer); } catch (e) {}
+                            layer = null; svg = null;
+                        }
+                    };
+                    return handle;
                 }
             };
             return api;

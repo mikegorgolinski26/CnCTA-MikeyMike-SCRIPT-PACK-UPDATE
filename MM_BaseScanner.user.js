@@ -3,7 +3,7 @@
 // @description     Scan every attackable base/camp/outpost within range of one of your bases and rank them for farming and capture: loot (Tib/Cry/Credits/Research), command-point cost, loot-per-CP efficiency, resource-field counts, perfect-layout flags, Construction-Yard / Defense-Facility row, and building/defense condition. Rebuilt on the MM - Common Library (no MaelstromTools dependency).
 // @author          BlinDManX, chertosha, Netquik, kad (original Maelstrom ADDON Basescanner AIO)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.3
+// @version         1.0.4
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
@@ -388,6 +388,12 @@
                             var cur = tableModel.getValue(C.RULE, row);
                             tableModel.setValue(C.RULE, row, !cur);
                             table.getSelectionModel().resetSelection();
+                            // keep the data row in sync (rerender/bubbles read from `data`) + drop/add its bubble
+                            try {
+                                var id = tableModel.getValue(C.ID, row);
+                                for (var di = 0; di < data.length; di++) { if (data[di][C.ID] === id) { data[di][C.RULE] = !cur; break; } }
+                            } catch (x2) {}
+                            try { if (bubblesOn()) refreshBubbles(); } catch (x3) {}
                         } else if (col === C.LOC) {
                             gotoRow(row);
                         }
@@ -444,6 +450,17 @@
             var chkOutposts = makeChk(MMt("Outposts"), "tOutposts", true);
             var chkCamps = makeChk(MMt("Camps"), "tCamps", true);
 
+            // Run in background: keep the async fill running after the window is closed (see step()).
+            var chkBg = makeChk(MMt("Run in background"), "background", false);
+            chkBg.set({ toolTipText: MMt("Keep filling the table after you close this window. Progress shows on the Base Scanner button. The fill pauses while you're inside one of your bases.") });
+            // Show layout bubbles: draw the per-base Tib/Cry perfect-spot tag on the region map (Part B).
+            var chkBubbles = makeChk(MMt("Layout bubbles"), "mapBubbles", false);
+            chkBubbles.set({ toolTipText: MMt("Show a Tib/Cry harvester-spot bubble next to each scanned base on the region map, shaded by its best perfect spot.") });
+            // makeChk already persists the setting; this extra listener draws/clears the overlay immediately.
+            chkBubbles.addListener("changeValue", function (e) {
+                try { if (e.getData() === true) refreshBubbles(); else if (bubbleLayer) bubbleLayer.clear(); } catch (x) {}
+            });
+
             var scanBtn = new qx.ui.form.Button(MMt("Scan")).set({ maxHeight: 26 });
             var stopBtn = new qx.ui.form.Button(MMt("Stop")).set({ maxHeight: 26, enabled: false });
             var progress = new qx.ui.basic.Label("").set({ alignY: "middle", rich: true, textColor: TXT });
@@ -452,6 +469,7 @@
             controls.add(lbl(MMt("CP≤"))); controls.add(cpSpin);
             controls.add(lbl(MMt("Lvl≥"))); controls.add(lvlSpin);
             controls.add(chkPlayers); controls.add(chkBases); controls.add(chkOutposts); controls.add(chkCamps);
+            controls.add(chkBg); controls.add(chkBubbles);
             controls.add(scanBtn); controls.add(stopBtn); controls.add(progress);
 
             // ---- window ----
@@ -468,17 +486,32 @@
             if (!win) { werr("window creation failed"); return; }
             win.add(controls);
             win.add(table, { flex: 1 });
-            win.addListener("appear", function () { rebuildBaseSelect(); });
+            win.addListener("appear", function () {
+                rebuildBaseSelect();
+                // reopening clears the button's "…N%" progress and re-shows whatever the background fill has
+                setHudProgress(null);
+                try { rerender(); } catch (e) {}
+            });
 
-            // HUD toggle button
-            MM.buttons.register({
+            // HUD toggle button (keep the handle so a background scan can show progress on it)
+            var BTN_LABEL = MMt("Base Scanner");
+            var hudBtn = MM.buttons.register({
                 id: "mm-base-scanner",
-                label: MMt("Base Scanner"),
+                label: BTN_LABEL,
                 tooltip: MMt("Scan attackable bases near one of your bases"),
                 onExecute: function () {
                     try { if (win.isVisible()) win.close(); else win.open(); } catch (e) { werr("toggle failed:", e); }
                 }
             });
+            // Show fill progress on the toolbar button while a background scan runs with the window closed.
+            // We change only the button's displayed LABEL, not its registered slot label, so the bar's sort
+            // order and the CnC-menu enable/disable (both keyed on the original label) stay correct.
+            function setHudProgress(pct) {
+                try {
+                    if (!hudBtn || typeof hudBtn.setLabel !== "function") return;
+                    hudBtn.setLabel(pct == null ? BTN_LABEL : (BTN_LABEL + " …" + pct + "%"));
+                } catch (e) {}
+            }
 
             // ---- progress + render ----
             function setProgress(done, total, label) {
@@ -496,6 +529,67 @@
                     if (sortCol === -1) tableModel.sortByColumn(DEFAULT_SORT, false);
                     else tableModel.sortByColumn(sortCol, asc);
                 } catch (e) { werr("rerender failed:", e); }
+            }
+
+            // ---- run-in-background + on-map layout bubbles ----
+            function backgroundOn() { try { return MM.settings.get(SET + "background", false) === true; } catch (e) { return false; } }
+            function bubblesOn()    { try { return MM.settings.get(SET + "mapBubbles", false) === true; } catch (e) { return false; } }
+
+            // Lazily-created shared overlay (MMCommon.map.bubbleLayer). Bubbles sit to the RIGHT of each
+            // base (the left/top is reserved for MM - Player Base Info's off/def bubbles) with a leader line.
+            var bubbleLayer = null;
+            function ensureBubbleLayer() {
+                if (bubbleLayer) return bubbleLayer;
+                try {
+                    if (!MM.map || typeof MM.map.bubbleLayer !== "function") { wwarn("map.bubbleLayer unavailable"); return null; }
+                    bubbleLayer = MM.map.bubbleLayer({ id: "mm_bscan_bubbles", offset: { x: 56, y: 0 }, leader: true, anchor: "left" });
+                } catch (e) { werr("bubbleLayer create failed:", e); bubbleLayer = null; }
+                return bubbleLayer;
+            }
+            // Best perfect-harvester-spot tier in a "n7 | n6 | n5 | n4" cell -> { tier, color }. Same
+            // palette as the table's MMScanSpotR (higher tier = better spot, wins).
+            function bestTier(str) {
+                if (str == null || str === "") return { tier: 0, color: null };
+                var p = String(str).split("|");
+                if (p.length < 4) return { tier: 0, color: null };
+                if ((parseInt(p[0], 10) || 0) > 0) return { tier: 7, color: "#9af09a" }; // green
+                if ((parseInt(p[1], 10) || 0) > 0) return { tier: 6, color: "#acd8ff" }; // blue
+                if ((parseInt(p[2], 10) || 0) > 0) return { tier: 5, color: "#ffd591" }; // amber
+                if ((parseInt(p[3], 10) || 0) > 0) return { tier: 4, color: "#fff6a6" }; // yellow
+                return { tier: 0, color: null };
+            }
+            function spotSeg(label, t) {
+                var bg = t.color || "rgba(255,255,255,0.10)";
+                var fg = t.color ? "#111" : "#cdd8df";
+                var txt = label + (t.tier ? t.tier : "–");
+                return "<span style='display:inline-block;padding:0 5px;margin:0 1px;border-radius:5px;background:" + bg + ";color:" + fg + "'>" + txt + "</span>";
+            }
+            // Two-part Tib + Cry tag, each segment shaded by its own best tier; bubble border = the better tier.
+            function bubbleContent(row) {
+                var tb = bestTier(row[C.TIBL]), cb = bestTier(row[C.CRYL]);
+                var acc = (tb.tier >= cb.tier ? tb.color : cb.color) || "#8fa0ab";
+                return {
+                    html: spotSeg(MMt("T"), tb) + spotSeg(MMt("C"), cb),
+                    accent: acc,
+                    title: (row[C.CITY] || "") + " " + (row[C.LOC] || "")
+                };
+            }
+            // (Re)sync the map bubbles to the currently-filled, not-ruled-out rows.
+            function refreshBubbles() {
+                if (!bubblesOn()) { if (bubbleLayer) bubbleLayer.clear(); return; }
+                var layer = ensureBubbleLayer(); if (!layer) return;
+                var live = {};
+                for (var i = 0; i < data.length; i++) {
+                    var row = data[i], cand = row.__cand;
+                    if (!cand) continue;
+                    if (row[C.RULE] === true) continue;                          // ruled out -> no bubble
+                    if (row[C.TIBL] === "" && row[C.CRYL] === "") continue;       // not analysed yet
+                    var key = "b" + row[C.ID];
+                    live[key] = true;
+                    layer.set(key, { x: cand.x, y: cand.y }, bubbleContent(row));
+                }
+                var keys = layer.keys();
+                for (var k = 0; k < keys.length; k++) { if (!live[keys[k]]) layer.remove(keys[k]); }
             }
 
             // ---- the scan ----
@@ -516,6 +610,8 @@
                 scanBtn.setEnabled(false);
                 scanBtn.setLabel(MMt("Scanning…"));
                 stopBtn.setEnabled(true);
+                setHudProgress(null);
+                if (bubbleLayer) { try { bubbleLayer.clear(); } catch (e) {} } // drop the previous scan's bubbles
                 var token = ++fillToken;
 
                 // Leave any open base and switch to the region/area map before the fill. The detail phase
@@ -573,9 +669,22 @@
                 // phase 2: async detail fill, one base at a time
                 var idx = 0, filled = 0;
                 function step() {
-                    if (token !== fillToken) return;           // superseded by a newer scan
-                    if (!win.isVisible()) { finish(token); return; } // closed mid-scan
+                    if (token !== fillToken) return;           // superseded / stopped (token bumped)
+                    // Closing the window ends the scan ONLY when "Run in background" is off. With it on, the
+                    // fill keeps running hidden and results survive (data/fillToken live in this closure).
+                    if (!backgroundOn() && !win.isVisible()) { finish(token); return; }
                     if (idx >= data.length) { finish(token); return; }
+                    // Pause the fill while the user is INSIDE a base view: each base's set_CurrentCityId(id)
+                    // below yanks the shared current-city pointer, which would fight the base they have open.
+                    // Wait politely and resume the moment they're back on the region map. (exitToRegion at scan
+                    // start means we normally begin in region view; this only triggers if they open a base
+                    // mid-scan - the documented background-mode caveat.)
+                    try {
+                        if (MM.map && MM.map.ready && MM.map.ready() && !MM.map.inRegionView()) {
+                            window.setTimeout(step, 600);
+                            return;
+                        }
+                    } catch (e) {}
                     var row = data[idx];
                     try { cities().set_CurrentCityId(row[C.ID]); } catch (e) {}
                     poll(row, 0);
@@ -590,6 +699,10 @@
                         idx++;
                         setProgress(filled, data.length);
                         rerender();
+                        try { if (bubblesOn()) refreshBubbles(); } catch (e) {}
+                        // surface progress on the toolbar button only while running hidden in the background
+                        if (backgroundOn() && !win.isVisible()) setHudProgress(Math.round(filled / Math.max(1, data.length) * 100));
+                        else setHudProgress(null);
                         window.setTimeout(step, 50);
                     } else if (attempt < 24) {
                         // detail can take ~4s to arrive for camps/outposts (observed ~20 round-trip
@@ -654,6 +767,8 @@
                 try { if (scanOriginOwnId != null) cities().set_CurrentCityId(scanOriginOwnId); } catch (e) {}
                 setProgress(data.length, data.length, data.length + " " + (data.length === 1 ? MMt("target") : MMt("targets")));
                 rerender();
+                setHudProgress(null);
+                try { if (bubblesOn()) refreshBubbles(); } catch (e) {}
                 wlog("scan finished:", data.length, "targets");
             }
 
@@ -668,6 +783,8 @@
                 try { if (scanOriginOwnId != null) cities().set_CurrentCityId(scanOriginOwnId); } catch (e) {}
                 setProgress(data.length, data.length, MMt("Stopped - ") + data.length + MMt(" loaded"));
                 rerender();
+                setHudProgress(null);
+                try { if (bubblesOn()) refreshBubbles(); } catch (e) {}
                 wlog("scan stopped by user");
             }
 
