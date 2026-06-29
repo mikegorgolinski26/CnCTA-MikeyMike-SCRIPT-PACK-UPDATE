@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.32
+// @version         1.0.33
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.32"
+            version: "1.0.33"
         };
 
         // -------------------------------------------------------------------
@@ -4440,6 +4440,12 @@
                     var offX = (opts.offset && opts.offset.x) || 0;
                     var offY = (opts.offset && opts.offset.y) || 0;
                     var useLeader = (opts.leader === true);
+                    // tip = where the leader's BASE end lands, as a GRID-cell fraction added to the base
+                    // coord (projected, so it's zoom-correct). worldToScreen(base.x,base.y) is the base's
+                    // top-centre, so tip {x:0,y:0.5} drops the leader onto the base's centre instead of
+                    // floating above it. Default {0,0} = the bare projection point (unchanged).
+                    var tipX = (opts.tip && opts.tip.x) || 0;
+                    var tipY = (opts.tip && opts.tip.y) || 0;
                     var anchorLeft = (opts.anchor !== "center");
                     var layerId = opts.id || "mm_bubble_layer";
                     var SVGNS = "http://www.w3.org/2000/svg";
@@ -4529,9 +4535,11 @@
                         it.el.style.left = Math.round(ax) + "px";
                         it.el.style.top = Math.round(ay) + "px";
                         if (it.line) {
-                            // leader runs from the base tile to the bubble's anchor edge (its left-middle)
-                            it.line.setAttribute("x1", Math.round(p.x));
-                            it.line.setAttribute("y1", Math.round(p.y));
+                            // leader runs from the base (its tip point) to the bubble's anchor edge (left-middle)
+                            var tp = p;
+                            if (tipX || tipY) { try { tp = api.worldToScreen(it.base.x + tipX, it.base.y + tipY); } catch (e) { tp = p; } }
+                            it.line.setAttribute("x1", Math.round(tp.x));
+                            it.line.setAttribute("y1", Math.round(tp.y));
                             it.line.setAttribute("x2", Math.round(ax));
                             it.line.setAttribute("y2", Math.round(ay));
                         }
