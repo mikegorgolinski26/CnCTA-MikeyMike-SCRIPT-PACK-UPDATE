@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.3
+// @version         1.2.4
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -319,25 +319,27 @@
 
             // ---- channel tabs ----
             var tabsBar = new qx.ui.container.Composite(new qx.ui.layout.Flow(3, 3)).set({ padding: 4, backgroundColor: "#0a1521" });
-            var tabGroup = new qx.ui.form.RadioGroup().set({ allowEmptySelection: false });
             var tabBtns = {};
             function makeTab(key) {
                 var def = CHAN[key];
                 var b = new qx.ui.form.ToggleButton(def.label).set({ focusable: false, padding: [2, 8] });
                 if (key !== "all") { try { b.setTextColor(def.color); } catch (e) {} }
-                tabGroup.add(b);
                 tabsBar.add(b);
-                b.addListener("changeValue", function (e) {
-                    if (!e.getData()) return;
-                    activeFilter = key;
-                    if (key !== "all") { lastChanKey = key; selectChannelIdx(nativeIdxFor(key)); }
-                    updateTitle();
-                    updateSendTarget();
-                    applyFilter();
-                });
+                // use execute (click), not the toggle's own value/RadioGroup, so re-clicking the active tab
+                // keeps it selected (a RadioGroup let a second click toggle off and fall back to All)
+                b.addListener("execute", function () { selectTab(key); });
                 return b;
             }
-            function buildTabs() { for (var i = 0; i < TAB_ORDER.length; i++) { var k = TAB_ORDER[i]; if (!tabBtns[k]) tabBtns[k] = makeTab(k); } try { tabBtns.all.setValue(true); } catch (e) {} }
+            function selectTab(key) {
+                activeFilter = key;
+                if (key !== "all") { lastChanKey = key; selectChannelIdx(nativeIdxFor(key)); }
+                for (var i = 0; i < TAB_ORDER.length; i++) { var k = TAB_ORDER[i]; var bb = tabBtns[k]; if (bb) try { bb.setValue(k === key); } catch (e) {} }
+                updateTitle(); updateSendTarget(); applyFilter();
+            }
+            function buildTabs() {
+                for (var i = 0; i < TAB_ORDER.length; i++) { var k = TAB_ORDER[i]; if (!tabBtns[k]) tabBtns[k] = makeTab(k); }
+                for (var j = 0; j < TAB_ORDER.length; j++) { var kk = TAB_ORDER[j]; var b = tabBtns[kk]; if (b) try { b.setValue(kk === activeFilter); } catch (e) {} }
+            }
             // grey out channels you can't use right now (e.g. Alliance when you're not in an alliance)
             function updateTabAvailability() {
                 try {
@@ -346,7 +348,7 @@
                         var b = tabBtns[k]; if (!b) continue;
                         var ok = channelAvailable(k);
                         b.setEnabled(ok);
-                        if (!ok && activeFilter === k) { activeFilter = "all"; try { tabBtns.all.setValue(true); } catch (e) {} updateTitle(); applyFilter(); }
+                        if (!ok && activeFilter === k) { selectTab("all"); }
                     }
                 } catch (e) {}
             }
