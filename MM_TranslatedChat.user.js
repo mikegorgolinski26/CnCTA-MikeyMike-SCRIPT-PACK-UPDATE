@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.1
+// @version         1.2.2
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -177,6 +177,17 @@
             try { var chat = getChat(); if (chat && chat.setVisibility) chat.setVisibility(hidden ? "excluded" : "visible"); }
             catch (e) { wwarn("setNativeHidden:", e); }
         }
+        // Are we actually in an alliance? (so we don't let an Alliance send fall through to Global.)
+        function inAlliance() {
+            try { var md = ClientLib.Data.MainData.GetInstance(); var a = md.get_Alliance && md.get_Alliance(); if (a) { if (typeof a.get_Exists === "function") return !!a.get_Exists(); if (typeof a.get_Id === "function") return a.get_Id() > 0; } } catch (e) {}
+            try { var p = ClientLib.Data.MainData.GetInstance().get_Player(); if (p && typeof p.get_AllianceId === "function") return p.get_AllianceId() > 0; } catch (e) {}
+            return true; // unknown -> don't block
+        }
+        // Can we send on this channel right now? (alliance requires actually being in one + the page existing)
+        function channelAvailable(key) {
+            if (key === "alliance") return inAlliance() && nativeIdxFor("alliance") >= 0;
+            return nativeIdxFor(key) >= 0;
+        }
 
         // ----------------------------------------------------------------------
         // Parse / render
@@ -232,7 +243,7 @@
 
             var rows = [];
             var activeFilter = "all";
-            var lastChanKey = "alliance";
+            var lastChanKey = "global";   // All-tab send target until a channel tab is picked (global is always available)
             var TXT = "#e8e8e8";
 
             // ---- feed ----
@@ -318,6 +329,18 @@
                 return b;
             }
             function buildTabs() { for (var i = 0; i < TAB_ORDER.length; i++) { var k = TAB_ORDER[i]; if (!tabBtns[k]) tabBtns[k] = makeTab(k); } try { tabBtns.all.setValue(true); } catch (e) {} }
+            // grey out channels you can't use right now (e.g. Alliance when you're not in an alliance)
+            function updateTabAvailability() {
+                try {
+                    for (var i = 0; i < TAB_ORDER.length; i++) {
+                        var k = TAB_ORDER[i]; if (k === "all") continue;
+                        var b = tabBtns[k]; if (!b) continue;
+                        var ok = channelAvailable(k);
+                        b.setEnabled(ok);
+                        if (!ok && activeFilter === k) { activeFilter = "all"; try { tabBtns.all.setValue(true); } catch (e) {} updateTitle(); applyFilter(); }
+                    }
+                } catch (e) {}
+            }
 
             // ---- controls row ----
             var controls = new qx.ui.container.Composite(new qx.ui.layout.HBox(8)).set({ padding: 5, backgroundColor: "#10243a" });
@@ -332,18 +355,18 @@
             controls.add(nativeChk);
             controls.add(new qx.ui.core.Spacer(), { flex: 1 });
             controls.add(statusLbl);
-            (function () {
-                function setStatus(s) {
-                    var map = {
-                        ready: '<span style="color:#7bd88f;">' + MMt("translation ready") + '</span>',
-                        downloading: '<span style="color:#e6c662;">' + MMt("preparing model…") + '</span>',
-                        unavailable: '<span style="color:#e08a8a;">' + MMt("translation unavailable") + '</span>',
-                        unsupported: '<span style="color:#e08a8a;">' + MMt("no built-in translator") + '</span>'
-                    };
-                    try { statusLbl.setValue(map[s] || ""); } catch (e) {}
-                }
-                Tr.status().then(setStatus, function () { setStatus("unavailable"); });
-            })();
+            function setStatus(s) {
+                var map = {
+                    ready: '<span style="color:#7bd88f;">' + MMt("translation ready") + '</span>',
+                    downloading: '<span style="color:#e6c662;">' + MMt("preparing model…") + '</span>',
+                    unavailable: '<span style="color:#e08a8a;">' + MMt("translation unavailable") + '</span>',
+                    unsupported: '<span style="color:#e08a8a;">' + MMt("no built-in translator") + '</span>'
+                };
+                try { statusLbl.setValue(map[s] || ""); } catch (e) {}
+            }
+            function refreshStatus() { Tr.status().then(setStatus, function () { setStatus("unavailable"); }); }
+            function flashNotice(msg) { try { statusLbl.setValue('<span style="color:#ff8a8a;">' + esc(msg) + '</span>'); window.setTimeout(refreshStatus, 3500); } catch (e) {} }
+            refreshStatus();
 
             // ---- input row ----
             var inputRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(6)).set({ padding: 5, backgroundColor: "#10243a" });
@@ -352,8 +375,13 @@
             function doSend() {
                 var text = (input.getValue() || "").trim();
                 if (!text) return;
+                var key = (activeFilter === "all") ? lastChanKey : activeFilter;
+                // never let an unavailable channel (e.g. Alliance when you're not in one) fall through to another
+                if (!channelAvailable(key)) {
+                    flashNotice((key === "alliance") ? MMt("Can't send — you're not in an alliance.") : (MMt("Can't send — channel unavailable.")));
+                    return;
+                }
                 try {
-                    var key = (activeFilter === "all") ? lastChanKey : activeFilter;
                     selectChannelIdx(nativeIdxFor(key));
                     var cw = getWidget();
                     if (cw && typeof cw.send === "function") cw.send(text);
@@ -378,15 +406,19 @@
             // frameless-ish: drop the qx caption bar so our blue title strip is the only chrome
             // (keep the window decorator so the resize handles still work when unlocked)
             try { var cb = win.getChildControl("captionbar"); if (cb) cb.exclude(); } catch (e) {}
-            // paint a clean outline on all four sides (frameless look, but bordered like the native chat)
+            // the theme's pane decorator only borders 3 sides (no top, where the caption bar used to be) -
+            // drop it and paint our own uniform border so all four edges match
+            try { var pane = win.getChildControl("pane"); if (pane) pane.setDecorator(null); } catch (e) {}
             function styleFrame() { try { var de = win.getContentElement().getDomElement(); if (de) { de.style.border = "1px solid #3a6e9c"; de.style.borderRadius = "4px"; de.style.boxSizing = "border-box"; } } catch (e) {} }
             win.addListener("appear", styleFrame);
+            styleFrame();
             win.add(titleStrip);
             win.add(controls);
             win.add(tabsBar);
             win.add(scroll, { flex: 1 });
             win.add(inputRow);
             buildTabs();
+            updateTabAvailability();
             updateTitle();
 
             // ---- drag by the title strip (only when unlocked); win captures so moves track ----
@@ -435,7 +467,7 @@
             nativeChk.addListener("changeValue", function () { try { MM.settings.set(SET + "hideNative", nativeChk.getValue()); setNativeHidden(nativeChk.getValue()); } catch (e) {} });
             setNativeHidden(hideNative());
 
-            win.addListener("appear", function () { buildTabs(); updateTitle(); applyLock(isLocked(), false); setNativeHidden(hideNative()); });
+            win.addListener("appear", function () { buildTabs(); updateTabAvailability(); updateTitle(); applyLock(isLocked(), false); setNativeHidden(hideNative()); });
 
             MM.buttons.register({
                 id: "mm-translated-chat",
