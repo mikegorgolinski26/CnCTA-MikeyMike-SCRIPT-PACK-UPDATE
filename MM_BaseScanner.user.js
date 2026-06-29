@@ -3,7 +3,7 @@
 // @description     Scan every attackable base/camp/outpost within range of one of your bases and rank them for farming and capture: loot (Tib/Cry/Credits/Research), command-point cost, loot-per-CP efficiency, resource-field counts, perfect-layout flags, Construction-Yard / Defense-Facility row, and building/defense condition. Rebuilt on the MM - Common Library (no MaelstromTools dependency).
 // @author          BlinDManX, chertosha, Netquik, kad (original Maelstrom ADDON Basescanner AIO)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.9
+// @version         1.0.10
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
@@ -565,11 +565,12 @@
                 if (bubbleLayer) return bubbleLayer;
                 try {
                     if (!MM.map || typeof MM.map.bubbleLayer !== "function") { wwarn("map.bubbleLayer unavailable"); return null; }
-                    // Bubble sits centred ABOVE the base with a straight-DOWN leader onto it (a map-pin look) -
-                    // clearer than a diagonal that's hard to trace. offset {x:0,y:-44} floats it above; the leader
-                    // drops to tip {x:0,y:0.9} (~0.9 of a grid cell below the base's projected top-centre, i.e.
-                    // onto the base body) so the vertical line points right at it. tip is grid-fraction = zoom-correct.
-                    bubbleLayer = MM.map.bubbleLayer({ id: "mm_bscan_bubbles", offset: { x: 0, y: -44 }, leader: true, anchor: "center", tip: { x: 0, y: 0.9 } });
+                    // Bubble sits centred ABOVE the base with a straight-DOWN leader + ARROWHEAD landing on it
+                    // (a map-pin look) - clearer than a diagonal that's hard to trace. offset {x:0,y:-46} floats
+                    // it above; the leader drops to tip {x:0,y:1.0} (~one grid cell below the base's projected
+                    // top-centre = onto the base body) and the arrowhead points right at it. tip is a grid
+                    // fraction so it's zoom-correct.
+                    bubbleLayer = MM.map.bubbleLayer({ id: "mm_bscan_bubbles", offset: { x: 0, y: -46 }, leader: true, arrow: true, anchor: "center", tip: { x: 0, y: 1.0 } });
                 } catch (e) { werr("bubbleLayer create failed:", e); bubbleLayer = null; }
                 return bubbleLayer;
             }
@@ -744,6 +745,11 @@
                     } else if (attempt < 24) {
                         // detail can take ~4s to arrive for camps/outposts (observed ~20 round-trip
                         // polls live), so be patient before giving up on a base.
+                        // RE-ASSERT the current-city pointer every few tries: another overlay that surveys
+                        // bases (e.g. MM - Off/Def Bubbles) drives the SAME single set_CurrentCityId pointer
+                        // and can evict the base we're waiting on (version drops back to -1, the row gets
+                        // dropped). Re-triggering the load keeps the scan filling even while that survey runs.
+                        if (attempt % 3 === 2) { try { cities().set_CurrentCityId(row[C.ID]); } catch (e) {} }
                         window.setTimeout(function () { poll(row, attempt + 1); }, 150 + attempt * 20);
                     } else {
                         // no data ever arrived - drop this row

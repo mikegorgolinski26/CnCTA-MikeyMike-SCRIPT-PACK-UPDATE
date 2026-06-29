@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.33
+// @version         1.0.34
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.33"
+            version: "1.0.34"
         };
 
         // -------------------------------------------------------------------
@@ -4432,6 +4432,10 @@
                 //            {0,0}). Base Scanner uses +x so its bubbles sit to the RIGHT, leaving the
                 //            left/top free for Player Base Info's off/def bubbles.
                 //   leader : true to draw a leader line from the base tile to the bubble's anchor edge.
+                //   tip    : { x, y } GRID-cell fraction added to the base coord for the leader's BASE end
+                //            (projected, so zoom-correct). worldToScreen(base) is the base's top-centre, so
+                //            tip {x:0,y:1.0} drops the leader onto the base body. Default {0,0}.
+                //   arrow  : true to draw an arrowhead at the leader's tip end, pointing into the base.
                 //   anchor : "left" (default - bubble extends to the right of the anchor; the leader meets
                 //            its left-middle) or "center" (bubble centred above the anchor, PBI-style).
                 //   id     : DOM id for the layer (default "mm_bubble_layer"); use a unique id per consumer.
@@ -4446,6 +4450,7 @@
                     // floating above it. Default {0,0} = the bare projection point (unchanged).
                     var tipX = (opts.tip && opts.tip.x) || 0;
                     var tipY = (opts.tip && opts.tip.y) || 0;
+                    var useArrow = (opts.arrow === true);   // draw an arrowhead at the leader's base (tip) end
                     var anchorLeft = (opts.anchor !== "center");
                     var layerId = opts.id || "mm_bubble_layer";
                     var SVGNS = "http://www.w3.org/2000/svg";
@@ -4507,6 +4512,12 @@
                         if (svg) svg.appendChild(ln);
                         return ln;
                     }
+                    function makeArrow() {
+                        var ar = document.createElementNS(SVGNS, "polygon");
+                        ar.setAttribute("fill", NEUTRAL);
+                        if (svg) svg.appendChild(ar);
+                        return ar;
+                    }
                     // If qx ever rebuilt the map container and dropped our layer, re-create it and re-attach
                     // every bubble from its stored base+content (the detached DOM nodes are gone).
                     function healLayer() {
@@ -4515,7 +4526,7 @@
                         ensureLayer();
                         for (var k in saved) {
                             var o = saved[k];
-                            var it = items[k] = { base: o.base, content: o.content, el: makeEl(), line: useLeader ? makeLine() : null };
+                            var it = items[k] = { base: o.base, content: o.content, el: makeEl(), line: useLeader ? makeLine() : null, arrow: (useLeader && useArrow) ? makeArrow() : null };
                             paint(k, it);
                         }
                     }
@@ -4526,6 +4537,7 @@
                         it.el.innerHTML = c.html || "";
                         if (c.title != null) it.el.title = c.title;
                         if (it.line) it.line.setAttribute("stroke", acc);
+                        if (it.arrow) it.arrow.setAttribute("fill", acc);
                     }
                     function position(key) {
                         var it = items[key]; if (!it) return;
@@ -4542,6 +4554,16 @@
                             it.line.setAttribute("y1", Math.round(tp.y));
                             it.line.setAttribute("x2", Math.round(ax));
                             it.line.setAttribute("y2", Math.round(ay));
+                            // arrowhead at the tip, oriented along the leader (points INTO the base)
+                            if (it.arrow) {
+                                var dx = tp.x - ax, dy = tp.y - ay, len = Math.sqrt(dx * dx + dy * dy) || 1;
+                                var ux = dx / len, uy = dy / len, AL = 10, AW = 5;
+                                var bx = tp.x - ux * AL, by = tp.y - uy * AL, px = -uy, py = ux;
+                                it.arrow.setAttribute("points",
+                                    Math.round(tp.x) + "," + Math.round(tp.y) + " " +
+                                    Math.round(bx + px * AW) + "," + Math.round(by + py * AW) + " " +
+                                    Math.round(bx - px * AW) + "," + Math.round(by - py * AW));
+                            }
                         }
                     }
                     // ---- region popup overlap hiding (a bubble shares the panels' z-index, so one sitting
@@ -4595,6 +4617,7 @@
                             }
                             it.el.style.visibility = hide ? "hidden" : "visible";
                             if (it.line) it.line.style.visibility = hide ? "hidden" : "visible";
+                            if (it.arrow) it.arrow.style.visibility = hide ? "hidden" : "visible";
                         }
                     }
                     function hideLayer() {
@@ -4626,7 +4649,7 @@
                             try {
                                 healLayer();
                                 var it = items[key];
-                                if (!it) it = items[key] = { base: base, content: content, el: makeEl(), line: useLeader ? makeLine() : null };
+                                if (!it) it = items[key] = { base: base, content: content, el: makeEl(), line: useLeader ? makeLine() : null, arrow: (useLeader && useArrow) ? makeArrow() : null };
                                 it.base = base; it.content = content || {};
                                 paint(key, it);
                                 position(key);
@@ -4638,6 +4661,7 @@
                             var it = items[key]; if (!it) return;
                             try { if (it.el && it.el.parentNode) it.el.parentNode.removeChild(it.el); } catch (e) {}
                             try { if (it.line && it.line.parentNode) it.line.parentNode.removeChild(it.line); } catch (e) {}
+                            try { if (it.arrow && it.arrow.parentNode) it.arrow.parentNode.removeChild(it.arrow); } catch (e) {}
                             delete items[key];
                         },
                         clear: function () { for (var k in items) handle.remove(k); },
