@@ -3,7 +3,7 @@
 // @description     Scan every attackable base/camp/outpost within range of one of your bases and rank them for farming and capture: loot (Tib/Cry/Credits/Research), command-point cost, loot-per-CP efficiency, resource-field counts, perfect-layout flags, Construction-Yard / Defense-Facility row, and building/defense condition. Rebuilt on the MM - Common Library (no MaelstromTools dependency).
 // @author          BlinDManX, chertosha, Netquik, kad (original Maelstrom ADDON Basescanner AIO)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.5
+// @version         1.0.6
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
@@ -461,6 +461,28 @@
                 try { if (e.getData() === true) refreshBubbles(); else if (bubbleLayer) bubbleLayer.clear(); } catch (x) {}
             });
 
+            // Re-apply every persisted control value once the player/world is loaded. build() reads settings
+            // ONCE, and that read can fire before the player id is ready - at which point the settings store
+            // resolves to the "default" bucket and returns defaults, so the saved toggles/limits look reset.
+            // The origin list dodges this by rebuilding on window "appear" (post-load); we do the same for the
+            // checkboxes + spinners here. setValue is a no-op when the value is unchanged, so this never fights
+            // a live toggle. Guarded on the player id so a too-early appear doesn't read the wrong bucket.
+            function syncControls() {
+                try {
+                    var pid = 0;
+                    try { pid = ClientLib.Data.MainData.GetInstance().get_Player().get_Id(); } catch (e) {}
+                    if (!pid) return;
+                    chkPlayers.setValue(MM.settings.get(SET + "tPlayers", false) === true);
+                    chkBases.setValue(MM.settings.get(SET + "tBases", true) === true);
+                    chkOutposts.setValue(MM.settings.get(SET + "tOutposts", true) === true);
+                    chkCamps.setValue(MM.settings.get(SET + "tCamps", true) === true);
+                    chkBg.setValue(MM.settings.get(SET + "background", false) === true);
+                    chkBubbles.setValue(MM.settings.get(SET + "mapBubbles", false) === true);
+                    cpSpin.setValue(MM.settings.get(SET + "cpLimit", 25));
+                    lvlSpin.setValue(MM.settings.get(SET + "minLevel", 0));
+                } catch (e) { wwarn("syncControls failed:", e); }
+            }
+
             var scanBtn = new qx.ui.form.Button(MMt("Scan")).set({ maxHeight: 26 });
             var stopBtn = new qx.ui.form.Button(MMt("Stop")).set({ maxHeight: 26, enabled: false });
             var progress = new qx.ui.basic.Label("").set({ alignY: "middle", rich: true, textColor: TXT });
@@ -488,6 +510,7 @@
             win.add(table, { flex: 1 });
             win.addListener("appear", function () {
                 rebuildBaseSelect();
+                syncControls();   // restore the remembered toggles/limits (build() may have read them too early)
                 // reopening clears the button's "…N%" progress and re-shows whatever the background fill has
                 setHudProgress(null);
                 try { rerender(); } catch (e) {}
