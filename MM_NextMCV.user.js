@@ -3,7 +3,7 @@
 // @description     A small always-on counter showing how close you are to your next MCV (the Research_BaseFound level that lets you found another base): time until you can afford the credits, and your research-point progress. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK (original MaelstromTools MCV popup)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.3.2
+// @version         1.3.3
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_NextMCV.user.js
@@ -315,7 +315,11 @@
                 var app = (typeof qx != "undefined" && qx.core && qx.core.Init) ? qx.core.Init.getApplication() : null;
                 var navReady = app && app.getUIItem && app.getUIItem(ClientLib.Data.Missions.PATH.BAR_NAVIGATION) && app.getUIItem(ClientLib.Data.Missions.PATH.BAR_NAVIGATION).isVisible();
                 if (navReady && window.MMCommon && window.MMCommon.ui && window.MMCommon.buttons) {
-                    build();
+                    // reassign: the module-load capture may have run before the Common Library injected
+                    // (injection order isn't guaranteed), leaving MM undefined. Build ONCE - a throw must
+                    // NOT fall through to the outer catch's retry (that floods the console every 1s).
+                    MM = window.MMCommon;
+                    try { build(); } catch (e2) { werr("build failed (not retrying):", e2); }
                 } else {
                     tries++;
                     if (tries === 30) wwarn("still waiting for game UI / MMCommon...");
