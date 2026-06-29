@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.6
+// @version         1.2.7
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -462,16 +462,30 @@
             // size/position you left it at (remembered separately, so locking doesn't clobber it).
             var DOCK = { w: 430, h: 250 };
             var DEF_UG = { left: 220, top: 120, width: 460, height: 320 };
-            var applyingGeom = false;   // suppress saveUG while we're (re)applying a restored size on appear
-            function getUG() { try { var g = MM.settings.get(SET + "ug", null); return (g && g.width) ? g : DEF_UG; } catch (e) { return DEF_UG; } }
-            // Save only a real, settled, on-screen size - never while we're mid-restore (the window briefly
-            // collapses to its content height before our re-apply lands, and persisting THAT was what reset
-            // the size on reload), and never an obviously-collapsed box.
+            var MIN_W = 280, MIN_H = 220;   // smallest sane unlocked size; rejects/repairs a collapsed box
+            var applyingGeom = false;       // suppress saveUG while we're (re)applying a restored size on appear
+            // Read the saved unlocked geometry, CLAMPED to sane minimums. A collapsed height (the window
+            // briefly shrinks to its content height on open) used to get saved and then faithfully re-applied
+            // every reload, so the window came back short forever. Clamping here repairs any such stale value.
+            function getUG() {
+                try {
+                    var g = MM.settings.get(SET + "ug", null);
+                    if (!g || !g.width) return DEF_UG;
+                    return {
+                        left: (g.left != null ? g.left : DEF_UG.left),
+                        top: (g.top != null ? g.top : DEF_UG.top),
+                        width: Math.max(MIN_W, g.width),
+                        height: Math.max(MIN_H, g.height)
+                    };
+                } catch (e) { return DEF_UG; }
+            }
+            // Save only a real, settled, on-screen size - never while we're mid-restore, and never a
+            // collapsed box (below the sane minimum), so a transient shrink can't corrupt the saved size.
             function saveUG() {
                 try {
                     if (isLocked() || applyingGeom || !win.isVisible()) return;
                     var b = win.getBounds();
-                    if (b && b.left != null && b.width >= 200 && b.height >= 140) {
+                    if (b && b.left != null && b.width >= MIN_W && b.height >= MIN_H) {
                         MM.settings.set(SET + "ug", { left: b.left, top: b.top, width: b.width, height: b.height });
                     }
                 } catch (e) {}
@@ -486,8 +500,11 @@
                 applyingGeom = true;
                 function put() { try { win.setWidth(g.width); win.setHeight(g.height); win.moveTo(g.left, g.top); } catch (e) {} }
                 put();
+                // re-apply across several frames - a late layout flush (tab build / translation-status update)
+                // can re-collapse the height after a single set; saving stays suppressed until the last one
                 window.setTimeout(function () { if (!isLocked()) put(); }, 60);
-                window.setTimeout(function () { if (!isLocked()) put(); applyingGeom = false; }, 360);
+                window.setTimeout(function () { if (!isLocked()) put(); }, 360);
+                window.setTimeout(function () { if (!isLocked()) put(); applyingGeom = false; }, 850);
             }
             function applyLock(locked, captureFirst) {
                 try {
