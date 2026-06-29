@@ -3,7 +3,7 @@
 // @description     Scan every attackable base/camp/outpost within range of one of your bases and rank them for farming and capture: loot (Tib/Cry/Credits/Research), command-point cost, loot-per-CP efficiency, resource-field counts, perfect-layout flags, Construction-Yard / Defense-Facility row, and building/defense condition. Rebuilt on the MM - Common Library (no MaelstromTools dependency).
 // @author          BlinDManX, chertosha, Netquik, kad (original Maelstrom ADDON Basescanner AIO)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.6
+// @version         1.0.7
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
@@ -565,7 +565,9 @@
                 if (bubbleLayer) return bubbleLayer;
                 try {
                     if (!MM.map || typeof MM.map.bubbleLayer !== "function") { wwarn("map.bubbleLayer unavailable"); return null; }
-                    bubbleLayer = MM.map.bubbleLayer({ id: "mm_bscan_bubbles", offset: { x: 56, y: 0 }, leader: true, anchor: "left" });
+                    // Offset up-AND-right so the leader runs as a diagonal pointing down to the base, rather
+                    // than a flat horizontal line lying across the top of it.
+                    bubbleLayer = MM.map.bubbleLayer({ id: "mm_bscan_bubbles", offset: { x: 42, y: -34 }, leader: true, anchor: "left" });
                 } catch (e) { werr("bubbleLayer create failed:", e); bubbleLayer = null; }
                 return bubbleLayer;
             }
