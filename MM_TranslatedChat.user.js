@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.7
+// @version         1.2.8
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -191,6 +191,55 @@
         }
 
         // ----------------------------------------------------------------------
+        // Message-body rendering: the game's chat markup (coords / player / base links, bold, colour)
+        // arrives as HTML inside data-chat-message. We must NOT (a) HTML-escape it (you'd see raw <a>
+        // tags - the bug) nor (b) render it verbatim (untrusted HTML + inline onclick = XSS/CSP risk).
+        // So we REBUILD it: keep safe formatting tags, and turn the game's coordinate links into our own
+        // clickable spans (rebuilt from the extracted numbers) wired via event delegation - same navigate
+        // behaviour as native chat, no inline handlers. Other links render as their text for now.
+        // ----------------------------------------------------------------------
+        // onClick="...centerCoordinatesOnRegionViewWindow(parseInt('656',10), parseInt('487',10))..."
+        var COORD_RE = /centerCoordinatesOnRegionViewWindow\(\s*parseInt\(\s*['"]?(\d+)['"]?\s*,\s*10\s*\)\s*,\s*parseInt\(\s*['"]?(\d+)['"]?\s*,\s*10\s*\)/i;
+        function navTo(x, y) {
+            try { if (MM.coords && MM.coords.goTo) { MM.coords.goTo(x, y); return; } } catch (e) {}
+            try { webfrontend.gui.UtilView.centerCoordinatesOnRegionViewWindow(parseInt(x, 10), parseInt(y, 10)); } catch (e) {}
+        }
+        function safeColor(c) { c = String(c || ""); return /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+)$/.test(c) ? c : ""; }
+        function coordSpan(x, y, text) {
+            return '<span class="mm-tc-coord" data-x="' + esc(x) + '" data-y="' + esc(y) + '" '
+                + 'style="color:#5ab0ff;cursor:pointer;text-decoration:underline;">' + esc(text || (x + ":" + y)) + '</span>';
+        }
+        function serializeBody(node) {
+            var out = "", kids = node.childNodes;
+            for (var i = 0; i < kids.length; i++) {
+                var n = kids[i];
+                if (n.nodeType === 3) { out += esc(n.nodeValue); continue; }      // text
+                if (n.nodeType !== 1) continue;
+                var tag = (n.tagName || "").toLowerCase();
+                if (tag === "a") {
+                    var m = COORD_RE.exec(n.getAttribute("onclick") || "");
+                    var txt = n.textContent || "";
+                    if (m) out += coordSpan(m[1], m[2], txt);
+                    else { var t2 = txt.match(/^\s*(\d{1,4}):(\d{1,4})\s*$/); if (t2) out += coordSpan(t2[1], t2[2], txt.trim()); else out += esc(txt); }
+                } else if (tag === "b" || tag === "i" || tag === "u" || tag === "s") {
+                    out += "<" + tag + ">" + serializeBody(n) + "</" + tag + ">";
+                } else if (tag === "font" || tag === "span") {
+                    var col = safeColor(n.getAttribute && n.getAttribute("color"));
+                    out += '<span' + (col ? ' style="color:' + col + ';"' : '') + '>' + serializeBody(n) + '</span>';
+                } else if (tag === "br") { out += "<br>"; }
+                else { out += serializeBody(n); }   // unknown -> keep its text/children, drop the tag
+            }
+            return out;
+        }
+        function toDom(rawHtml) { var d = document.createElement("div"); d.innerHTML = String(rawHtml == null ? "" : rawHtml); return d; }
+        function bodyToHtml(rawHtml) { try { return serializeBody(toDom(rawHtml)); } catch (e) { return esc(String(rawHtml == null ? "" : rawHtml)); } }
+        function bodyToPlain(rawHtml) { try { return (toDom(rawHtml).textContent || "").trim(); } catch (e) { return String(rawHtml == null ? "" : rawHtml); } }
+        // re-linkify "X:Y" patterns in already-plain (e.g. translated) text - the numbers survive translation
+        function linkifyCoords(text) {
+            return esc(String(text == null ? "" : text)).replace(/(\d{1,4}):(\d{1,4})/g, function (_, x, y) { return coordSpan(x, y, x + ":" + y); });
+        }
+
+        // ----------------------------------------------------------------------
         // Parse / render
         // ----------------------------------------------------------------------
         function parseMessage(html) {
@@ -217,6 +266,7 @@
                     chan: def ? def.label : "",
                     chanColor: chanColor || (def ? def.color : null),
                     sender: sender, senderId: senderId, mtype: mtype, raw: raw,
+                    rawPlain: bodyToPlain(raw),   // body as plain text (markup stripped) - for translation/detection
                     plain: (d.textContent || "").trim()
                 };
             } catch (e) { wwarn("parse failed:", e); return null; }
@@ -228,9 +278,11 @@
             if (p.chan) s += '<span style="color:' + (p.chanColor || "#9ab0c0") + ';">[' + esc(p.chan) + ']</span> ';
             if (tr && tr.translated && tr.src) s += '<span style="background:#5a4410;color:#f0c662;font-size:10px;font-weight:bold;padding:0 4px;border-radius:3px;">' + esc(String(tr.src).toUpperCase()) + '</span> ';
             if (p.sender) s += '<span style="color:#d8b878;">[' + esc(p.sender) + ']:</span> ';
-            var bodyText = (tr && tr.translated) ? tr.out : (p.raw != null ? p.raw : p.plain);
-            s += '<span style="color:#e6edf3;">' + esc(bodyText) + '</span>';
-            if (tr && tr.translated && showOriginal() && p.raw != null) s += ' <span style="color:#5d7d9c;font-style:italic;font-size:11px;">(' + esc(p.raw) + ')</span>';
+            // translated -> show the translation with coords re-linkified; otherwise render the native body
+            // markup (clickable coords + safe formatting) instead of escaping it as raw text.
+            var bodyHtml = (tr && tr.translated) ? linkifyCoords(tr.out) : bodyToHtml(p.raw != null ? p.raw : p.plain);
+            s += '<span style="color:#e6edf3;">' + bodyHtml + '</span>';
+            if (tr && tr.translated && showOriginal() && p.raw != null) s += ' <span style="color:#5d7d9c;font-style:italic;font-size:11px;">(' + bodyToHtml(p.raw) + ')</span>';
             if (!tr && pending) s += ' <span style="color:#5d7d9c;font-style:italic;font-size:11px;">· ' + esc(MMt("translating…")) + '</span>';
             return s;
         }
@@ -253,6 +305,26 @@
             var list = new qx.ui.container.Composite(new qx.ui.layout.VBox(2)).set({ padding: 6, backgroundColor: "#0c1a28" });
             var scroll = new qx.ui.container.Scroll();
             scroll.add(list);
+            // Make rebuilt coord links navigate, via ONE delegated listener on the feed's DOM (no inline
+            // onclick -> CSP-safe). Wired once the feed element exists (retried on appear).
+            function wireCoordClicks() {
+                try {
+                    var el = list.getContentElement() && list.getContentElement().getDomElement();
+                    if (!el || el.__mmCoordWired) return;
+                    el.__mmCoordWired = true;
+                    el.addEventListener("click", function (ev) {
+                        var t = ev.target;
+                        while (t && t !== el) {
+                            if (t.classList && t.classList.contains("mm-tc-coord")) {
+                                var x = parseInt(t.getAttribute("data-x"), 10), y = parseInt(t.getAttribute("data-y"), 10);
+                                if (!isNaN(x) && !isNaN(y)) { navTo(x, y); try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {} }
+                                return;
+                            }
+                            t = t.parentNode;
+                        }
+                    });
+                } catch (e) {}
+            }
             function atBottom() { try { return (scroll.getScrollY() >= scroll.getScrollMaxY() - 24); } catch (e) { return true; } }
             function scrollBottomSoon(force) { var stick = force || atBottom(); if (!stick) return; window.setTimeout(function () { try { scroll.scrollToY(scroll.getScrollMaxY()); } catch (e) {} }, 0); }
             function rowVisible(r) { return (activeFilter === "all") || (r.chanKey === activeFilter); }
@@ -275,10 +347,12 @@
                 if (!p) return;
                 if (!p.raw || String(p.mtype) === "0") return;
                 var row = addRow(p);
-                if (p.raw && Tr.supported) {
+                if (p.rawPlain && Tr.supported) {
                     var tgt = targetLang(), done = false;
                     var hintTimer = window.setTimeout(function () { if (!done) { try { row.lbl.setValue(lineHtml(p, null, true)); } catch (e) {} } }, 400);
-                    Tr.process(p.raw, tgt).then(function (tr) {
+                    // translate the PLAIN body (markup stripped) - feeding HTML to the detector/translator
+                    // both mangled the links and skewed language detection
+                    Tr.process(p.rawPlain, tgt).then(function (tr) {
                         done = true; try { window.clearTimeout(hintTimer); } catch (e) {}
                         try { row.tr = tr; row.lbl.setValue(lineHtml(p, tr)); if (tr && tr.translated && rowVisible(row)) scrollBottomSoon(); } catch (e) {}
                     });
@@ -546,6 +620,7 @@
                 // was loaded), reflect it on the tabs + feed, then restore geometry + native state
                 try { activeFilter = MM.settings.get(SET + "filter", activeFilter) || activeFilter; lastChanKey = MM.settings.get(SET + "lastChan", lastChanKey) || lastChanKey; } catch (e) {}
                 buildTabs(); updateTabAvailability(); applyFilter(); updateTitle(); updateSendTarget(); applyLock(isLocked(), false); applyNativeVisibility();
+                wireCoordClicks();   // the feed DOM exists now - attach the delegated coord-link handler
             });
 
             MM.buttons.register({
