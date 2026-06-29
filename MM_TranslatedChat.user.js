@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.4
+// @version         1.2.5
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -78,7 +78,8 @@
         function showOriginal() { try { return MM.settings.get(SET + "showOriginal", true) !== false; } catch (e) { return true; } }
         function targetLang() { try { var o = MM.settings.get(SET + "target", null); return o || MM.i18n.getLang() || "en"; } catch (e) { return "en"; } }
         function isLocked() { try { return MM.settings.get(SET + "locked", true) !== false; } catch (e) { return true; } }
-        function hideNative() { try { return MM.settings.get(SET + "hideNative", true) !== false; } catch (e) { return true; } }
+        // Default OFF: keep the game's native chat unless the user deliberately opts in to replacing it.
+        function hideNative() { try { return MM.settings.get(SET + "hideNative", false) === true; } catch (e) { return false; } }
 
         // ----------------------------------------------------------------------
         // On-device translation engine
@@ -478,20 +479,27 @@
             try { win.addListener("resize", saveUG); } catch (e) {}
             window.setInterval(function () { try { if (win.isVisible() && !isLocked()) saveUG(); } catch (e) {} }, 1500);
 
-            // ---- minimize (native stays hidden; restore via the MM Tools button) ----
+            // ---- minimize: closes our window; the disappear handler restores native chat ----
             minBtn.addListener("tap", function () { try { win.close(); } catch (e) {} });
 
-            // ---- native replace (independent of our window's open state) ----
+            // ---- native replace (ONLY while THIS window is open) ----
+            // The native chat is hidden only when the user has BOTH this window open AND "Hide native chat"
+            // ticked. So a fresh install - and a minimized/closed window - always leaves a working chat on
+            // screen, never a blank where both are hidden. (This was the first-load complaint: native was
+            // hidden by default but our window doesn't auto-open, so there was no chat at all.)
+            function applyNativeVisibility() { try { setNativeHidden(win.isVisible() && hideNative()); } catch (e) {} }
             nativeChk.setValue(hideNative());
-            nativeChk.addListener("changeValue", function () { try { MM.settings.set(SET + "hideNative", nativeChk.getValue()); setNativeHidden(nativeChk.getValue()); } catch (e) {} });
-            setNativeHidden(hideNative());
-            // keep native hidden across reloads: the game can (re)show its chat AFTER our build runs, so
-            // re-assert on a few delays and whenever the native window's visibility changes
-            function enforceNativeHidden() { try { if (!hideNative()) return; var c = getChat(); if (c && c.getVisibility && c.getVisibility() !== "excluded") setNativeHidden(true); } catch (e) {} }
+            nativeChk.addListener("changeValue", function () { try { MM.settings.set(SET + "hideNative", nativeChk.getValue()); applyNativeVisibility(); } catch (e) {} });
+            // The game can (re)show its chat AFTER our build runs; re-assert the hide, but ONLY while our
+            // window is open and the setting is on - otherwise leave native alone so it stays visible.
+            function enforceNativeHidden() { try { if (!(win.isVisible() && hideNative())) return; var c = getChat(); if (c && c.getVisibility && c.getVisibility() !== "excluded") setNativeHidden(true); } catch (e) {} }
             try { var nchat = getChat(); if (nchat && nchat.addListener) nchat.addListener("changeVisibility", enforceNativeHidden); } catch (e) {}
             [300, 1000, 2500, 5000].forEach(function (d) { window.setTimeout(enforceNativeHidden, d); });
+            // restore native whenever this window closes/minimizes, so chat is never left blank
+            win.addListener("disappear", function () { try { setNativeHidden(false); } catch (e) {} });
+            applyNativeVisibility();
 
-            win.addListener("appear", function () { buildTabs(); updateTabAvailability(); updateTitle(); updateSendTarget(); applyLock(isLocked(), false); setNativeHidden(hideNative()); });
+            win.addListener("appear", function () { buildTabs(); updateTabAvailability(); updateTitle(); updateSendTarget(); applyLock(isLocked(), false); applyNativeVisibility(); });
 
             MM.buttons.register({
                 id: "mm-translated-chat",
