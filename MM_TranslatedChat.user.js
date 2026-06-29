@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.9
+// @version         1.2.10
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -174,9 +174,35 @@
             catch (e) { wwarn("selectChannelIdx:", e); }
             return false;
         }
+        // The lower-left native "Chat" launcher chip = webfrontend.gui.chat.ChatButtonWidget (the chat's
+        // MINIMIZED form, a SEPARATE widget from the chat window). It's not a singleton, but it sits very
+        // shallow in the widget tree, so a small breadth-first walk finds the live instance. Cached.
+        var _chatBtn = null;
+        function findChatButton() {
+            try {
+                var root = qx.core.Init.getApplication().getRoot();
+                var q = [root], n = 0;
+                while (q.length && n++ < 6000) {
+                    var w = q.shift(); if (!w) continue;
+                    try { if (w.classname === "webfrontend.gui.chat.ChatButtonWidget") return w; } catch (e) {}
+                    try { var ch = w.getChildren ? w.getChildren() : null; if (ch) for (var i = 0; i < ch.length; i++) q.push(ch[i]); } catch (e) {}
+                }
+            } catch (e) { wwarn("findChatButton:", e); }
+            return null;
+        }
+        function getChatButton() {
+            try { if (_chatBtn && (!_chatBtn.isDisposed || !_chatBtn.isDisposed())) return _chatBtn; } catch (e) {}
+            _chatBtn = findChatButton();
+            return _chatBtn;
+        }
+        // Hide/show the native chat = BOTH the chat window AND the minimized launcher chip, so it's gone
+        // whether the native chat was restored or minimized when you ticked "Hide native chat".
         function setNativeHidden(hidden) {
-            try { var chat = getChat(); if (chat && chat.setVisibility) chat.setVisibility(hidden ? "excluded" : "visible"); }
-            catch (e) { wwarn("setNativeHidden:", e); }
+            var v = hidden ? "excluded" : "visible";
+            try { var chat = getChat(); if (chat && chat.setVisibility) chat.setVisibility(v); }
+            catch (e) { wwarn("setNativeHidden chat:", e); }
+            try { var btn = getChatButton(); if (btn && btn.setVisibility) btn.setVisibility(v); }
+            catch (e) { wwarn("setNativeHidden button:", e); }
         }
         // Are we actually in an alliance? (so we don't let an Alliance send fall through to Global.)
         function inAlliance() {
@@ -608,7 +634,15 @@
             nativeChk.addListener("changeValue", function () { try { MM.settings.set(SET + "hideNative", nativeChk.getValue()); applyNativeVisibility(); } catch (e) {} });
             // The game can (re)show its chat AFTER our build runs; re-assert the hide, but ONLY while our
             // window is open and the setting is on - otherwise leave native alone so it stays visible.
-            function enforceNativeHidden() { try { if (!(win.isVisible() && hideNative())) return; var c = getChat(); if (c && c.getVisibility && c.getVisibility() !== "excluded") setNativeHidden(true); } catch (e) {} }
+            function enforceNativeHidden() {
+                try {
+                    if (!(win.isVisible() && hideNative())) return;
+                    var c = getChat(), b = getChatButton();
+                    var chatShown = c && c.getVisibility && c.getVisibility() !== "excluded";
+                    var btnShown = b && b.getVisibility && b.getVisibility() !== "excluded";   // re-appears when native is minimized
+                    if (chatShown || btnShown) setNativeHidden(true);
+                } catch (e) {}
+            }
             try { var nchat = getChat(); if (nchat && nchat.addListener) nchat.addListener("changeVisibility", enforceNativeHidden); } catch (e) {}
             [300, 1000, 2500, 5000].forEach(function (d) { window.setTimeout(enforceNativeHidden, d); });
             // restore native whenever this window closes/minimizes, so chat is never left blank
