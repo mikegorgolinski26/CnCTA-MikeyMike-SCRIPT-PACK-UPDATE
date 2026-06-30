@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.33
+// @version         1.4.34
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -602,7 +602,14 @@
                             textColor: "#ffb060", font: "font_size_13_bold"
                         });
                         comp.add(lblFail, { row: 0, column: 0, colSpan: 11 });
-                        wwarn("attack-loot: gave up polling for selId=" + selId + " (last reason=" + (data.reason || "?") + ")");
+                        // The game re-fires onCitiesChange while a base sits at ver=-1, so this branch is
+                        // re-entered repeatedly for the SAME base - demote to debug-gated wlog and fire it
+                        // only once per selId so it can't flood the console (the on-panel "unavailable"
+                        // label already tells the user; the give-up isn't actionable for them).
+                        if (widget.__MM_BT_lootGaveUp !== selId) {
+                            widget.__MM_BT_lootGaveUp = selId;
+                            wlog("attack-loot: gave up polling for selId=" + selId + " (last reason=" + (data.reason || "?") + ")");
+                        }
                     }
                     return;
                 }

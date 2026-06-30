@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.10
+// @version         1.2.11
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -87,7 +87,7 @@
         var Tr = (function () {
             function has(name) { try { return (name in self) && typeof self[name] !== "undefined"; } catch (e) { return false; } }
             var supported = has("Translator") && has("LanguageDetector");
-            var detectorP = null, translators = {}, cache = {};
+            var detectorP = null, translators = {}, cache = {}, cacheKeys = [], CACHE_MAX = 500;
             function getDetector() {
                 if (detectorP) return detectorP;
                 detectorP = (async function () {
@@ -135,7 +135,11 @@
                         if (out == null || out === text) return { translated: false, src: src };
                         return { translated: true, src: src, out: out };
                     })().catch(function (e) { wwarn("translate failed:", e); return { translated: false }; });
+                    // Cap the cache so a long session of varied chat can't grow it without bound. Keys are
+                    // unique (we early-return above on a hit), so this is a simple FIFO evict of the oldest.
                     cache[key] = p;
+                    cacheKeys.push(key);
+                    if (cacheKeys.length > CACHE_MAX) { var oldKey = cacheKeys.shift(); delete cache[oldKey]; }
                     return p;
                 }
             };
