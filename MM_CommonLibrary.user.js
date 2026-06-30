@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.36
+// @version         1.0.37
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.36"
+            version: "1.0.37"
         };
 
         // -------------------------------------------------------------------
@@ -4560,10 +4560,25 @@
                         if (it.line) it.line.setAttribute("stroke", acc);
                         if (it.arrow) it.arrow.setAttribute("fill", acc);
                     }
-                    function position(key) {
+                    // Per-reproject projector: resolve VisMain + grid dims ONCE for a whole pass. Otherwise
+                    // api.worldToScreen re-fetches get_Region() ~twice per call (gw()+gh()), and position()
+                    // calls it twice per bubble (anchor + tip) - i.e. ~4 get_Region() per bubble per pan tick.
+                    function makeProjector() {
+                        try {
+                            var v = vm(), r = v.get_Region();
+                            var GW = (r && r.get_GridWidth && r.get_GridWidth()) || 128;
+                            var GH = (r && r.get_GridHeight && r.get_GridHeight()) || 96;
+                            if (typeof v.ScreenPosFromWorldPosX === "function") {
+                                return function (gx, gy) { return { x: v.ScreenPosFromWorldPosX(gx * GW), y: v.ScreenPosFromWorldPosY(gy * GH) }; };
+                            }
+                        } catch (e) {}
+                        return null;   // null -> position() falls back to the safe per-call api.worldToScreen
+                    }
+                    function position(key, proj) {
                         var it = items[key]; if (!it) return;
+                        var P = proj || api.worldToScreen;   // hoisted projector, or safe per-call fallback
                         var bp;   // bubble anchor point, shifted by the grid-fraction anchorGrid (e.g. tile centre)
-                        try { bp = api.worldToScreen(it.base.x + aGX, it.base.y + aGY); } catch (e) { return; }
+                        try { bp = P(it.base.x + aGX, it.base.y + aGY); } catch (e) { return; }
                         var ax = bp.x + offX, ay = bp.y + offY;
                         it.el.style.left = Math.round(ax) + "px";
                         it.el.style.top = Math.round(ay) + "px";
@@ -4571,7 +4586,7 @@
                             // leader: from the base TIP point up to the bubble - its bottom-centre when the
                             // bubble is centred on its anchor (middle), else its anchor edge.
                             var tp;
-                            try { tp = api.worldToScreen(it.base.x + tipX, it.base.y + tipY); } catch (e) { tp = bp; }
+                            try { tp = P(it.base.x + tipX, it.base.y + tipY); } catch (e) { tp = bp; }
                             var bx = ax, by = (anchorMode === "middle") ? (ay + ((it.el.offsetHeight || 24) / 2)) : ay;
                             it.line.setAttribute("x1", Math.round(tp.x));
                             it.line.setAttribute("y1", Math.round(tp.y));
@@ -4630,6 +4645,11 @@
                     function rectsIntersect(a, b) { return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom); }
                     function updatePopupVisibility() {
                         if (!layer || layer.style.display === "none") return;
+                        // No bubbles -> skip the per-panel getBoundingClientRect work entirely. The 200ms
+                        // popupTimer still wakes, but does ZERO layout reads when the layer is empty (the
+                        // common case for a layer that's active but currently has nothing to show).
+                        var any = false; for (var _k in items) { any = true; break; }
+                        if (!any) return;
                         var rects = popupRects();
                         for (var k in items) {
                             var it = items[k]; if (!it || !it.el) continue;
@@ -4652,7 +4672,8 @@
                         healLayer();
                         if (layer) layer.style.display = "block";
                         if (svg) svg.style.display = "block";
-                        for (var k in items) position(k);
+                        var proj = makeProjector();   // resolve region/grid once for the whole pass
+                        for (var k in items) position(k, proj);
                         updatePopupVisibility();
                     }
 
@@ -5580,6 +5601,109 @@
                 // current known state (undefined until the first broadcast lands)
                 isEnabled: function (id) { return enabled[id]; }
             };
+        })();
+
+        // -------------------------------------------------------------------
+        // disposables: a per-script teardown "bag", auto-fired on that script's
+        // lifecycle.onDisable. Lets a script register every always-on timer /
+        // listener in ONE place instead of hand-storing and hand-clearing each
+        // handle - the #1 source of "still ticking after disable" leftovers that
+        // accumulate over a session. Built on lifecycle.watch, and its totals feed
+        // debug.leakMeter so live MM timers/listeners are countable.
+        //   var D = MMCommon.disposables(MY_REGISTRY_ID);
+        //   D.addInterval(fn, 200);                  // setInterval, auto-cleared on disable
+        //   D.addTimeout(fn, 500);                   // setTimeout, auto-cleared if still pending on disable
+        //   D.addListener(el, "click", fn);          // DOM listener, auto-removed on disable
+        //   D.add(function () { layer.destroy(); }); // arbitrary teardown
+        //   D.disposeAll();                          // run now (also runs automatically on disable)
+        // disposables only TEARS DOWN; on re-enable the script re-arms its own work.
+        // -------------------------------------------------------------------
+        NS.disposables = (function () {
+            var bags = [];   // every live bag, so leakMeter can total their sizes
+            function make(id) {
+                var ds = [];   // teardown fns, run LIFO
+                var bag = {
+                    add: function (fn) { if (typeof fn === "function") ds.push(fn); return fn; },
+                    addInterval: function (fn, ms) {
+                        var t = window.setInterval(fn, ms);
+                        ds.push(function () { try { window.clearInterval(t); } catch (e) {} });
+                        return t;
+                    },
+                    addTimeout: function (fn, ms) {
+                        var t = window.setTimeout(fn, ms);
+                        ds.push(function () { try { window.clearTimeout(t); } catch (e) {} });
+                        return t;
+                    },
+                    addListener: function (target, type, fn, cap) {
+                        try { target.addEventListener(type, fn, cap || false); } catch (e) {}
+                        ds.push(function () { try { target.removeEventListener(type, fn, cap || false); } catch (e) {} });
+                        return fn;
+                    },
+                    disposeAll: function () {
+                        while (ds.length) { var f = ds.pop(); try { f(); } catch (e) { NS.log.err("disposables(" + id + "):", e); } }
+                    },
+                    size: function () { return ds.length; }
+                };
+                bags.push(bag);
+                try { if (NS.lifecycle && NS.lifecycle.watch && id != null) NS.lifecycle.watch(id, { onDisable: function () { bag.disposeAll(); } }); } catch (e) {}
+                return bag;
+            }
+            make.total = function () { var n = 0; for (var i = 0; i < bags.length; i++) n += bags[i].size(); return n; };
+            make.bagCount = function () { return bags.length; };
+            return make;
+        })();
+
+        // -------------------------------------------------------------------
+        // debug.leakMeter: snapshot the signals that climb when something isn't
+        // torn down - qooxdoo's global ObjectRegistry (undisposed widgets pile up
+        // here: the MovableMenuOverlay class of leak), total DOM nodes, and live MM
+        // timers/listeners tracked via disposables. Call it repeatedly (or .start(ms))
+        // and it prints the DELTA from the previous snapshot, so a number that keeps
+        // climbing while the game sits idle = a leak. Dev tool; always prints.
+        //   MMCommon.debug.leakMeter();             // one snapshot (+delta vs previous)
+        //   MMCommon.debug.leakMeter.start(60000);  // log every 60s
+        //   MMCommon.debug.leakMeter.stop();
+        //   window.MikeyMike_LeakMeter()            // same, console-friendly alias
+        // -------------------------------------------------------------------
+        NS.debug = NS.debug || {};
+        (function () {
+            var last = null, timer = null;
+            function qxObjectCount() {
+                try {
+                    var R = (typeof qx !== "undefined") && qx.core && qx.core.ObjectRegistry;
+                    if (R) {
+                        if (typeof R.getRegistry === "function") { var g = R.getRegistry(), n = 0; for (var k in g) if (g.hasOwnProperty(k)) n++; return n; }
+                        if (R.__registry) { var n2 = 0, r2 = R.__registry; for (var k2 in r2) if (r2.hasOwnProperty(k2)) n2++; return n2; }
+                    }
+                } catch (e) {}
+                return -1;
+            }
+            function snap() {
+                var s = { qxObjects: qxObjectCount(), domNodes: -1, mmTimers: -1, mmBags: -1 };
+                try { s.domNodes = document.getElementsByTagName("*").length; } catch (e) {}
+                try { if (NS.disposables) { s.mmTimers = NS.disposables.total(); s.mmBags = NS.disposables.bagCount(); } } catch (e) {}
+                return s;
+            }
+            function delta(cur, prev, k) {
+                if (!prev || !(prev[k] >= 0) || !(cur[k] >= 0)) return "";
+                var d = cur[k] - prev[k];
+                return " (" + (d >= 0 ? "+" : "") + d + ")";
+            }
+            function meter() {
+                var cur = snap();
+                try {
+                    console.log("[MM leak-meter] qxObjects=" + cur.qxObjects + delta(cur, last, "qxObjects")
+                        + "  domNodes=" + cur.domNodes + delta(cur, last, "domNodes")
+                        + "  mmTimers/listeners=" + cur.mmTimers + delta(cur, last, "mmTimers")
+                        + "  mmBags=" + cur.mmBags);
+                } catch (e) {}
+                last = cur;
+                return cur;
+            }
+            meter.start = function (ms) { meter.stop(); meter(); try { timer = window.setInterval(meter, ms || 60000); } catch (e) {} try { console.log("[MM leak-meter] started @ " + (ms || 60000) + "ms - watch for steadily climbing counts"); } catch (e) {} };
+            meter.stop = function () { if (timer) { try { window.clearInterval(timer); } catch (e) {} timer = null; } };
+            NS.debug.leakMeter = meter;
+            try { window.MikeyMike_LeakMeter = meter; } catch (e) {}
         })();
 
         // -------------------------------------------------------------------

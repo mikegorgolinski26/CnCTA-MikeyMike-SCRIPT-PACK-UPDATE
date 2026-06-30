@@ -3,7 +3,7 @@
 // @namespace    https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description  Draws a live on-map overlay of small bubbles showing Offense / Defense level (stacked) over every visible player base in region view (own / alliance / enemy). Off/def for other players' bases is surveyed in the background; a base's bubble only appears once its values are known. Bubbles track the map as you pan and zoom. A HUD options panel toggles which base types show.
-// @version      1.2.9
+// @version      1.2.10
 // @author       XDaast
 // @contributor  NetquiK (https://github.com/netquik)
 // @contributor  MikeyMike
@@ -331,15 +331,27 @@
 		}
 		function updatePopupVisibility() {
 			if (!layer || layer.style.display === "none") return;
+			// No bubbles -> skip the popup-panel getBoundingClientRect work entirely (the poll still wakes
+			// but does zero layout reads). Common while panning before any base is surveyed.
+			var any = false; for (var _id in bubbles) { any = true; break; }
+			if (!any) return;
 			var rects = popupRects();
+			if (!rects.length) {
+				// nothing open to hide behind: show every bubble without measuring any of them.
+				for (var vid in bubbles) { var bv = bubbles[vid]; if (bv && bv.el) bv.el.style.visibility = "visible"; }
+				return;
+			}
+			// BATCH reads then writes: measure every bubble first, then set visibility, so the loop doesn't
+			// interleave getBoundingClientRect reads with style writes.
+			var pend = [];
 			for (var id in bubbles) {
 				var b = bubbles[id];
 				if (!b || !b.el) continue;
-				if (!rects.length) { b.el.style.visibility = "visible"; continue; }
 				var hit = false, br = b.el.getBoundingClientRect();
 				for (var i = 0; i < rects.length; i++) { if (rectsIntersect(br, rects[i])) { hit = true; break; } }
-				b.el.style.visibility = hit ? "hidden" : "visible";
+				pend.push(b.el); pend.push(hit);
 			}
+			for (var j = 0; j < pend.length; j += 2) { pend[j].style.visibility = pend[j + 1] ? "hidden" : "visible"; }
 		}
 		function reprojectAll() {
 			if (!MM.map.inRegionView()) { if (layer) layer.style.display = "none"; return; }
@@ -391,6 +403,19 @@
 			if (enumTimer) return;
 			enumTimer = window.setTimeout(function () { enumTimer = null; refreshOverlay(); }, 140);
 		}
+
+		// Popup-overlap poll: hide bubbles sitting under an open base-info panel + resume a survey that was
+		// deferred while a panel was open. A popup opening doesn't move the camera, so this can't be
+		// event-driven. 250ms (was 150ms) still hides a bubble within a quarter-second of a panel opening -
+		// imperceptible - while doing 40% fewer wakeups. Stored so it's torn down on disable (not left
+		// ticking) and re-armed on enable.
+		var popupTimerId = null;
+		function popupTick() {
+			try { updatePopupVisibility(); } catch (e) {}
+			try { if (surveyDeferred && lastOwnMap && !surveyBlocked()) pump(lastOwnMap); } catch (e) {}
+		}
+		function startPopupTimer() { if (popupTimerId == null) popupTimerId = window.setInterval(popupTick, 250); }
+		function stopPopupTimer() { if (popupTimerId != null) { try { window.clearInterval(popupTimerId); } catch (e) {} popupTimerId = null; } }
 
 		// ---- options panel ---------------------------------------------------------
 		function buildOptions() {
@@ -466,10 +491,7 @@
 					// popup opening doesn't move the camera and so wouldn't trigger reprojectAll above.
 					// Same poll resumes a survey that was deferred while a base info panel was open (the
 					// pump() eviction guard) the moment that panel closes.
-					window.setInterval(function () {
-						try { updatePopupVisibility(); } catch (e) {}
-						try { if (surveyDeferred && lastOwnMap && !surveyBlocked()) pump(lastOwnMap); } catch (e) {}
-					}, 150);
+					startPopupTimer();
 					// React to being toggled in the CnC Pack menu / options page WITHOUT a refresh: on
 					// disable, tear down the survey + overlay; on re-enable (same session), resume.
 					try {
@@ -478,6 +500,7 @@
 								onDisable: function () {
 									wlog("disabled via CnC Pack menu - stopping survey + clearing overlay");
 									scriptEnabled = false;
+									stopPopupTimer();
 									queue.length = 0;
 									for (var dk in pending) delete pending[dk];
 									if (surveyRestoreId !== null) { try { MM.base.setCurrentCityId(surveyRestoreId); } catch (e) {} surveyRestoreId = null; }
@@ -487,6 +510,7 @@
 								onEnable: function () {
 									wlog("re-enabled via CnC Pack menu - resuming overlay");
 									scriptEnabled = true;
+									startPopupTimer();
 									refreshOverlay();
 								}
 							});

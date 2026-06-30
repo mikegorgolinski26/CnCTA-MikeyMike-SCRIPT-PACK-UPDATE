@@ -3,7 +3,7 @@
 // @namespace      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include        https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description    Makes the game's own pop-out menu overlays (Mail, Forum, Ranking, alliance/diplomacy panels - anything that flies out from the top menu bar) draggable. Drag them anywhere instead of being locked to centre, and the position is remembered across refreshes.
-// @version        1.0.3
+// @version        1.0.4
 // @license        CC-BY-NC-SA 4.0
 // @author         MikeyMike (rework of Netquik's "MovableMenuOverlay")
 // @contributor    Netquik [SoO] (https://github.com/netquik)
@@ -222,8 +222,17 @@
                         if (this.MMO) {
                             var cur = visualPos(this.MMO);
                             if (cur) savePos(clampPos(cur));
-                            try { this.MMO.toggleMovable(); } catch (e) {}
-                            try { A.getDesktop().remove(this.MMO); } catch (e) {}
+                            var old = this.MMO;
+                            this.MMO = null;
+                            try { old.toggleMovable(); } catch (e) {}
+                            try { A.getDesktop().remove(old); } catch (e) {}
+                            // Dispose the old container so it doesn't pile up undisposed in qx.core.ObjectRegistry
+                            // over a session - every menu fly-out open used to leak one MMOverlay + its pointerup
+                            // listener, because remove() only DETACHES, it doesn't free. removeAll() first so that
+                            // if a game overlay were somehow still parented here it's detached (not destroyed); in
+                            // normal flow the switch-overlay patch (oOModF) already removed it before we get here.
+                            try { old.removeAll(); } catch (e) {}
+                            try { old.dispose(); } catch (e) {}
                         }
                         var position = clampPos(loadPos() || defaultPos());
                         savePos(position); // first run seeds the default; keeps the setting in sync
