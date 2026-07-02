@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.11
+// @version         1.2.12
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -88,6 +88,53 @@
             function has(name) { try { return (name in self) && typeof self[name] !== "undefined"; } catch (e) { return false; } }
             var supported = has("Translator") && has("LanguageDetector");
             var detectorP = null, translators = {}, cache = {}, cacheKeys = [], CACHE_MAX = 500;
+            // Language-pack download gate: Chrome only starts downloading a translation pair's
+            // model when Translator.create() is called WITH a user gesture. Chat messages arrive
+            // from network events (no gesture), so the first-ever pair (e.g. fr>en on a fresh
+            // profile) rejects forever and every message silently stays untranslated. Fix: queue
+            // the pair and retry create() inside the next real click/keypress anywhere in the
+            // game - that call is allowed to download. Once ready, the cache is flushed so rows
+            // that were skipped can re-translate.
+            var pendingPairs = {}, gestureHooked = false, onPending = null, onReady = null;
+            function clearCache() { cache = {}; cacheKeys = []; }
+            function flushPendingOnGesture() {
+                var keys = Object.keys(pendingPairs);
+                if (!keys.length) { unhookGesture(); return; }
+                keys.forEach(function (k) {
+                    var pr = pendingPairs[k]; delete pendingPairs[k];
+                    if (translators[k]) return;                    // a retry is already in flight
+                    var p = Translator.create({ sourceLanguage: pr.src, targetLanguage: pr.tgt }); // called INSIDE the gesture
+                    translators[k] = p;
+                    p.then(function () {
+                        wlog("language pack ready:", k);
+                        clearCache();                              // drop cached translated:false results
+                        if (onReady) try { onReady(pr.src, pr.tgt); } catch (e) {}
+                    }, function (e) {
+                        if (translators[k] === p) delete translators[k];
+                        wwarn("language pack download failed:", k, e);
+                        pendingPairs[k] = pr; hookGesture();       // try again on a later gesture
+                    });
+                });
+                if (!Object.keys(pendingPairs).length) unhookGesture();
+            }
+            function hookGesture() {
+                if (gestureHooked) return;
+                gestureHooked = true;
+                document.addEventListener("mousedown", flushPendingOnGesture, true);
+                document.addEventListener("keydown", flushPendingOnGesture, true);
+            }
+            function unhookGesture() {
+                if (!gestureHooked) return;
+                gestureHooked = false;
+                document.removeEventListener("mousedown", flushPendingOnGesture, true);
+                document.removeEventListener("keydown", flushPendingOnGesture, true);
+            }
+            function queuePair(k, src, tgt) {
+                if (pendingPairs[k]) return;
+                pendingPairs[k] = { src: src, tgt: tgt };
+                hookGesture();
+                if (onPending) try { onPending(src, tgt); } catch (e) {}
+            }
             function getDetector() {
                 if (detectorP) return detectorP;
                 detectorP = (async function () {
@@ -101,17 +148,28 @@
             function getTranslator(src, tgt) {
                 var k = src + ">" + tgt;
                 if (translators[k]) return translators[k];
-                translators[k] = (async function () {
+                var p = (async function () {
                     var av = await Translator.availability({ sourceLanguage: src, targetLanguage: tgt });
                     if (av === "unavailable") throw new Error("Translator unavailable " + k);
-                    return await Translator.create({ sourceLanguage: src, targetLanguage: tgt });
+                    try {
+                        return await Translator.create({ sourceLanguage: src, targetLanguage: tgt });
+                    } catch (e) {
+                        // pack not installed ("downloadable"/"downloading") and no user gesture:
+                        // create() refuses to start the download - retry on the next gesture
+                        if (av !== "available") queuePair(k, src, tgt);
+                        throw e;
+                    }
                 })();
-                translators[k].catch(function () { delete translators[k]; });
-                return translators[k];
+                translators[k] = p;
+                p.catch(function () { if (translators[k] === p) delete translators[k]; });
+                return p;
             }
             return {
                 supported: supported,
                 warm: function () { if (supported) { try { getDetector(); } catch (e) {} } },
+                // UI hooks for the language-pack download gate (single subscriber each)
+                onPairPending: function (cb) { onPending = cb; },
+                onPairReady: function (cb) { onReady = cb; },
                 status: function () {
                     if (!supported) return Promise.resolve("unsupported");
                     return (async function () {
@@ -486,6 +544,28 @@
             function refreshStatus() { Tr.status().then(setStatus, function () { setStatus("unavailable"); }); }
             function flashNotice(msg) { try { statusLbl.setValue('<span style="color:#ff8a8a;">' + esc(msg) + '</span>'); window.setTimeout(refreshStatus, 3500); } catch (e) {} }
             refreshStatus();
+            // Language-pack download gate (see Tr): tell the user why nothing is translating yet,
+            // and once the pack lands, re-run the rows that were skipped while it was missing.
+            function retranslateRows() {
+                try {
+                    var tgt = targetLang();
+                    rows.forEach(function (r) {
+                        if (!r.p || !r.p.rawPlain) return;
+                        if (r.tr && r.tr.translated) return;
+                        Tr.process(r.p.rawPlain, tgt).then(function (tr) {
+                            try { if (tr && tr.translated) { r.tr = tr; r.lbl.setValue(lineHtml(r.p, tr)); } } catch (e) {}
+                        });
+                    });
+                    scrollBottomSoon();
+                } catch (e) { wwarn("retranslateRows:", e); }
+            }
+            Tr.onPairPending(function (src, tgt) {
+                try { statusLbl.setValue('<span style="color:#e6c662;">' + esc(MMt("language pack needed — click anywhere in the game to download") + " (" + String(src).toUpperCase() + "→" + String(tgt).toUpperCase() + ")") + '</span>'); } catch (e) {}
+            });
+            Tr.onPairReady(function () {
+                try { statusLbl.setValue('<span style="color:#7bd88f;">' + esc(MMt("language pack downloaded — translating")) + '</span>'); window.setTimeout(refreshStatus, 3500); } catch (e) {}
+                retranslateRows();
+            });
 
             // ---- input row ----
             var inputRow = new qx.ui.container.Composite(new qx.ui.layout.HBox(6)).set({ padding: 5, backgroundColor: "#10243a" });
