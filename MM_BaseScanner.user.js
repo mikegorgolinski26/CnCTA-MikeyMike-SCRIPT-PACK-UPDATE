@@ -3,7 +3,7 @@
 // @description     Scan every attackable base/camp/outpost within range of one of your bases and rank them for farming and capture: loot (Tib/Cry/Credits/Research), command-point cost, loot-per-CP efficiency, resource-field counts, perfect-layout flags, Construction-Yard / Defense-Facility row, and building/defense condition. Rebuilt on the MM - Common Library (no MaelstromTools dependency).
 // @author          BlinDManX, chertosha, Netquik, kad (original Maelstrom ADDON Basescanner AIO)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.11
+// @version         1.0.12
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
@@ -334,6 +334,7 @@
             var scanning = false;
             var fillToken = 0;      // bumped to cancel an in-flight async fill
             var scanOriginOwnId = null; // own-base id to restore as "current" when a scan ends/stops
+            var scanStats = null;   // scan.inRange drop counters from the last scan (why candidates were hidden)
 
             // ---- table ----
             var tableModel = new qx.ui.table.model.Simple();
@@ -432,6 +433,7 @@
 
             // CP limit
             var cpSpin = new qx.ui.form.Spinner(1, MM.settings.get(SET + "cpLimit", 25), 999).set({ width: 64, maxHeight: 26 });
+            cpSpin.set({ toolTipText: MMt("Hide targets costing more command points than this. NPC bases cost far more CP than camps (roughly 25-45 vs 10-16), so raise this to include Bases in the results.") });
             cpSpin.addListener("changeValue", function () { try { MM.settings.set(SET + "cpLimit", cpSpin.getValue()); } catch (e) {} });
 
             // min level
@@ -667,13 +669,15 @@
 
                 setProgress(0, 0, MMt("Enumerating…"));
                 var candidates = [];
+                scanStats = {}; // filled by scan.inRange with drop counters (overCp / underLevel / failDistance)
                 try {
                     candidates = MM.scan.inRange({
                         origin: origin,
                         cpLimit: cpSpin.getValue(),
                         minLevel: lvlSpin.getValue(),
                         types: types,
-                        excludeOwn: true
+                        excludeOwn: true,
+                        stats: scanStats
                     });
                 } catch (e) { werr("scan.inRange failed:", e); }
 
@@ -812,7 +816,17 @@
                 try { stopBtn.setEnabled(false); } catch (e) {}
                 // Restore the user's own base as "current" (stays in Region view - doesn't switch back).
                 try { if (scanOriginOwnId != null) cities().set_CurrentCityId(scanOriginOwnId); } catch (e) {}
-                setProgress(data.length, data.length, data.length + " " + (data.length === 1 ? MMt("target") : MMt("targets")));
+                // Say how many in-range targets the CP≤ cap hid: attacking an NPC BASE costs far more
+                // CP than a camp (live: bases 26-41 vs camps 12-16 from the same origin), so a
+                // camp-sized cap silently empties the Bases type - which looks exactly like a scanner
+                // bug. Surface the count so the user knows to raise CP≤ instead.
+                var doneLabel = data.length + " " + (data.length === 1 ? MMt("target") : MMt("targets"));
+                try {
+                    if (scanStats && scanStats.overCp > 0) {
+                        doneLabel += " <span style='color:#ffd591'>(+" + scanStats.overCp + " " + MMt("over the CP limit") + ")</span>";
+                    }
+                } catch (e) {}
+                setProgress(data.length, data.length, doneLabel);
                 rerender();
                 setHudProgress(null);
                 try { if (bubblesOn()) refreshBubbles(); } catch (e) {}

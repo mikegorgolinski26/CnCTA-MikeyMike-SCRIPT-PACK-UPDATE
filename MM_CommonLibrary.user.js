@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.37
+// @version         1.0.38
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -3854,7 +3854,10 @@
             //   CalculateAttackCommandPointCostToCoord for type-1 targets, matching AIO),
             //   excludeOwn (default true: skip your own bases by id), excludeIds (array or id->true map),
             //   attackableOnly (default true: drop targets the origin can't actually attack - out of
-            //   range or beyond its command-point capacity - via the game's own CheckAttackBase) }
+            //   range or beyond its command-point capacity - via the game's own CheckAttackBase),
+            //   stats (optional object: filled with drop counters { enumerated, kept, overCp,
+            //   underLevel, failDistance } so callers can tell the user WHY candidates were hidden
+            //   - e.g. every NPC base costing more CP than the cap - instead of dropping silently) }
             // Returns [{ id, type, x, y, baseLevel, campType, cp }] (campType null for non-camps,
             // cp null if the cost call threw). Ally exclusion is left to the detail phase, where the
             // alliance relationship is authoritative (same as AIO's FG re-check).
@@ -3908,34 +3911,58 @@
                         if (opts.excludeIds.length != null) { for (var j = 0; j < opts.excludeIds.length; j++) exIds[opts.excludeIds[j]] = true; }
                         else exIds = opts.excludeIds;
                     }
-                    var step = Math.floor(maxD + 1);
-                    for (var sy = py - step; sy <= py + step; sy++) {
-                        for (var sx = px - step; sx <= px + step; sx++) {
-                            var ddx = px - sx, ddy = py - sy;
-                            if (Math.sqrt(ddx * ddx + ddy * ddy) > maxD) continue;
-                            var obj = world.GetObjectFromPosition(sx, sy);
-                            if (!obj || types.indexOf(obj.Type) === -1) continue;
-                            if (typeof obj.getID !== "function" || typeof obj.get_BaseLevel !== "function") continue;
-                            var id = obj.getID();
-                            if (ownIds[id] || exIds[id]) continue;
-                            if (parseInt(obj.get_BaseLevel(), 10) < minLevel) continue;
-                            var cp;
-                            try {
-                                cp = (obj.Type === 1 && playerCP)
-                                    ? origin.CalculateAttackCommandPointCostToCoord(sx, sy, true, true)
-                                    : origin.CalculateAttackCommandPointCostToCoord(sx, sy);
-                            } catch (e) { cp = null; }
-                            if (cp != null && cp > cpLimit) continue;
-                            if (attackableOnly) {
-                                var car; try { car = world.CheckAttackBase(sx, sy); } catch (e) { car = 0; }
-                                if (car & FAIL_MASK) continue; // out of range / not enough command points
+                    var stats = opts.stats || null;
+                    if (stats) { stats.enumerated = 0; stats.kept = 0; stats.overCp = 0; stats.underLevel = 0; stats.failDistance = 0; }
+                    // CheckAttackBase measures from the CURRENT own city, NOT from `origin`
+                    // (live-verified 2026-07-03: FailDistance flipped for the same tile when the
+                    // selected base changed). Point the current-city pointer at the origin for the
+                    // duration of this sync loop so the distance gate is origin-relative, then
+                    // restore - otherwise scanning from a non-selected base wrongly drops targets
+                    // that are in the ORIGIN's range but outside the SELECTED base's range.
+                    var restoreCurId = null;
+                    if (attackableOnly) {
+                        try {
+                            var curOwn = cities.get_CurrentOwnCity();
+                            if (curOwn && origin.get_Id && curOwn.get_Id() !== origin.get_Id()) {
+                                restoreCurId = curOwn.get_Id();
+                                cities.set_CurrentCityId(origin.get_Id());
                             }
-                            out.push({
-                                id: id, type: obj.Type, x: sx, y: sy, baseLevel: obj.get_BaseLevel(),
-                                campType: (typeof obj.get_CampType === "function") ? obj.get_CampType() : null,
-                                cp: cp
-                            });
+                        } catch (e) {}
+                    }
+                    try {
+                        var step = Math.floor(maxD + 1);
+                        for (var sy = py - step; sy <= py + step; sy++) {
+                            for (var sx = px - step; sx <= px + step; sx++) {
+                                var ddx = px - sx, ddy = py - sy;
+                                if (Math.sqrt(ddx * ddx + ddy * ddy) > maxD) continue;
+                                var obj = world.GetObjectFromPosition(sx, sy);
+                                if (!obj || types.indexOf(obj.Type) === -1) continue;
+                                if (typeof obj.getID !== "function" || typeof obj.get_BaseLevel !== "function") continue;
+                                var id = obj.getID();
+                                if (ownIds[id] || exIds[id]) continue;
+                                if (stats) stats.enumerated++;
+                                if (parseInt(obj.get_BaseLevel(), 10) < minLevel) { if (stats) stats.underLevel++; continue; }
+                                var cp;
+                                try {
+                                    cp = (obj.Type === 1 && playerCP)
+                                        ? origin.CalculateAttackCommandPointCostToCoord(sx, sy, true, true)
+                                        : origin.CalculateAttackCommandPointCostToCoord(sx, sy);
+                                } catch (e) { cp = null; }
+                                if (cp != null && cp > cpLimit) { if (stats) stats.overCp++; continue; }
+                                if (attackableOnly) {
+                                    var car; try { car = world.CheckAttackBase(sx, sy); } catch (e) { car = 0; }
+                                    if (car & FAIL_MASK) { if (stats) stats.failDistance++; continue; } // out of real attack range
+                                }
+                                if (stats) stats.kept++;
+                                out.push({
+                                    id: id, type: obj.Type, x: sx, y: sy, baseLevel: obj.get_BaseLevel(),
+                                    campType: (typeof obj.get_CampType === "function") ? obj.get_CampType() : null,
+                                    cp: cp
+                                });
+                            }
                         }
+                    } finally {
+                        if (restoreCurId != null) { try { cities.set_CurrentCityId(restoreCurId); } catch (e) {} }
                     }
                 } catch (e) { NS.log.err("scan.inRange failed:", e); }
                 return out;
