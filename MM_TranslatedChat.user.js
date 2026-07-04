@@ -3,7 +3,7 @@
 // @description     A frameless replacement chat window that auto-translates incoming messages into your region language, entirely on-device (Chrome/Edge built-in Translator + Language Detector - nothing leaves your browser). Channel tabs (All / Global / Alliance / Whisper) switch the channel and target your sends; type and send from the window; each translated line is tagged with a two-letter source-language code between the [channel] and the [player], original shown dimmed. Padlock docks it lower-left like the native chat, or unlock to move + resize. Hides the native chat; remembers everything across logins.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.2.12
+// @version         1.2.13
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_TranslatedChat.user.js
@@ -253,7 +253,15 @@
             return null;
         }
         function getChatButton() {
-            try { if (_chatBtn && (!_chatBtn.isDisposed || !_chatBtn.isDisposed())) return _chatBtn; } catch (e) {}
+            // stale-cache guards: a disposed OR detached (no layout parent) chip means the game
+            // re-created it - re-find so we always talk to the LIVE instance.
+            try {
+                if (_chatBtn && (!_chatBtn.isDisposed || !_chatBtn.isDisposed())) {
+                    var attached = true;
+                    try { attached = !!_chatBtn.getLayoutParent(); } catch (e) {}
+                    if (attached) return _chatBtn;
+                }
+            } catch (e) {}
             _chatBtn = findChatButton();
             return _chatBtn;
         }
@@ -722,13 +730,49 @@
                 try {
                     if (!(win.isVisible() && hideNative())) return;
                     var c = getChat(), b = getChatButton();
+                    hookChipEnforce(b); // (re)attach the chip listener - the game can re-create the chip
                     var chatShown = c && c.getVisibility && c.getVisibility() !== "excluded";
                     var btnShown = b && b.getVisibility && b.getVisibility() !== "excluded";   // re-appears when native is minimized
                     if (chatShown || btnShown) setNativeHidden(true);
                 } catch (e) {}
             }
+            // The launcher CHIP needs its own visibility listener: the game re-shows it via paths that
+            // never touch the chat WINDOW's visibility (e.g. an incoming message while the chat is
+            // hidden), so the chat-window listener below never fired and the chip stayed on screen -
+            // Mike's "hide native doesn't fully hide" report. Instances can be re-created, so the hook
+            // is idempotent per instance and re-applied from enforceNativeHidden/the watchdog.
+            function hookChipEnforce(btn) {
+                try {
+                    if (btn && btn.addListener && !btn.__mmTcVisHook) {
+                        btn.__mmTcVisHook = true;
+                        btn.addListener("changeVisibility", function () { window.setTimeout(enforceNativeHidden, 0); });
+                    }
+                } catch (e) {}
+            }
+            // Catch-all for text aimed at the NATIVE chat input while it's hidden: the GAME's own
+            // region-menu "Paste Coords" (tnf:paste coords - game code, not ours) writes straight into
+            // the native editable, which the user can't see. Nothing legitimate can be typed into a
+            // hidden input, so anything found there is moved into OUR input and focused.
+            function nativeInputDom() {
+                try { return getChat().getChatWidget().getEditable().getContentElement().getDomElement(); } catch (e) { return null; }
+            }
+            function sweepNativeInput() {
+                try {
+                    if (!(win.isVisible() && hideNative())) return;
+                    var d = nativeInputDom();
+                    if (!d || !d.value) return;
+                    var t = d.value;
+                    d.value = "";
+                    input.setValue((input.getValue() || "") + t);
+                    try { input.focus(); } catch (e) {}
+                    wlog("moved text from hidden native input:", t);
+                } catch (e) {}
+            }
             try { var nchat = getChat(); if (nchat && nchat.addListener) nchat.addListener("changeVisibility", enforceNativeHidden); } catch (e) {}
             [300, 1000, 2500, 5000].forEach(function (d) { window.setTimeout(enforceNativeHidden, d); });
+            // Watchdog: re-assert the hide + sweep the hidden native input. Both callees no-op unless
+            // the window is open AND "Hide native chat" is on, so this is a cheap gated check otherwise.
+            window.setInterval(function () { try { enforceNativeHidden(); sweepNativeInput(); } catch (e) {} }, 1200);
             // restore native whenever this window closes/minimizes, so chat is never left blank
             win.addListener("disappear", function () { try { setNativeHidden(false); } catch (e) {} });
             applyNativeVisibility();
