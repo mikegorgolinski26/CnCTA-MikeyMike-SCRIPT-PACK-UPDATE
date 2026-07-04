@@ -3,7 +3,7 @@
 // @description     Scan every attackable base/camp/outpost within range of one of your bases and rank them for farming and capture: loot (Tib/Cry/Credits/Research), command-point cost, loot-per-CP efficiency, resource-field counts, perfect-layout flags, Construction-Yard / Defense-Facility row, and building/defense condition. Rebuilt on the MM - Common Library (no MaelstromTools dependency).
 // @author          BlinDManX, chertosha, Netquik, kad (original Maelstrom ADDON Basescanner AIO)
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.12
+// @version         1.0.13
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseScanner.user.js
@@ -38,7 +38,10 @@
  CP cost synchronously (MMCommon.scan.inRange); phase 2 loads each base's detail
  ASYNCHRONOUSLY (GetCity returns version:-1 until the server round-trip lands), so
  the table fills in progressively, then re-sorts. Allied / ghost / no-data bases
- drop out during the fill. Loot via MMCommon.loot.ofCity.
+ drop out during the fill. Loot via MMCommon.loot.ofCity. On busy worlds a target
+ can be in server-side flux (attacked/respawning): joins then fail with version -2
+ (dropped instantly) or wedge the game's response queue entirely - detected via
+ 3 consecutive join timeouts, which aborts the scan with a "reload the game" note.
 
  NOT YET PORTED: the original "Growth Rate" column (the CNCOPTplus growth-optimizer
  estimate). That is ~300 lines of era-stale optimizer math that overlaps the
@@ -714,6 +717,18 @@
 
                 // phase 2: async detail fill, one base at a time
                 var idx = 0, filled = 0;
+                // Consecutive full-timeout counter (world-glitch detector). On busy worlds some
+                // targets are in server-side flux (being attacked / respawning): their join either
+                // fails CLEANLY (get_Version() === -2) or - worse - the server answer is malformed
+                // and the GAME's own response handler throws ("Cannot read properties of null
+                // (reading 'length')" in qx.io.remote.RequestQueue), which kills that whole poll
+                // batch and can wedge ALL further city loads until a reload (live-reproduced on
+                // world 474; world 473 scans were unaffected). We can't fix the game's handler, so:
+                // -2 rows drop instantly (clean refusal), a timed-out row triggers a home-bounce
+                // (re-join the origin to clear the bad join), and 3 timeouts IN A ROW = the queue
+                // is dead -> abort the scan with an honest "reload the game" message instead of
+                // grinding every remaining row against a wedged session.
+                var consecTimeouts = 0;
                 function step() {
                     if (token !== fillToken) return;           // superseded / stopped (token bumped)
                     // Closing the window ends the scan ONLY when "Run in background" is off. With it on, the
@@ -737,9 +752,10 @@
                 }
                 function poll(row, attempt) {
                     if (token !== fillToken) return;
-                    var ncity = null;
-                    try { ncity = cities().GetCity(row[C.ID]); } catch (e) {}
-                    if (ncity && ncity.get_Version() > 0) {
+                    var ncity = null, ver = null;
+                    try { ncity = cities().GetCity(row[C.ID]); ver = ncity ? ncity.get_Version() : null; } catch (e) {}
+                    if (ncity && ver > 0) {
+                        consecTimeouts = 0;
                         applyDetail(row, ncity, origin);
                         filled++;
                         idx++;
@@ -749,29 +765,65 @@
                         // surface progress on the toolbar button only while running hidden in the background
                         if (backgroundOn() && !win.isVisible()) setHudProgress(Math.round(filled / Math.max(1, data.length) * 100));
                         else setHudProgress(null);
-                        window.setTimeout(step, 50);
+                        // settle before joining the next city: switching too fast widens the game's
+                        // response-race window (the world-glitch wedge above). 200ms is still ~5/s.
+                        window.setTimeout(step, 200);
+                    } else if (ver === -2) {
+                        // clean server refusal (target in flux - under attack / respawning): drop
+                        // NOW, no retries and no re-asserts (hammering a refused join spams the queue).
+                        consecTimeouts = 0;
+                        wlog("dropping (join refused, version -2):", row[C.LOC]);
+                        dropRow(row);
+                        setProgress(filled, data.length);
+                        rerender();
+                        window.setTimeout(step, 200);
                     } else if (attempt < 24) {
                         // detail can take ~4s to arrive for camps/outposts (observed ~20 round-trip
                         // polls live), so be patient before giving up on a base.
-                        // RE-ASSERT the current-city pointer every few tries: another overlay that surveys
+                        // RE-ASSERT the current-city pointer OCCASIONALLY: another overlay that surveys
                         // bases (e.g. MM - Off/Def Bubbles) drives the SAME single set_CurrentCityId pointer
                         // and can evict the base we're waiting on (version drops back to -1, the row gets
-                        // dropped). Re-triggering the load keeps the scan filling even while that survey runs.
-                        if (attempt % 3 === 2) { try { cities().set_CurrentCityId(row[C.ID]); } catch (e) {} }
+                        // dropped). Every 6th try (not 3rd): enough to survive that contention, without
+                        // spamming join requests at a struggling target (join spam feeds the wedge above).
+                        if (attempt % 6 === 5) { try { cities().set_CurrentCityId(row[C.ID]); } catch (e) {} }
                         window.setTimeout(function () { poll(row, attempt + 1); }, 150 + attempt * 20);
                     } else {
-                        // no data ever arrived - drop this row
-                        wlog("dropping (no data):", row[C.LOC]);
+                        // no data ever arrived - drop this row and HOME-BOUNCE: re-join the origin so
+                        // the dead join isn't left as the current city while we move on.
+                        consecTimeouts++;
+                        wlog("dropping (no data):", row[C.LOC], "consecutive timeouts:", consecTimeouts);
                         dropRow(row);
                         idx = Math.max(0, idx); // idx now points at the next row (this one removed)
                         setProgress(filled, data.length);
                         rerender();
-                        window.setTimeout(step, 30);
+                        if (consecTimeouts >= 3) {
+                            // three full timeouts in a row = the game's city-request queue is wedged
+                            // (the world-glitch above); every further row would burn ~9s and fail too.
+                            werr("aborting scan: 3 consecutive join timeouts - game data queue looks wedged");
+                            abortScan();
+                            return;
+                        }
+                        try { if (scanOriginOwnId != null) cities().set_CurrentCityId(scanOriginOwnId); } catch (e) {}
+                        window.setTimeout(step, 900); // let the home join settle before the next target
                     }
                 }
                 function dropRow(row) {
                     var i = data.indexOf(row);
                     if (i >= 0) data.splice(i, 1);
+                }
+                // World-glitch abort: keep what filled, reset the UI, tell the user the truth.
+                // (A wedged response queue usually needs a game reload to fully recover.)
+                function abortScan() {
+                    if (token !== fillToken) return;
+                    fillToken++; // cancel anything still scheduled
+                    scanning = false;
+                    try { scanBtn.setEnabled(true); scanBtn.setLabel(MMt("Scan")); } catch (e) {}
+                    try { stopBtn.setEnabled(false); } catch (e) {}
+                    try { if (scanOriginOwnId != null) cities().set_CurrentCityId(scanOriginOwnId); } catch (e) {}
+                    setProgress(0, 0, "<span style='color:#ff8a8a'>" + filled + " " + MMt("loaded, then the game stopped answering base-data requests - reload the game (F5) and scan again") + "</span>");
+                    rerender();
+                    setHudProgress(null);
+                    try { if (bubblesOn()) refreshBubbles(); } catch (e) {}
                 }
                 function applyDetail(row, ncity, originCity) {
                     try {
