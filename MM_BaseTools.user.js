@@ -3,7 +3,7 @@
 // @description     One-stop per-base toolkit: collect packages across all bases, repair all units/buildings, see overall production, prioritize building upgrades, and (later) auto-optimize tile layout for tiberium/crystal/power/credit production. Rebuilt on the MM - Common Library.
 // @author          Maelstrom, HuffyLuf, KRS_L, Krisan, DLwarez, NetquiK
 // @contributor     MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.4.34
+// @version         1.4.35
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_BaseTools.user.js
@@ -41,8 +41,9 @@
                         recommend-only overlay (icons, on-grid move markers,
                         sell-up-to-N). PHASE B: one-click "Apply to base" -
                         auto-applies the proposed moves/demolitions via the
-                        sniffed CityBuilding primitives (move IXYXAF / demolish
-                        BFHPNB), with a confirm-with-preview dialog (total moves,
+                        CityBuilding edit primitives (self-resolved at runtime by
+                        command-string sniffing - the obfuscated names rotate on
+                        game updates), with a confirm-with-preview dialog (total moves,
                         permanent demolitions, package progress reset) and
                         effect-verified, dependency-safe step ordering.
 
@@ -1169,8 +1170,9 @@
                 var rev = terrRev();
                 var maxT = 0; for (var k in rev) { var v = +k; if (v > maxT) maxT = v; }
                 var found = null;
-                // Fast path: the known name from the live sniff.
-                try { if (typeof city.TOIMPX === "function" && city.TOIMPX.length === 2) found = city.TOIMPX; } catch (e) {}
+                // Fast path: the known name from the live sniff (rotates on game re-obfuscation -
+                // TOIMPX until 2026-08, QPANSW after; the scan below self-heals when it rotates again).
+                try { if (typeof city.QPANSW === "function" && city.QPANSW.length === 2) found = city.QPANSW; } catch (e) {}
                 if (!found) {
                     // Fallback: scan for any 2-arg fn returning valid terrain enums (game may have renamed it).
                     for (var p in city) {
@@ -1227,7 +1229,11 @@
                                     var C = m.ConnectedLinkTypes.d;
                                     for (var lt in C) {
                                         var l = C[lt]; if (typeof l !== "object") continue;
-                                        var ltid = N(l.LQJDCI), conns = N(l.NrOfLinkConnections), val = N(l.Value), max = N(l.MaxConnections);
+                                        // Link-type id: the dict KEY is the id (verified live 2026-08); the
+                                        // per-entry property is OBFUSCATED and rotates on game updates
+                                        // (LQJDCI -> SPMPDP in the 2026-08 client), so the key is primary
+                                        // and the current obf name is only a fallback.
+                                        var ltid = N(lt) || N(l.SPMPDP), conns = N(l.NrOfLinkConnections), val = N(l.Value), max = N(l.MaxConnections);
                                         if (l.IconPath && iconByLink[ltid] == null) iconByLink[ltid] = l.IconPath; // building/field icon URL
                                         // perConn is only trustworthy when the link is ACTUALLY active. The
                                         // game sometimes reports NrOfLinkConnections > 0 with Value=0 and
@@ -1817,7 +1823,10 @@
                     for (var i = 0; i < src.length; i++) arr.push({ lt: src[i].lt, max: src[i].max, perConn: src[i].perConn * scale });
                     links[modId] = arr;
                 }
-                var typeId = null; try { typeId = N(refB.obj.WXVGSE()); } catch (e) {}
+                // Build-type id for the CreateBuilding primitive: get_Type() is a NAMED getter that
+                // returns the same id the old obfuscated WXVGSE() did (== get_MdbBuildingId(),
+                // verified across all techs live 2026-08) - no obfuscation dependency needed.
+                var typeId = null; try { typeId = N(refB.obj.get_Type()); } catch (e) {}
                 return { id: "VIRT_" + (++_virtSeq) + "_" + refB.techName, techName: refB.techName, harvRes: refB.harvRes,
                          x: x, y: y, level: L, links: links, virtual: true, typeId: typeId, refTechName: refB.techName };
             }
@@ -2274,9 +2283,54 @@
 
             // ===================== PHASE B: auto-apply ============================
             // Turn an optimize result into a dependency-safe ordered step list and fire it
-            // against the live base. The move primitive is the (obfuscated) CityBuilding mover
-            // `IXYXAF(x,y)` and demolish is `BFHPNB()` (both sniffed live - see the
-            // base-edit-move-primitive notes). N() coerces .NET-wrapped numbers.
+            // against the live base. The move/demolish/create/upgrade primitives live behind
+            // OBFUSCATED member names that ROTATE whenever EA re-obfuscates the client (2026-08:
+            // every previously-sniffed name died at once - IXYXAF/BFHPNB/AKMRLA/OAJKZC/ZYSGML).
+            // So primitives() re-FINDS them at runtime: names rotate, but the server-command
+            // string inside each method body ("MoveBuilding", "Demolish", "CreateBuilding",
+            // "UpgradeBuilding") does not. N() coerces .NET-wrapped numbers.
+
+            // Find an obfuscated method on `obj` by the command string its source contains.
+            // Only obfuscated-LOOKING names (short ALL-CAPS) are considered, so readable APIs
+            // like CanDemolish (whose NAME, not body, mentions Demolish) can never false-match.
+            function findObfMethodName(obj, marker, arity) {
+                try {
+                    for (var p in obj) {
+                        if (!/^[A-Z]{4,8}$/.test(p)) continue;
+                        var f; try { f = obj[p]; } catch (e) { continue; }
+                        if (typeof f !== "function" || (arity != null && f.length !== arity)) continue;
+                        var src; try { src = Function.prototype.toString.call(f); } catch (e) { continue; }
+                        if (src.indexOf(marker) !== -1) return p;
+                    }
+                } catch (e) {}
+                return null;
+            }
+            // Resolve all edit primitives once per session (cheap one-time scan, then cached):
+            //   move     - CityBuilding 2-arg method containing "MoveBuilding"  (was IXYXAF, now ZRBFIX)
+            //   demolish - CityBuilding 0-arg method containing "Demolish"      (was BFHPNB, now GWQHNS)
+            //   mgrProp  - the city property holding the construction manager   (was AKMRLA, now FVOLFJ)
+            //   place    - manager 3-arg method containing "CreateBuilding"     (was OAJKZC, now JHZRPF)
+            //   upgMulti - manager 2-arg method containing "UpgradeBuilding"    (was ZYSGML, now KTTFLZ)
+            var _prim = null;
+            function primitives(city) {
+                if (_prim) return _prim;
+                var P = { move: null, demolish: null, mgrProp: null, place: null, upgMulti: null };
+                try {
+                    var bproto = ClientLib.Data.CityBuilding.prototype;
+                    P.move = findObfMethodName(bproto, "MoveBuilding", 2);
+                    P.demolish = findObfMethodName(bproto, "Demolish", 0);
+                    for (var p in city) {
+                        if (!/^[A-Z]{4,8}$/.test(p)) continue;
+                        var v; try { v = city[p]; } catch (e) { continue; }
+                        if (!v || typeof v !== "object") continue;
+                        var place = findObfMethodName(v, "CreateBuilding", 3);
+                        if (place) { P.mgrProp = p; P.place = place; P.upgMulti = findObfMethodName(v, "UpgradeBuilding", 2); break; }
+                    }
+                } catch (e) { werr("OPT: primitive resolution failed:", e); }
+                wlog("OPT primitives: move=" + P.move + " demolish=" + P.demolish + " mgr=" + P.mgrProp + " place=" + P.place + " upgMulti=" + P.upgMulti);
+                _prim = P;
+                return P;
+            }
 
             // Read every building's LIVE position + object handle right now (authoritative -
             // the optimize snapshot may be a few seconds stale). byId[id]={id,obj,x,y}; occ["x,y"]=id.
@@ -2307,11 +2361,17 @@
             // steps: {type:'demolish'|'move', id, obj, techName, harvRes, level, fromX, fromY, toX, toY, staged?}.
             // Strategy: (1) demolish all sells first (frees their tiles); (2) repeatedly apply any move
             // whose target tile is CURRENTLY empty + terrain-legal; (3) break a move cycle by parking one
-            // building on a spare legal tile (staged) so its target frees up. Every IXYXAF we ultimately
+            // building on a spare legal tile (staged) so its target frees up. Every move we ultimately
             // emit is a move-into-an-empty-tile (never relies on the game's swap-on-occupied behaviour).
             // Also re-validates the plan isn't stale (base unchanged since optimize).
             function buildApplyPlan(city, res) {
                 if (!res || !res.ok) return { ok: false, reason: MMt("no optimization result to apply") };
+                // Refuse to plan at all when a needed primitive is unresolvable (a PARTIAL apply -
+                // demolishes firing while the moves after them fail - would be destructive).
+                var P0 = primitives(city);
+                if (((res.sells || []).length && !P0.demolish) || ((res.moves || []).length && !P0.move) ||
+                    ((res.builds || []).length && !(P0.mgrProp && P0.place)))
+                    return { ok: false, reason: MMt("the game updated and the base-edit primitives can't be located - a pack update is needed") };
                 var snap = res.snapshot;
                 var live = readLive(city); if (!live) return { ok: false, reason: MMt("could not read the base") };
 
@@ -2404,6 +2464,7 @@
             // hooks: { onStep(index, step, ok, msg), onDone({applied, failed, failedSteps}) }.
             function executeApplyPlan(city, plan, hooks) {
                 hooks = hooks || {};
+                var P = primitives(city);
                 var steps = plan.steps, i = 0, done = [], failed = [];
                 function findObj(id) { try { var bd = city.get_Buildings().d; for (var k in bd) { var b = bd[k]; if (b && b.get_Id && b.get_Id() === id) return b; } } catch (e) {} return null; }
                 function findByPos(x, y) { try { var bd = city.get_Buildings().d; for (var k in bd) { var b = bd[k]; if (b && b.get_CoordX && N(b.get_CoordX()) === x && N(b.get_CoordY()) === y) return b; } } catch (e) {} return null; }
@@ -2415,11 +2476,11 @@
                     var st = steps[i];
                     if (st.type === "build") {
                         try {
-                            var mgr = city.AKMRLA;
-                            if (!mgr || typeof mgr.OAJKZC !== "function") return fail(st, MMt("build manager unavailable"));
+                            var mgr = P.mgrProp ? city[P.mgrProp] : null;
+                            if (!mgr || !P.place || typeof mgr[P.place] !== "function") return fail(st, MMt("build manager unavailable"));
                             if (st.typeId == null) return fail(st, MMt("missing build type id"));
                             if (findByPos(st.toX, st.toY)) return fail(st, MMt("build tile is occupied"));
-                            mgr.OAJKZC(st.typeId, st.toX, st.toY);
+                            mgr[P.place](st.typeId, st.toX, st.toY);
                             verify(function () { return !!findByPos(st.toX, st.toY); }, st, 50);   // builds (esp. harvesters on fields) can take longer to appear than a move
                         } catch (e) { return fail(st, String(e)); }
                         return;
@@ -2430,11 +2491,11 @@
                             if (!ub) return fail(st, MMt("building to upgrade not found"));
                             var curLvl = N(ub.get_CurrentLevel ? ub.get_CurrentLevel() : 0);
                             var nLevels = st.level - curLvl;
-                            var mgr = city.AKMRLA, hasMulti = !!(mgr && typeof mgr.ZYSGML === "function");
-                            wlog("apply upgrade @" + st.toX + ":" + st.toY + " cur=" + curLvl + " target=" + st.level + " nLevels=" + nLevels + " multiLevelApi=" + hasMulti + " canUpg=" + (ub.AJLDOH ? ub.AJLDOH() : "?"));
+                            var mgr = P.mgrProp ? city[P.mgrProp] : null, hasMulti = !!(mgr && P.upgMulti && typeof mgr[P.upgMulti] === "function");
+                            wlog("apply upgrade @" + st.toX + ":" + st.toY + " cur=" + curLvl + " target=" + st.level + " nLevels=" + nLevels + " multiLevelApi=" + hasMulti);
                             if (nLevels <= 0) { return ok(st); }
                             if (hasMulti) {
-                                mgr.ZYSGML(ub, nLevels);   // UpgradeBuildingMultiLevel: queues ALL levels in one command
+                                mgr[P.upgMulti](ub, nLevels);   // UpgradeBuildingMultiLevel: queues ALL levels in one command
                             } else {
                                 ClientLib.API.City.GetInstance().UpgradeBuildingToLevel(ub, st.level); // fallback (queues only 1 level on a fresh build)
                             }
@@ -2448,10 +2509,12 @@
                     try {
                         if (st.type === "demolish") {
                             if (obj.CanDemolish && !obj.CanDemolish()) return fail(st, MMt("game refused demolish"));
-                            obj.BFHPNB();
+                            if (!P.demolish) return fail(st, MMt("demolish primitive unavailable (game updated)"));
+                            obj[P.demolish]();
                             verify(function () { return findObj(st.id) == null; }, st);
                         } else {
-                            obj.IXYXAF(st.toX, st.toY);
+                            if (!P.move) return fail(st, MMt("move primitive unavailable (game updated)"));
+                            obj[P.move](st.toX, st.toY);
                             verify(function () { var o = findObj(st.id); return !!o && N(o.get_CoordX()) === st.toX && N(o.get_CoordY()) === st.toY; }, st);
                         }
                     } catch (e) { return fail(st, String(e)); }
@@ -2497,12 +2560,15 @@
             });
             if (!win) { werr("could not create window"); return; }
             win.add(tabView);
+            // THEME GUARD: the game's 2026-08 re-skin turned the themed tabview pane LIGHT;
+            // own it (the window-level pane + inherited text color are handled by MM.ui.Window).
+            try { MM.ui.darken(tabView); } catch (e) {}
 
             // ---- Tab 1: Collect & Repair ----
             var tabCR = new qx.ui.tabview.Page(MMt("Collect & Repair"));
             tabCR.setLayout(new qx.ui.layout.VBox(8));
             tabCR.setPadding(8);
-            tabView.add(tabCR);
+            tabView.add(MM.ui.darken(tabCR));
 
             var statusLbl = new qx.ui.basic.Label(MMt("(refreshing...)")).set({ rich: true, textColor: "#cccccc" });
             tabCR.add(statusLbl);
@@ -2853,7 +2919,7 @@
                 return page;
             }
             var pageProd = buildProductionTab();
-            tabView.add(pageProd);
+            tabView.add(MM.ui.darken(pageProd));
 
             // ---- Tab 3: Upgrade Priority (Option B - one unified, sortable table) ----
             // Single table across ALL bases and ALL resource types. Filter by resource and by
@@ -3575,7 +3641,7 @@
             }
 
             var pageUpg = buildUpgradeTab();
-            tabView.add(pageUpg);
+            tabView.add(MM.ui.darken(pageUpg));
 
             // ---- Tab 4: Layout Optimizer (Phase A - recommend-only) ----------------
             // Four buttons (Tiberium / Crystal / Power / Credits); each runs the OPT engine on the
@@ -4042,6 +4108,7 @@
                         modal: true, showMinimize: false, showMaximize: false, allowMaximize: false,
                         resizable: false, contentPadding: 12, width: 420 });
                     win.setLayout(new qx.ui.layout.VBox(8));
+                    try { MM.ui.darken(win); } catch (e) {}   // theme guard (this one bypasses the MM.ui.Window factory)
 
                     var html = "";
                     html += "<b>" + plan.nMoves + "</b> " + MMt("building") + (plan.nMoves === 1 ? "" : MMt("s")) + " " + MMt("will be <b>moved</b>");
@@ -4198,7 +4265,7 @@
             }
 
             var pageOpt = buildOptimizerTab();
-            tabView.add(pageOpt);
+            tabView.add(MM.ui.darken(pageOpt));
 
             // ---- persist + restore the last-viewed tab (per player+world) ----
             // Restore on the FIRST window "appear", NOT at build: at build the player id may not be

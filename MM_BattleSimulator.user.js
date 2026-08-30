@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.8
+// @version         1.1.9
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -4411,6 +4411,8 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 resizableBottom: false,
                                 useResizeFrame: false
                             });
+                            // THEME GUARD (2026-08 game re-skin: light theme) - own our pane + default text color.
+                            try { if (window.MMCommon && MMCommon.ui && MMCommon.ui.darken) MMCommon.ui.darken(this); } catch (e) {}
                             this.moveTo(
                                 TABS.SETTINGS.get("GUI.Window.Stats.position", [124, 31])[0], TABS.SETTINGS.get("GUI.Window.Stats.position", [124, 31])[1]);
                             this.addListener("move", function () {
@@ -5595,6 +5597,8 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 showMinimize: false,
                                 resizable: false
                             });
+                            // THEME GUARD (2026-08 game re-skin: light theme) - own our pane + default text color.
+                            try { if (window.MMCommon && MMCommon.ui && MMCommon.ui.darken) MMCommon.ui.darken(this); } catch (e) {}
                             this.center();
                             this.Prios = prios;
                         } catch (e) {
@@ -5628,6 +5632,8 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 resizable: false,
                                 contentPadding: 8
                             });
+                            // THEME GUARD (2026-08 game re-skin: light theme) - own our pane + default text color.
+                            try { if (window.MMCommon && MMCommon.ui && MMCommon.ui.darken) MMCommon.ui.darken(this); } catch (e) {}
                             this.center();
                             this._fields = {};
                             var self = this;

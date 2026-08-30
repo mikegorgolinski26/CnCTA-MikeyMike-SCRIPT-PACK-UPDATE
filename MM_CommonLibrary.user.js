@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.38
+// @version         1.0.39
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.37"
+            version: "1.0.39"
         };
 
         // -------------------------------------------------------------------
@@ -4758,12 +4758,31 @@
         // ui: consistent, movable, position-persistent MMCommon window factory.
         NS.ui = {
             num: NS.num, // convenience alias
+            // THEME GUARD (2026-08 game re-skin): the game's qx theme flipped to a LIGHT window
+            // pane with dark default text, which made every MM window - all designed against the
+            // old dark theme - unreadable (near-white labels on a near-white pane). Own both
+            // layers instead of inheriting them: paint the pane dark and make light text the
+            // INHERITED default (qx textColor is inheritable, so labels that set their own color
+            // keep it, and game-themed child widgets like SelectBox/Spinner paint their own
+            // chrome and are unaffected). Works on windows, tabviews (their "pane" child), and
+            // plain containers (falls back to the widget's own background).
+            darken: function (w) {
+                try {
+                    var p = null;
+                    try { p = w.getChildControl ? w.getChildControl("pane") : null; } catch (e) { p = null; }
+                    if (p && p.setBackgroundColor) p.setBackgroundColor("#23282b");
+                    else if (w.setBackgroundColor) w.setBackgroundColor("#23282b");
+                } catch (e) {}
+                try { if (w.setTextColor) w.setTextColor("#dfe6ea"); } catch (e) {}
+                return w;
+            },
             // Create a window with standard chrome whose position (and optional size) persist via
             // MMCommon.settings. opts: { caption, icon, key, layout, width, height, pos:[x,y], resizable,
             //   contentPadding, restoreOpen, persistSize, dock }
             //   persistSize: true  -> remember BOTH width and height across reloads (use width/height as
             //                         the first-run defaults). Without it, only width persists (legacy),
             //                         and only when opts.width is set.
+            //   darkPane: false -> skip the dark-pane/light-text theme guard (see NS.ui.darken).
             //   dock: true (or a px threshold, default 24) enables edge-docking - when a drag settles
             //   within the threshold of a viewport edge the window snaps flush to it, the edge persists,
             //   and a docked window re-hugs that edge on viewport/content resize and after a refresh.
@@ -4781,6 +4800,10 @@
                         resizable: (opts.resizable !== false),
                         contentPadding: (opts.contentPadding != null ? opts.contentPadding : 4)
                     });
+
+                    // Own our colors regardless of the game theme (see NS.ui.darken - the game's
+                    // 2026-08 re-skin turned the themed pane light). opts.darkPane:false opts out.
+                    if (opts.darkPane !== false) NS.ui.darken(win);
 
                     // frameless: a clean "floating panel" with no title bar / window chrome, dragged by
                     // its whole body (e.g. the Next MCV counter). It's still a real qx.ui.window.Window, so
