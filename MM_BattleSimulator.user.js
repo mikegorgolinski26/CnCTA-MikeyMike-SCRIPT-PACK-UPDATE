@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.9
+// @version         1.1.10
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -143,6 +143,23 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                     statics: {
                         getDisplayName: function (ETechName, EFactionType) {
                             return ClientLib.Base.Tech.GetTechDisplayNameFromTechId(ClientLib.Base.Tech.GetTechIdFromTechNameAndFaction(ETechName, EFactionType));
+                        },
+                        // THEME GUARD (2026-08 game re-skin): the Stats window's cards/headers used
+                        // the game's "pane-light-plain"/"pane-light-opaque" theme decorators, which
+                        // the re-skin turned LIGHT grey - unreadable under the pack's light text.
+                        // Own dark replacements instead. Lazy SHARED instances ("opaque" = solid
+                        // card, "plain" = section wrapper / stale-sim look) because the fresh/stale
+                        // toggle in SimView.__onTick swaps decorators every tick and must not
+                        // allocate a new Decorator each time.
+                        __darkPanes: null,
+                        darkPane: function (kind) {
+                            var C = this.__darkPanes || (this.__darkPanes = {});
+                            if (!C[kind]) {
+                                C[kind] = new qx.ui.decoration.Decorator().set(kind === "opaque"
+                                    ? { backgroundColor: "#23282b", radius: 6, width: 1, color: "#3f454b", style: "solid" }
+                                    : { backgroundColor: "#1c2124", radius: 6, width: 1, color: "#33383c", style: "solid" });
+                            }
+                            return C[kind];
                         }
                     }
                 });
@@ -3706,7 +3723,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             WDG_COMBATSWAPVIEW.getLayoutParent().addAfter(TABS.GUI.ArmySetupAttackBar.getInstance().SaveLoad, this.btnSimulation);
                             //Move Box
                             this.boxMove = new TABS.GUI.MovableBox(new qx.ui.layout.Grid()).set({
-                                decorator: "pane-light-plain",
+                                decorator: TABS.RES.darkPane("plain"),
                                 opacity: 0.7,
                                 paddingTop: 0,
                                 paddingLeft: 2,
@@ -4473,34 +4490,34 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             }, this);
                             this.GUI = {
                                 Battle: new qx.ui.container.Composite(new qx.ui.layout.HBox(-2)).set({
-                                    decorator: "pane-light-plain",
+                                    decorator: TABS.RES.darkPane("plain"),
                                     allowGrowX: true,
                                     marginLeft: 0,
                                     marginRight: 0
                                 }),
                                 Enemy: new qx.ui.container.Composite(new qx.ui.layout.HBox(-2)).set({
-                                    decorator: "pane-light-plain",
+                                    decorator: TABS.RES.darkPane("plain"),
                                     allowGrowX: true,
                                     marginTop: -18,
                                     marginLeft: 0,
                                     marginRight: 0
                                 }),
                                 Repair: new qx.ui.container.Composite(new qx.ui.layout.HBox(-2)).set({
-                                    decorator: "pane-light-plain",
+                                    decorator: TABS.RES.darkPane("plain"),
                                     allowGrowX: true,
                                     marginTop: -18,
                                     marginLeft: 0,
                                     marginRight: 0
                                 }),
                                 Loot: new qx.ui.container.Composite(new qx.ui.layout.HBox(-2)).set({
-                                    decorator: "pane-light-plain",
+                                    decorator: TABS.RES.darkPane("plain"),
                                     allowGrowX: true,
                                     marginTop: -18,
                                     marginLeft: 0,
                                     marginRight: 0
                                 }),
                                 Buttons: new qx.ui.container.Composite(new qx.ui.layout.HBox(-2)).set({
-                                    decorator: "pane-light-plain",
+                                    decorator: TABS.RES.darkPane("plain"),
                                     allowGrowX: true,
                                     marginLeft: 0,
                                     marginRight: 0
@@ -4648,7 +4665,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             });
                             var fontsize = qx.theme.manager.Font.getInstance().resolve(this.getChildControl("statusbar-text").getFont()).getSize(),
                                 lblReset = new qx.ui.basic.Label(MMt(this.tr("Reset"))).set({
-                                    textColor: "#115274",
+                                    textColor: "#6fc7ee",   // was #115274 - unreadable on the dark statusbar since the theme guard
                                     font: new qx.bom.Font("statusbar-text").set({
                                         size: fontsize,
                                         decoration: "underline"
@@ -4735,7 +4752,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 zIndex: 11
                             });
                             Header.add(new qx.ui.container.Composite(new qx.ui.layout.VBox(5)).set({
-                                decorator: "pane-light-opaque",
+                                decorator: TABS.RES.darkPane("opaque"),
                                 allowGrowX: true,
                                 allowGrowY: true,
                             }));
@@ -4916,7 +4933,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     allowGrowX: true,
                                     marginLeft: 0,
                                     marginRight: 0,
-                                    decorator: "pane-light-opaque"
+                                    decorator: TABS.RES.darkPane("opaque")
                                 }),
                                 Enemy: new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({
                                     //padding : 5,
@@ -4924,7 +4941,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     marginTop: 10,
                                     marginLeft: 0,
                                     marginRight: 0,
-                                    decorator: "pane-light-opaque"
+                                    decorator: TABS.RES.darkPane("opaque")
                                 }),
                                 Repair: new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({
                                     //padding : 5,
@@ -4932,7 +4949,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     marginTop: 10,
                                     marginLeft: 0,
                                     marginRight: 0,
-                                    decorator: "pane-light-opaque"
+                                    decorator: TABS.RES.darkPane("opaque")
                                 }),
                                 Loot: new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({
                                     //padding : 5,
@@ -4940,14 +4957,14 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                     marginTop: 10,
                                     marginLeft: 0,
                                     marginRight: 0,
-                                    decorator: "pane-light-opaque"
+                                    decorator: TABS.RES.darkPane("opaque")
                                 }),
                                 Buttons: new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({
                                     //padding : 5,
                                     allowGrowX: true,
                                     marginLeft: 0,
                                     marginRight: 0,
-                                    decorator: "pane-light-opaque"
+                                    decorator: TABS.RES.darkPane("opaque")
                                 })
                             };
                             this.Label = {
@@ -5255,12 +5272,12 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             if (typeof this.Cache["key"] !== "undefined" && typeof this.Cache["result"] !== "undefined" && typeof this.Cache.result["ownid"] !== "undefined") {
                                 if (CurrentCity !== null && CurrentCity.get_Version() !== -1 && ClientLib.Vis.VisMain.GetInstance().GetActiveView().get_VisAreaComplete() && this.Cache.key === TABS.CACHE.getInstance().calcUnitsHash(TABS.UTIL.Formation.Get(), this.Cache.result.ownid)) {
                                     for (i in this.GUI) {
-                                        this.GUI[i].setDecorator("pane-light-opaque");
+                                        this.GUI[i].setDecorator(TABS.RES.darkPane("opaque"));
                                         this.GUI[i].setOpacity(1);
                                     }
                                 } else {
                                     for (i in this.GUI) {
-                                        this.GUI[i].setDecorator("pane-light-plain");
+                                        this.GUI[i].setDecorator(TABS.RES.darkPane("plain"));
                                         this.GUI[i].setOpacity(0.7);
                                     }
                                 }
@@ -5275,7 +5292,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             this.__updateBattleMoral();
                             this.Window.__updateLabels();
                             for (var i in this.GUI) {
-                                this.GUI[i].setDecorator("pane-light-opaque");
+                                this.GUI[i].setDecorator(TABS.RES.darkPane("opaque"));
                                 this.GUI[i].setOpacity(1);
                             }
                         },
