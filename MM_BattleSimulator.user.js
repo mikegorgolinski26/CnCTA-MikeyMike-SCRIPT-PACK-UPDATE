@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.11
+// @version         1.1.12
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -4527,6 +4527,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 Battle: new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({
                                     width: 29,
                                     padding: 9,
+                                    paddingTop: 0,   // icons must start where the sim-card rows start (cards have no top padding) - the 9px top padding put every icon 9px below its row
                                     allowGrowX: true,
                                     marginLeft: 0,
                                     marginRight: 0
@@ -4534,6 +4535,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 Enemy: new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({
                                     width: 29,
                                     padding: 9,
+                                    paddingTop: 0,   // icons must start where the sim-card rows start (cards have no top padding) - the 9px top padding put every icon 9px below its row
                                     marginTop: 10,
                                     allowGrowX: true,
                                     marginLeft: 0,
@@ -4542,6 +4544,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 Repair: new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({
                                     width: 29,
                                     padding: 9,
+                                    paddingTop: 0,   // icons must start where the sim-card rows start (cards have no top padding) - the 9px top padding put every icon 9px below its row
                                     marginTop: 10,
                                     allowGrowX: true,
                                     marginLeft: 0,
@@ -4550,6 +4553,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 Loot: new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({
                                     width: 29,
                                     padding: 9,
+                                    paddingTop: 0,   // icons must start where the sim-card rows start (cards have no top padding) - the 9px top padding put every icon 9px below its row
                                     marginTop: 10,
                                     allowGrowX: true,
                                     marginLeft: 0,
@@ -4558,6 +4562,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 Buttons: new qx.ui.container.Composite(new qx.ui.layout.VBox()).set({
                                     width: 29,
                                     padding: 9,
+                                    paddingTop: 0,   // icons must start where the sim-card rows start (cards have no top padding) - the 9px top padding put every icon 9px below its row
                                     allowGrowX: true,
                                     marginLeft: 0,
                                     marginRight: 0
