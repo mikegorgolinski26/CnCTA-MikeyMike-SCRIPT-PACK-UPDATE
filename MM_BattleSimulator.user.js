@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.10
+// @version         1.1.11
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -4498,21 +4498,21 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 Enemy: new qx.ui.container.Composite(new qx.ui.layout.HBox(-2)).set({
                                     decorator: TABS.RES.darkPane("plain"),
                                     allowGrowX: true,
-                                    marginTop: -18,
+                                    marginTop: 0,   // was -18: tucked under the header bar, fine when it was translucent - now a solid dark card that clipped the first row
                                     marginLeft: 0,
                                     marginRight: 0
                                 }),
                                 Repair: new qx.ui.container.Composite(new qx.ui.layout.HBox(-2)).set({
                                     decorator: TABS.RES.darkPane("plain"),
                                     allowGrowX: true,
-                                    marginTop: -18,
+                                    marginTop: 0,   // was -18: tucked under the header bar, fine when it was translucent - now a solid dark card that clipped the first row
                                     marginLeft: 0,
                                     marginRight: 0
                                 }),
                                 Loot: new qx.ui.container.Composite(new qx.ui.layout.HBox(-2)).set({
                                     decorator: TABS.RES.darkPane("plain"),
                                     allowGrowX: true,
-                                    marginTop: -18,
+                                    marginTop: 0,   // was -18: tucked under the header bar, fine when it was translucent - now a solid dark card that clipped the first row
                                     marginLeft: 0,
                                     marginRight: 0
                                 }),
@@ -4761,7 +4761,11 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 allowGrowX: true,
                                 allowGrowY: true,
                                 paddingBottom: 2,
-                                font: "font_size_13_bold_shadow"
+                                // Own plain bold font: the game's themed "font_size_13_bold_shadow"
+                                // renders its shadow in the re-skinned theme's colors, which smears
+                                // light text into a same-color double image on our dark header bar.
+                                font: qx.bom.Font.fromString("bold 13px sans-serif"),
+                                textColor: "#f2f6f8"
                             }));
                             return Header;
                         },
@@ -5103,7 +5107,8 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                                 scale: true,
                                 alignY: "middle"
                             });
-                            this.Label.Repair.Overall.getContentElement().setStyle("text-shadow", "0 0 3pt");
+                            // (removed the "0 0 3pt" text-shadow glow on Repair.Overall - with no color it
+                            // uses currentColor, blurring the light text into itself on the dark cards)
                             for (i in this.GUI) {
                                 for (j in this.Label[i]) {
                                     this.GUI[i].add(this.Label[i][j], {
