@@ -2,7 +2,7 @@
 // @name            MM - Battle Sim 2026
 // @description     Allows you to simulate combat before actually attacking. MikeyMike Edition adds an automatic layout optimizer (tunable via an Optimizer Options panel) that tries several formations and selects the winning layout with the lowest repair time.
 // @author          Eistee & TheStriker & VisiG & Lobotommi & XDaast
-// @version         1.1.12
+// @version         1.1.13
 // @contributor     zbluebugz (https://github.com/zbluebugz) changed cncopt.com code block to cnctaopt.com code block
 // @contributor     NetquiK (https://github.com/netquik) (see first comment for changelog)
 // @contributor     MikeyMike (Lowest-Repair auto layout optimizer + preset)
@@ -148,16 +148,24 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                         // the game's "pane-light-plain"/"pane-light-opaque" theme decorators, which
                         // the re-skin turned LIGHT grey - unreadable under the pack's light text.
                         // Own dark replacements instead. Lazy SHARED instances ("opaque" = solid
-                        // card, "plain" = section wrapper / stale-sim look) because the fresh/stale
-                        // toggle in SimView.__onTick swaps decorators every tick and must not
-                        // allocate a new Decorator each time.
+                        // card, "plain" = section wrapper / stale-sim look, "frame" = the floating
+                        // toolbar) because the fresh/stale toggle in SimView.__onTick swaps
+                        // decorators every tick and must not allocate a new Decorator each time.
+                        // "frame" (1.1.13): the toolbar box floats over the dark map at 70% opacity,
+                        // where the "plain" card's near-black hairline vanished - the game's old
+                        // pane-light-plain drew a visible light frame there. Same steel-blue border
+                        // + drop shadow MMCommon.ui.Window uses for its frameless panels.
                         __darkPanes: null,
                         darkPane: function (kind) {
                             var C = this.__darkPanes || (this.__darkPanes = {});
                             if (!C[kind]) {
-                                C[kind] = new qx.ui.decoration.Decorator().set(kind === "opaque"
-                                    ? { backgroundColor: "#23282b", radius: 6, width: 1, color: "#3f454b", style: "solid" }
-                                    : { backgroundColor: "#1c2124", radius: 6, width: 1, color: "#33383c", style: "solid" });
+                                var d = new qx.ui.decoration.Decorator();
+                                if (kind === "opaque") d.set({ backgroundColor: "#23282b", radius: 6, width: 1, color: "#3f454b", style: "solid" });
+                                else if (kind === "frame") {
+                                    d.set({ backgroundColor: "#1c2124", radius: 6, width: 1, color: "#c3d3e0", style: "solid" });
+                                    try { d.set({ shadowColor: "rgba(0,0,0,0.6)", shadowBlurRadius: 8, shadowLength: 1 }); } catch (e) {}
+                                } else d.set({ backgroundColor: "#1c2124", radius: 6, width: 1, color: "#33383c", style: "solid" });
+                                C[kind] = d;
                             }
                             return C[kind];
                         }
@@ -3723,7 +3731,7 @@ codes by MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
                             WDG_COMBATSWAPVIEW.getLayoutParent().addAfter(TABS.GUI.ArmySetupAttackBar.getInstance().SaveLoad, this.btnSimulation);
                             //Move Box
                             this.boxMove = new TABS.GUI.MovableBox(new qx.ui.layout.Grid()).set({
-                                decorator: TABS.RES.darkPane("plain"),
+                                decorator: TABS.RES.darkPane("frame"),
                                 opacity: 0.7,
                                 paddingTop: 0,
                                 paddingLeft: 2,
