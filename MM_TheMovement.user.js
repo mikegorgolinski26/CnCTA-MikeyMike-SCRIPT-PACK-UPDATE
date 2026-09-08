@@ -3,7 +3,7 @@
 // @namespace      https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @include        https://cncapp*.alliances.commandandconquer.com/*/index.aspx*
 // @description    Client-side "what-if" territory planner: right-click any base/NPC on the region map to simulate moving it, ruining it (for any alliance), levelling it up, or removing it - the territory-control colouring updates live, with full Undo / Reset plans. Everything is a LOCAL visualisation; nothing is ever sent to the server.
-// @version        1.0.1
+// @version        1.0.2
 // @license        GPL version 3 or any later version; http://www.gnu.org/copyleft/gpl.html
 // @author         MikeyMike (rework of petui's "The Movement")
 // @contributor    petui
@@ -241,6 +241,7 @@
                         }
                         button.set({
                             label: this.__formatActionName(action),
+                            center: true, // centered like the game's own region-menu buttons
                             paddingLeft: -1,
                             paddingRight: -1
                         });

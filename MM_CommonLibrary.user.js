@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.39
+// @version         1.0.40
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.39"
+            version: "1.0.40"
         };
 
         // -------------------------------------------------------------------
@@ -5904,11 +5904,37 @@
                     // Scripts button becomes the right end-cap. We populate it with setMenu() instead of
                     // .Add(), so we call the same native integrator (__Hi) to both reveal it and fix the
                     // tiling - a plain show() leaves it as a detached extra tile with a seam after Ranking.
-                    // __Hi is obfuscated; if a game update renames it, fall back to show() (menu still works,
-                    // just with the cosmetic seam).
+                    // __Hi is obfuscated and the 2026-08 game update renamed it (__Gv today) AND dropped
+                    // the re-tiling from it, so the integrator can no longer be trusted for the tiling.
+                    // Reveal via whatever the integrator is called now (sniff the prototype for a
+                    // 0-arity obfuscated method whose source calls .show()), fall back to show(), then
+                    // ALWAYS re-tile the bar ourselves: every visible tile before us that still wears the
+                    // right end-cap (Ranking) becomes a middle tile and we take the end-cap. Without this
+                    // Ranking keeps its bevelled lower-right corner next to a second end-cap = a seam.
                     var revealed = false;
                     try { if (typeof sb.__Hi === "function") { sb.__Hi(); revealed = true; } } catch (e) {}
+                    if (!revealed) {
+                        try {
+                            var proto = Object.getPrototypeOf(sb);
+                            var names = Object.getOwnPropertyNames(proto);
+                            for (var pi = 0; pi < names.length && !revealed; pi++) {
+                                var pn = names[pi], pf = proto[pn];
+                                if (!/^__[A-Za-z]{2,3}$/.test(pn) || typeof pf !== "function" || pf.length !== 0) continue;
+                                if (!/\.show\(\)/.test(Function.prototype.toString.call(pf))) continue;
+                                pf.call(sb); revealed = true;
+                            }
+                        } catch (e) {}
+                    }
                     if (!revealed) { try { sb.show(); } catch (e) {} }
+                    try {
+                        var kids = sb.getLayoutParent().getChildren(), sbIdx = kids.indexOf(sb);
+                        for (var ki = 0; ki < sbIdx; ki++) {
+                            var kc = kids[ki];
+                            if (kc.getAppearance && kc.getAppearance() === "button-bar-right" &&
+                                (!kc.getVisibility || kc.getVisibility() === "visible")) kc.setAppearance("button-bar-center");
+                        }
+                        if (sb.getAppearance() !== "button-bar-right") sb.setAppearance("button-bar-right");
+                    } catch (e) {}
                     var menu = new qx.ui.menu.Menu();
                     itemsById = {};
                     for (var c = 0; c < CATS.length; c++) {
