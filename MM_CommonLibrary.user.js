@@ -2,7 +2,7 @@
 // @name            MM - Common Library
 // @description     Shared foundation library for the CnCTA MikeyMike pack. Runs in the game's page context and exposes window.MMCommon: one place for logging, net-events, settings, number/time formatting, coordinate helpers, and (being filled in during migration) the cnctaopt link encoder, base-scan, repair/loot calc, and a dockable-window + CommonButtonHandler UI. Load right after MM - Framework Wrapper.
 // @author          MikeyMike (CnCTA-MikeyMike-SCRIPT-PACK)
-// @version         1.0.40
+// @version         1.0.41
 // @match           https://*.alliances.commandandconquer.com/*/index.aspx*
 // @downloadURL     https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
 // @updateURL       https://raw.githubusercontent.com/mikegorgolinski26/CnCTA-MikeyMike-SCRIPT-PACK-UPDATE/main/MM_CommonLibrary.user.js
@@ -70,7 +70,7 @@
         }
 
         var NS = {
-            version: "1.0.40"
+            version: "1.0.41"
         };
 
         // -------------------------------------------------------------------
@@ -4776,6 +4776,75 @@
                 try { if (w.setTextColor) w.setTextColor("#dfe6ea"); } catch (e) {}
                 return w;
             },
+            // BUTTON-CENTERING GUARD (2026-09, same game re-skin): the stock "button" appearance in
+            // the game's qx theme now returns an EMPTY style - it lost its center:true - while its
+            // siblings (button-text-small, button-standard-gdi/nod, ...) still carry it. Every plain
+            // game button that doesn't set center itself (Supplies "Add and Unpack", the "Ok" in
+            // "Getting item", Upgrade, Repair all, ...) therefore renders with LEFT-aligned text in a
+            // wide button. Restore center:true in that one appearance (a no-op if the game fixes it:
+            // we only fill in a MISSING value), flush the appearance manager's per-theme style cache
+            // (it memoises styleFrom() per appearance id + state set, keyed by theme name), and
+            // re-style the buttons that already exist. Buttons created afterwards pick it up from
+            // the theme like any other. Live-verified 2026-09-10 on the Supplies window.
+            centerGameButtons: function () {
+                try {
+                    if (!window.qx || !qx.theme || !qx.theme.manager || !qx.theme.manager.Appearance) return false;
+                    var mgr = qx.theme.manager.Appearance.getInstance();
+                    var th = mgr.getTheme();
+                    if (!th || !th.appearances || !th.appearances["button"]) return false;
+                    var entry = th.appearances["button"];
+                    if (entry.__mmCenterPatched) return true;
+                    var probe = null;
+                    try { probe = mgr.styleFrom("button", {}); } catch (e) { probe = null; }
+                    if (probe && probe.center !== undefined) { entry.__mmCenterPatched = true; return true; } // game already centers
+                    var orig = entry.style;
+                    entry.style = function (states) {
+                        var st = null;
+                        try { st = orig ? orig.call(this, states) : null; } catch (e) { st = null; }
+                        st = st || {};
+                        if (st.center === undefined) st.center = true;
+                        return st;
+                    };
+                    entry.__mmCenterPatched = true;
+                    // flush the cached styles for the current theme (obfuscated member names -> sniff:
+                    // any own plain-object member holding a per-theme-name map)
+                    try {
+                        var keys = Object.keys(mgr);
+                        for (var i = 0; i < keys.length; i++) {
+                            var v = mgr[keys[i]];
+                            if (v && typeof v === "object" && !Array.isArray(v) && v[th.name] && typeof v[th.name] === "object") v[th.name] = {};
+                        }
+                    } catch (e) {}
+                    // Re-style the buttons that already exist. syncAppearance() DIRECTLY: the deferred
+                    // updateAppearance()+queue-flush route was live-tested and left already-rendered
+                    // buttons (Repair all, Hall of Fame) untouched, while a direct sync sets the themed
+                    // value. Walk the widget tree from the root via the protected child list (the public
+                    // getChildren() skips child controls, and this game's qx object registry holds NO
+                    // widgets - live-checked: 1646 objects, 0 buttons - so the tree is the only reliable
+                    // source). Buttons in windows that haven't been opened yet aren't in the tree, but
+                    // they sync from the (now patched) theme on first render anyway.
+                    var restyled = 0, stamp = "mmc" + Date.now();
+                    function restyle(w) {
+                        try {
+                            if (!(w instanceof qx.ui.form.Button) || w.getAppearance() !== "button" || w.getCenter()) return;
+                            if (w.syncAppearance) w.syncAppearance(); else if (w.updateAppearance) w.updateAppearance();
+                            restyled++;
+                        } catch (e) {}
+                    }
+                    try {
+                        (function walk(w, d) {
+                            if (!w || d > 80 || w.$$mmCenterSeen === stamp) return;
+                            try { w.$$mmCenterSeen = stamp; } catch (e) {}
+                            restyle(w);
+                            var ch = null;
+                            try { ch = w._getChildren ? w._getChildren() : (w.getChildren ? w.getChildren() : null); } catch (e) { ch = null; }
+                            if (ch) for (var k = 0; k < ch.length; k++) walk(ch[k], d + 1);
+                        })(qx.core.Init.getApplication().getRoot(), 0);
+                    } catch (e) {}
+                    log.log("ui.centerGameButtons: restored center:true on the game's \"button\" appearance, re-styled " + restyled + " existing button(s)");
+                    return true;
+                } catch (e) { NS.log.err("ui.centerGameButtons:", e); return false; }
+            },
             // Create a window with standard chrome whose position (and optional size) persist via
             // MMCommon.settings. opts: { caption, icon, key, layout, width, height, pos:[x,y], resizable,
             //   contentPadding, restoreOpen, persistSize, dock }
@@ -6096,6 +6165,17 @@
             };
         } catch (e) {}
         try { NS.menu.init(); } catch (e) { NS.log.err("menu.init:", e); }
+        // Button-centering guard (see NS.ui.centerGameButtons): the theme exists once the game's
+        // qx application is up, so poll for it briefly instead of assuming load order.
+        try {
+            (function () {
+                var tries = 0, id = window.setInterval(function () {
+                    var ok = false;
+                    try { ok = !!(window.qx && qx.core && qx.core.Init && qx.core.Init.getApplication() && NS.ui.centerGameButtons()); } catch (e) { ok = false; }
+                    if (ok || ++tries > 240) window.clearInterval(id);
+                }, 250);
+            })();
+        } catch (e) {}
         log.log("MMCommon " + NS.version + " ready");
     };
 
